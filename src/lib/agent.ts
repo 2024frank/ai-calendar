@@ -6,6 +6,7 @@ import { communities, runs, sources } from "@/db/schema";
 import { EVENTS_SCHEMA, NORMALIZED_EVENT_CONTRACT } from "./contract";
 import { fetchPage } from "./fetchPage";
 import { ingestEvents } from "./ingest";
+import { buildFeedbackBlock } from "./learning";
 import { emit } from "./runEvents";
 
 const MODEL = "claude-opus-4-8";
@@ -203,6 +204,13 @@ export async function runExtraction(runId: number) {
 
     if (Date.now() - started > RUN_BUDGET_MS) return fail(runId, "Exceeded the run time budget.");
 
+    const feedback = await buildFeedbackBlock(source.id);
+    if (feedback) {
+      await emit(runId, "model_turn", "Applying reviewer feedback from earlier runs", {
+        phase: "feedback",
+      });
+    }
+
     const today = new Date().toLocaleString("en-US", { timeZone: community.timezone });
     const prompt = `Extract every upcoming event from this source and return them in the required JSON shape.
 
@@ -214,6 +222,7 @@ ${NORMALIZED_EVENT_CONTRACT}
 
 ${recipe?.instruction_block ? `SOURCE-SPECIFIC INSTRUCTIONS:\n${recipe.instruction_block}` : ""}
 ${source.specialInstructions ? `\nCREATOR'S SPECIAL INSTRUCTIONS (honor these):\n${source.specialInstructions}` : ""}
+${feedback ? `\n${feedback}\n` : ""}
 
 ${page.jsonLd.length ? `STRUCTURED DATA FOUND ON THE PAGE (prefer this when it is accurate):\n${JSON.stringify(page.jsonLd).slice(0, 20000)}\n` : ""}
 SOURCE CONTENT:

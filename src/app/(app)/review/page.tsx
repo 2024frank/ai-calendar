@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { reviewQueue } from "@/lib/data";
+import { listSources, reviewQueue } from "@/lib/data";
 import { fmtDate } from "@/components/bits";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,7 @@ function firstSessionDate(sessions: unknown): string {
   const start = (sessions[0] as { startTime?: number })?.startTime;
   if (!start) return "—";
   return new Date(start * 1000).toLocaleString("en-US", {
+    weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -18,14 +20,16 @@ function firstSessionDate(sessions: unknown): string {
 
 export default async function ReviewPage() {
   const s = await requireUser();
-  const rows = await reviewQueue(s);
+  const [rows, srcs] = await Promise.all([reviewQueue(s), listSources(s)]);
+  const sourceName = new Map(srcs.map((x) => [x.id, x.name]));
 
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div>
         <div className="page-title">Review queue</div>
         <div className="muted">
-          Restricted-mode events wait here for approval before publishing.
+          Open an event to check it, fix anything wrong, then approve or reject. Your decisions train
+          the agent.
         </div>
       </div>
 
@@ -34,29 +38,47 @@ export default async function ReviewPage() {
           <thead>
             <tr>
               <th>Event</th>
-              <th>Type</th>
+              <th>Source</th>
               <th>When</th>
               <th>Location</th>
               <th>Added</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted" style={{ padding: 20 }}>
+                <td colSpan={6} className="muted" style={{ padding: 20 }}>
                   Nothing waiting for review.
                 </td>
               </tr>
             )}
             {rows.map((e) => (
               <tr key={e.id}>
-                <td style={{ fontWeight: 600 }}>{e.title ?? "(untitled)"}</td>
-                <td>{e.eventType ?? "—"}</td>
+                <td>
+                  <Link
+                    href={`/review/${e.id}`}
+                    style={{ color: "var(--accent)", fontWeight: 600 }}
+                  >
+                    {e.title ?? "(untitled)"}
+                  </Link>
+                  {e.rejectionReason && (
+                    <div className="badge warn" style={{ marginTop: 4 }}>
+                      needs attention
+                    </div>
+                  )}
+                </td>
+                <td className="muted">{sourceName.get(e.sourceId ?? -1) ?? "—"}</td>
                 <td>{firstSessionDate(e.sessions)}</td>
                 <td className="muted">
-                  {(e.location ?? "").slice(0, 40) || (e.locationType === "on" ? "Online" : "—")}
+                  {(e.location ?? "").slice(0, 34) || (e.locationType === "on" ? "Online" : "—")}
                 </td>
                 <td className="muted">{fmtDate(e.createdAt)}</td>
+                <td>
+                  <Link className="btn" href={`/review/${e.id}`}>
+                    Open
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>

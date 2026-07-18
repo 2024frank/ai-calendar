@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { runs } from "@/db/schema";
+import { communities, runs } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getSource } from "@/lib/data";
+import { cronToLabel, cronToValue } from "@/lib/schedule";
 import { DiscoveryStatus, RunStatus, fmtDate, Badge } from "@/components/bits";
 import { RunActions } from "./RunActions";
+import { SourceSettings } from "./SourceSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +27,15 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
   const source = await getSource(s, Number(id));
   if (!source) notFound();
 
-  const recentRuns = await db
-    .select()
-    .from(runs)
-    .where(eq(runs.sourceId, source.id))
-    .orderBy(desc(runs.startedAt))
-    .limit(10);
+  const [recentRuns, [community]] = await Promise.all([
+    db
+      .select()
+      .from(runs)
+      .where(eq(runs.sourceId, source.id))
+      .orderBy(desc(runs.startedAt))
+      .limit(10),
+    db.select().from(communities).where(eq(communities.id, source.communityId)).limit(1),
+  ]);
 
   const recipe = (source.extractionRecipe ?? null) as {
     extraction_method?: string;
@@ -68,12 +73,28 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
             ) : null
           }
         />
-        <Field label="Effective mode" value={source.mode ?? "inherit (community default)"} />
+        <Field
+          label="Review mode"
+          value={
+            source.mode
+              ? source.mode === "restricted"
+                ? "Restricted, every event reviewed"
+                : "Unrestricted, publishes automatically"
+              : `Community default (${community?.defaultMode ?? "restricted"})`
+          }
+        />
         <Field label="Extraction method" value={recipe?.extraction_method ?? "not discovered yet"} />
-        <Field label="Schedule" value={source.scheduleCron ?? "not scheduled"} />
+        <Field label="Checks for events" value={cronToLabel(source.scheduleCron)} />
         <Field label="Sponsor / org" value={source.orgName ?? source.calendarSourceName} />
-        <Field label="Legacy agent prompt" value={source.legacyAgentId ? "importable" : "none"} />
       </div>
+
+      <SourceSettings
+        sourceId={source.id}
+        mode={source.mode}
+        schedule={cronToValue(source.scheduleCron)}
+        active={source.active}
+        communityDefaultMode={community?.defaultMode ?? "restricted"}
+      />
 
       {source.specialInstructions && (
         <div className="card">

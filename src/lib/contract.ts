@@ -1,24 +1,8 @@
 import { createHash } from "crypto";
 
-/** CommunityHub post-type taxonomy (destination config mirrors this). */
-export const POST_TYPES: Record<number, string> = {
-  1: "Volunteer Opportunity",
-  2: "Exhibit",
-  3: "Fair, Festival, or Public Celebration",
-  4: "Tour, Walking Tours or Open House",
-  5: "Film",
-  6: "Presentation or Lecture",
-  7: "Workshop or Class",
-  8: "Music Performance",
-  9: "Theatre or Dance",
-  10: "City Government",
-  11: "Spectator Sport",
-  12: "Participatory Sport or Game",
-  13: "Networking Event",
-  59: "Ecolympics or Environmental",
-  89: "Other",
-};
-export const POST_TYPE_IDS = Object.keys(POST_TYPES).map(Number);
+import { POST_TYPES, POST_TYPE_IDS } from "./taxonomy";
+
+export { POST_TYPES, POST_TYPE_IDS };
 
 export type Session = { startTime: number; endTime: number };
 export type ExtractedEvent = {

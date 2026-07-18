@@ -105,6 +105,17 @@ export async function dashboardStats(s: Session) {
   };
 }
 
+/** Load one event only if this session is allowed to see it. */
+export async function getEventScoped(s: Session, id: number) {
+  const [row] = await db.select().from(events).where(eq(events.id, id)).limit(1);
+  if (!row) return null;
+  if (s.role === "platform_admin") return row;
+  if (row.communityId !== s.communityId) return null;
+  const ids = await scopedSourceIds(s);
+  if (ids && row.sourceId && !ids.includes(row.sourceId)) return null;
+  return row;
+}
+
 export async function reviewQueue(s: Session, limit = 100) {
   const ids = await scopedSourceIds(s);
   if (ids && ids.length === 0) return [];

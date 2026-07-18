@@ -1,6 +1,7 @@
 import { requirePlatformAdmin } from "@/lib/auth";
 import { listCommunities, listDestinations } from "@/lib/data";
 import { Badge } from "@/components/bits";
+import { CommunitySettings } from "./CommunitySettings";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function CommunitiesPage() {
               <div>
                 <h3>{c.name}</h3>
                 <div className="muted" style={{ fontSize: 12 }}>
-                  slug: {c.slug} · timezone: {c.timezone} · default mode: {c.defaultMode}
+                  slug: {c.slug}
                 </div>
               </div>
               {c.defaultDestinationId ? (
@@ -40,7 +41,13 @@ export default async function CommunitiesPage() {
               )}
             </div>
 
-            <div style={{ marginTop: 12 }}>
+            <CommunitySettings
+              communityId={c.id}
+              defaultMode={c.defaultMode}
+              timezone={c.timezone}
+            />
+
+            <div style={{ marginTop: 16 }}>
               <div className="label">Endpoints</div>
               {ds.length === 0 ? (
                 <div className="muted">No external endpoint. Events live in the AI calendar.</div>
