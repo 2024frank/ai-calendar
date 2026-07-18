@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { loginTokens, users } from "@/db/schema";
 import { sendPasswordSetup } from "@/lib/email";
+import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,9 @@ export async function POST(req: Request) {
   const email = String(body.email ?? "").trim().toLowerCase();
   if (!email.includes("@")) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
+  }
+  if (!rateLimit(`forgot:${clientKey(req)}`, 6, 10 * 60_000)) {
+    return NextResponse.json({ ok: true }); // stay quiet; do not reveal throttling
   }
 
   const [user] = await db

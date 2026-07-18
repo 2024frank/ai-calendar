@@ -17,9 +17,15 @@ export type Session = {
 };
 
 function secret() {
-  return new TextEncoder().encode(
-    process.env.AUTH_JWT_SECRET || "dev-insecure-secret-change-me-please-0123456789",
-  );
+  const s = process.env.AUTH_JWT_SECRET;
+  if (!s || s.length < 16) {
+    // Never let a forgeable, source-visible fallback sign real sessions.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("AUTH_JWT_SECRET must be set (32+ random chars) in production");
+    }
+    return new TextEncoder().encode("dev-insecure-secret-change-me-please-0123456789");
+  }
+  return new TextEncoder().encode(s);
 }
 
 export async function createSession(s: Session) {

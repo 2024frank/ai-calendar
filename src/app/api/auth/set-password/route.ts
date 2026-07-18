@@ -5,11 +5,15 @@ import { db } from "@/db";
 import { loginTokens, users } from "@/db/schema";
 import { createSession } from "@/lib/auth";
 import { hashPassword, passwordProblem } from "@/lib/password";
+import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  if (!rateLimit(`setpw:${clientKey(req)}`, 20, 10 * 60_000)) {
+    return NextResponse.json({ error: "Too many attempts. Try again shortly." }, { status: 429 });
+  }
   const body = await req.json().catch(() => ({}));
   const rawToken = String(body.token ?? "");
   const password = String(body.password ?? "");

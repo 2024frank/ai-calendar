@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { createSession } from "@/lib/auth";
 import { verifyPassword } from "@/lib/password";
+import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,12 @@ export async function POST(req: Request) {
   const password = String(body.password ?? "");
   if (!email || !password) {
     return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
+  }
+  if (!rateLimit(`login:${clientKey(req)}:${email}`, 8, 10 * 60_000)) {
+    return NextResponse.json(
+      { error: "Too many attempts. Wait a few minutes and try again." },
+      { status: 429 },
+    );
   }
 
   const [user] = await db

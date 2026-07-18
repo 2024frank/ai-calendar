@@ -1,6 +1,14 @@
 import "server-only";
 import { Resend } from "resend";
 
+function esc(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function shell(title: string, body: string) {
   const base = process.env.APP_URL || "https://ai-calendar.uhurued.com";
   return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px">
@@ -52,9 +60,10 @@ export async function sendPasswordSetup(email: string, link: string, isReset: bo
 }
 
 export async function sendInvite(email: string, link: string, communityName: string) {
+  const safeName = esc(communityName);
   const html = shell(
-    `You've been added to ${communityName}`,
-    `<p style="color:#333;font-size:14px">You now have access to the ${communityName} calendar workspace. Click to sign in.</p>
+    `You've been added to ${safeName}`,
+    `<p style="color:#333;font-size:14px">You now have access to the ${safeName} calendar workspace. Click to sign in.</p>
      <p><a href="${link}" style="display:inline-block;background:#2f6d4f;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px">Open AI Calendar</a></p>
      <p style="color:#888;font-size:12px;word-break:break-all">${link}</p>`,
   );

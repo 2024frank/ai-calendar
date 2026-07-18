@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, loginTokens, reviewerSources, users } from "@/db/schema";
+import { communities, loginTokens, reviewerSources, sources, users } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
 import { sendInvite } from "@/lib/email";
 
@@ -77,12 +77,20 @@ export async function POST(req: Request) {
     userId = (res as { insertId: number }).insertId;
   }
 
-  if (role === "reviewer" && sourceIds.length) {
+  if (role === "reviewer" && sourceIds.length && communityId) {
+    // Only assign sources that actually belong to this reviewer's community.
+    const owned = await db
+      .select({ id: sources.id })
+      .from(sources)
+      .where(and(inArray(sources.id, sourceIds), eq(sources.communityId, communityId)));
+    const allowed = owned.map((r) => r.id);
     await db.delete(reviewerSources).where(eq(reviewerSources.userId, userId));
-    await db
-      .insert(reviewerSources)
-      .values(sourceIds.map((sid) => ({ userId, sourceId: sid })))
-      .catch(() => undefined);
+    if (allowed.length) {
+      await db
+        .insert(reviewerSources)
+        .values(allowed.map((sid) => ({ userId, sourceId: sid })))
+        .catch(() => undefined);
+    }
   }
 
   // Mint a sign-in link so the invite works even before email is configured.
