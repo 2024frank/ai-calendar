@@ -279,13 +279,18 @@ export async function ingestEvents(
     });
     const newId = (res as { insertId: number }).insertId;
 
-    // An image we generated only exists as bytes until it has a URL. Point the
-    // image field at this app's own endpoint so it renders in the review editor
-    // and can be sent to CommunityHub like any other picture.
+    // Links that need the row's own id: the deep link back to this reviewer
+    // record, and (for images we generated) a real URL for the picture.
+    const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
+    const patch: Record<string, unknown> = {
+      ingestedPostUrl: `${appUrl}/review/${newId}`,
+    };
     if (e.imageData && !e.imageCdnUrl) {
-      const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
+      patch.imageCdnUrl = `${appUrl}/api/events/${newId}/image`;
+    }
+    await db.update(events).set(patch).where(eq(events.id, newId));
+    if (e.imageData && !e.imageCdnUrl) {
       const served = `${appUrl}/api/events/${newId}/image`;
-      await db.update(events).set({ imageCdnUrl: served }).where(eq(events.id, newId));
       await emit(runId, "image_enriched", `Merged image published at ${served}`, {
         eventId: newId,
         image: served,

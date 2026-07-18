@@ -68,6 +68,7 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
           phone: ev.phone,
           calendarSourceName: ev.calendarSourceName,
           calendarSourceUrl: ev.calendarSourceUrl,
+          ingestedPostUrl: ev.ingestedPostUrl,
           fieldNotes: (ev.fieldNotes ?? null) as Record<string, string> | null,
           rejectionReason: ev.rejectionReason,
         }}

@@ -43,6 +43,7 @@ type EventRow = {
   phone: string | null;
   calendarSourceName: string | null;
   calendarSourceUrl: string | null;
+  ingestedPostUrl: string | null;
   fieldNotes: Record<string, string> | null;
   rejectionReason: string | null;
 };
@@ -267,6 +268,7 @@ export function EventReview({
       geoScope: f.geoScope,
       calendarSourceName: f.calendarSourceName.trim() || undefined,
       calendarSourceUrl: f.calendarSourceUrl.trim() || undefined,
+      ingestedPostUrl: event.ingestedPostUrl ?? undefined,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [f, sponsors, sessions, buttons, cats, screenIds],
@@ -578,9 +580,14 @@ export function EventReview({
               )}
             </Field>
           </div>
-          <Field label="Publishing identity (sent as the payload email, set by the app)">
-            <input className="input" value={publishEmail} disabled />
-          </Field>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Field label="Publishing identity (sent as the payload email, set by the app)">
+              <input className="input" value={publishEmail} disabled />
+            </Field>
+            <Field label="Reviewer record link (sent with the post, managed by this app)">
+              <input className="input" value={event.ingestedPostUrl ?? ""} disabled />
+            </Field>
+          </div>
         </Section>
 
         {msg && <div className="badge">{msg}</div>}

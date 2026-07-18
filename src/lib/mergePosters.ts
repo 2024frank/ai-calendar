@@ -38,7 +38,7 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
 
   // Decode one at a time: four full-size posters held at once is a lot of memory
   // for a serverless process.
-  const parts: { data: Buffer; width: number }[] = [];
+  const parts: { data: Buffer; width: number; height: number }[] = [];
   for (const url of wanted) {
     try {
       const raw = await fetchImageBytes(url);
@@ -56,7 +56,7 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
         })
         .jpeg({ quality: 88 })
         .toBuffer({ resolveWithObject: true });
-      parts.push({ data: out.data, width: out.info.width });
+      parts.push({ data: out.data, width: out.info.width, height: out.info.height });
     } catch {
       // Skip an unreadable poster; the rest still merge.
     }
@@ -67,9 +67,13 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
   const totalWidth = parts.reduce((sum, p) => sum + p.width, 0);
   if (!Number.isSafeInteger(totalWidth) || totalWidth <= 0) return null;
 
+  // Size the canvas to the posters themselves. Using a fixed height left a
+  // black band under anything shorter than the nominal height.
+  const canvasHeight = Math.max(...parts.map((p) => p.height));
+
   let x = 0;
   const overlays = parts.map((p) => {
-    const item = { input: p.data, left: x, top: 0 };
+    const item = { input: p.data, left: x, top: Math.round((canvasHeight - p.height) / 2) };
     x += p.width;
     return item;
   });
@@ -77,7 +81,7 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
   return sharp({
     create: {
       width: totalWidth,
-      height: POSTER_HEIGHT,
+      height: canvasHeight,
       channels: 3,
       background: { r: 0, g: 0, b: 0 },
     },

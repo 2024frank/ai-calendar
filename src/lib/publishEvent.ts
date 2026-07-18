@@ -51,7 +51,9 @@ export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string)
   if (image) payload.image_cdn_url = image;
   if (ev.calendarSourceName) payload.calendarSourceName = ev.calendarSourceName;
   if (ev.calendarSourceUrl) payload.calendarSourceUrl = ev.calendarSourceUrl;
-  payload.ingestedPostUrl = `${appUrl}/review/${ev.id}`;
+  // The reviewer deep link recorded on the event, so the published post
+  // points back at the record behind it.
+  payload.ingestedPostUrl = ev.ingestedPostUrl ?? `${appUrl}/review/${ev.id}`;
 
   return payload;
 }

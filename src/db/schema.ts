@@ -231,6 +231,9 @@ export const events = mysqlTable(
     phone: varchar("phone", { length: 64 }),
     calendarSourceName: varchar("calendar_source_name", { length: 200 }),
     calendarSourceUrl: varchar("calendar_source_url", { length: 2048 }),
+    // Deep link back to this event's reviewer record, sent with the payload so
+    // anyone looking at the published post can jump to the record behind it.
+    ingestedPostUrl: varchar("ingested_post_url", { length: 2048 }),
     fieldNotes: json("field_notes"),
     dedupKey: varchar("dedup_key", { length: 64 }),
     provenance: mysqlEnum("provenance", PROVENANCE),
