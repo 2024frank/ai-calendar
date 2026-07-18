@@ -8,7 +8,7 @@ import { ReviewFilters } from "./ReviewFilters";
 export const dynamic = "force-dynamic";
 
 const TABS = [
-  { key: "pending", label: "Review queue" },
+  { key: "pending", label: "Pending events" },
   { key: "duplicates", label: "Duplicates" },
   { key: "rejected", label: "Rejected" },
   { key: "approved", label: "Approved" },
@@ -19,7 +19,9 @@ function firstSessionDate(sessions: unknown): string {
   if (!Array.isArray(sessions) || sessions.length === 0) return "—";
   const start = (sessions[0] as { startTime?: number })?.startTime;
   if (!start) return "—";
+  // Always Oberlin time, never the viewer's own timezone.
   return new Date(start * 1000).toLocaleString("en-US", {
+    timeZone: "America/New_York",
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -62,7 +64,7 @@ export default async function ReviewPage({
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div>
-        <div className="page-title">Review</div>
+        <div className="page-title">Pending events</div>
         <div className="muted">
           Open an event to check it, fix anything wrong, then approve or reject. Your decisions train
           the agent.

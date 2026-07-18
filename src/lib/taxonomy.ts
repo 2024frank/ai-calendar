@@ -47,6 +47,47 @@ export const GEO_SCOPES = [
   { value: "regional", label: "Regional" },
 ] as const;
 
+/** Plain English for every validation code, so no reviewer sees raw jargon. */
+export const ISSUE_LABELS: Record<string, string> = {
+  title_missing: "The title is missing",
+  title_too_long: "The title is longer than 60 characters",
+  description_too_short: "The short description is too short",
+  description_too_long: "The short description is longer than 200 characters",
+  sponsors_missing: "No hosting organization was found",
+  image_missing: "No picture was found for this event",
+  website_missing: "The website link is missing",
+  contact_email_missing: "The contact email is missing",
+  phone_missing: "The phone number is missing",
+  post_type_missing: "No category was chosen",
+  post_type_invalid: "A category is not one CommunityHub accepts",
+  sessions_missing: "No date or time was found",
+  session_start_invalid: "The start date is not a real date",
+  session_end_before_start: "The end time comes before the start time",
+  end_equals_start: "The end time is the same as the start time, so it still needs a real end time",
+  location_required: "An in-person event needs a street address",
+  url_link_required: "An online event needs a link to join",
+  missing_registration_required_text:
+    'This event takes registrations, so the short description should end with "Registration required."',
+  long_description_contains_url:
+    "The long description contains a link. Links belong in the website or registration field",
+  long_description_ambiguous_location:
+    'The long description says "here" or "there" instead of naming the venue',
+};
+
+export function issueLabel(code: string): string {
+  return ISSUE_LABELS[code] ?? code.replace(/_/g, " ");
+}
+
+/** Turn a stored reason (which may contain raw codes) into readable sentences. */
+export function humanizeIssues(reason: string): string[] {
+  const body = reason.replace(/^[^:]*:\s*/, "");
+  return body
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map(issueLabel);
+}
+
 export const REJECT_REASONS = [
   { code: "not_an_event", label: "Not an event" },
   { code: "duplicate_missed", label: "Duplicate of an existing event" },

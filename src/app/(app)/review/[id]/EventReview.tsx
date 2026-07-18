@@ -10,6 +10,7 @@ import {
   POST_TYPES,
   POST_TYPE_IDS,
   REJECT_REASONS,
+  humanizeIssues,
 } from "@/lib/taxonomy";
 
 type Session = { startTime: number; endTime: number };
@@ -45,16 +46,54 @@ type EventRow = {
   rejectionReason: string | null;
 };
 
-/* datetime-local <-> unix seconds (local wall time) */
+/*
+ * datetime-local <-> unix seconds, always in Oberlin time regardless of the
+ * reviewer's own timezone. Showing a browser-local time would silently shift
+ * every event for anyone not sitting in Eastern.
+ */
+// The community's own timezone (Oberlin is Eastern), never the viewer's.
+let TZ = "America/New_York";
+
+/** Offset (ms) of the zone at a given instant, DST included. */
+function tzOffsetMs(utcMs: number): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(utcMs));
+  const g = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const asUtc = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second"));
+  return asUtc - utcMs;
+}
+
 function toLocalInput(sec: number): string {
   if (!sec) return "";
-  const d = new Date(sec * 1000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(sec * 1000));
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${g("year")}-${g("month")}-${g("day")}T${(g("hour") === "24" ? "00" : g("hour"))}:${g("minute")}`;
 }
+
 function fromLocalInput(s: string): number {
   if (!s) return 0;
-  return Math.floor(new Date(s).getTime() / 1000);
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+  if (!m) return 0;
+  const [, y, mo, d, h, mi] = m.map(Number) as unknown as number[];
+  // Treat the typed wall time as Oberlin time, then convert to a real instant.
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  return Math.floor((guess - tzOffsetMs(guess)) / 1000);
 }
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -118,7 +157,18 @@ function Segmented<T extends string>({
   );
 }
 
-export function EventReview({ event, sourceName }: { event: EventRow; sourceName: string }) {
+export function EventReview({
+  event,
+  sourceName,
+  publishEmail,
+  timezone,
+}: {
+  event: EventRow;
+  sourceName: string;
+  publishEmail: string;
+  timezone: string;
+}) {
+  TZ = timezone || "America/New_York";
   const router = useRouter();
 
   const [f, setF] = useState({
@@ -191,6 +241,9 @@ export function EventReview({ event, sourceName }: { event: EventRow; sourceName
   const payload = useMemo(
     () => ({
       eventType: f.eventType,
+      // Publishing identity: who is submitting. Server-set, never the org's
+      // public contact (that is contactEmail below).
+      email: publishEmail,
       title: f.title.trim(),
       description: f.description.trim(),
       extendedDescription: f.extendedDescription.trim() || undefined,
@@ -291,8 +344,12 @@ export function EventReview({ event, sourceName }: { event: EventRow; sourceName
         )}
         {event.rejectionReason && (
           <div className="card" style={{ borderColor: "var(--warn)" }}>
-            <div className="label">Flagged by validation</div>
-            <div style={{ fontSize: 13 }}>{event.rejectionReason}</div>
+            <div className="label">Still needed before this can be published</div>
+            <ul style={{ fontSize: 13, margin: "4px 0 0", paddingLeft: 18 }}>
+              {humanizeIssues(event.rejectionReason).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -336,7 +393,7 @@ export function EventReview({ event, sourceName }: { event: EventRow; sourceName
           </Field>
         </Section>
 
-        <Section title="Schedule" hint="Times are local (America/New_York).">
+        <Section title="Schedule" hint={`Times are Oberlin time (${TZ}).`}>
           <Field label="Sessions" required missing={m("sessions")}>
             <div className="grid" style={{ gap: 6 }}>
               {sessions.map((s, i) => (
@@ -506,10 +563,23 @@ export function EventReview({ event, sourceName }: { event: EventRow; sourceName
             <Field label="Calendar source name">
               <input className="input" value={f.calendarSourceName} onChange={set("calendarSourceName")} />
             </Field>
-            <Field label="Calendar source URL">
+            <Field label="Calendar source URL (the original page for this event)">
               <input className="input" value={f.calendarSourceUrl} onChange={set("calendarSourceUrl")} />
+              {f.calendarSourceUrl.trim() && (
+                <a
+                  href={f.calendarSourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "inline-block", marginTop: 6, fontSize: 13, color: "var(--accent)" }}
+                >
+                  Open the original to check or fix it →
+                </a>
+              )}
             </Field>
           </div>
+          <Field label="Publishing identity (sent as the payload email, set by the app)">
+            <input className="input" value={publishEmail} disabled />
+          </Field>
         </Section>
 
         {msg && <div className="badge">{msg}</div>}

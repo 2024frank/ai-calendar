@@ -1,4 +1,5 @@
 import "server-only";
+import { cookies } from "next/headers";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -8,17 +9,58 @@ import {
   reviewerSources,
   runs,
   sources,
+  userCommunities,
 } from "@/db/schema";
 import type { Session } from "./auth";
 
-/** Source ids this session may see. null => all (platform_admin). */
+/**
+ * Communities this user may work in: their home community plus any extra
+ * membership. A platform admin may work in every community.
+ */
+export async function accessibleCommunities(s: Session) {
+  if (s.role === "platform_admin") return listCommunities();
+  const extra = await db
+    .select({ id: userCommunities.communityId })
+    .from(userCommunities)
+    .where(eq(userCommunities.userId, s.uid));
+  const ids = [...new Set([s.communityId, ...extra.map((r) => r.id)].filter(Boolean))] as number[];
+  if (!ids.length) return [];
+  return db.select().from(communities).where(inArray(communities.id, ids)).orderBy(communities.name);
+}
+
+/** The community the user is currently working in, honouring their choice. */
+export async function activeCommunityId(s: Session, chosen?: number | null) {
+  const allowed = await accessibleCommunities(s);
+  if (chosen && allowed.some((c) => c.id === chosen)) return chosen;
+  return s.communityId ?? allowed[0]?.id ?? null;
+}
+
+/** The community currently selected in the sidebar, validated against access. */
+export async function currentCommunityId(s: Session): Promise<number | null> {
+  const raw = (await cookies()).get("ac_community")?.value;
+  const id = Number(raw);
+  if (!Number.isInteger(id)) return s.communityId ?? null;
+  const allowed = await accessibleCommunities(s);
+  return allowed.some((c) => c.id === id) ? id : (s.communityId ?? null);
+}
+
+/** Source ids this session may see. null => every community (platform admin). */
 export async function scopedSourceIds(s: Session): Promise<number[] | null> {
-  if (s.role === "platform_admin") return null;
+  const active = await currentCommunityId(s);
+  if (s.role === "platform_admin") {
+    // Scoped once a community is picked; otherwise everything.
+    if (!active) return null;
+    const rows = await db
+      .select({ id: sources.id })
+      .from(sources)
+      .where(eq(sources.communityId, active));
+    return rows.map((r) => r.id);
+  }
   if (s.role === "community_admin" || s.canReviewAllSources) {
     const rows = await db
       .select({ id: sources.id })
       .from(sources)
-      .where(eq(sources.communityId, s.communityId ?? -1));
+      .where(eq(sources.communityId, active ?? s.communityId ?? -1));
     return rows.map((r) => r.id);
   }
   const rows = await db
@@ -109,8 +151,7 @@ export async function dashboardStats(s: Session) {
 export async function getEventScoped(s: Session, id: number) {
   const [row] = await db.select().from(events).where(eq(events.id, id)).limit(1);
   if (!row) return null;
-  if (s.role === "platform_admin") return row;
-  if (row.communityId !== s.communityId) return null;
+  if (s.role !== "platform_admin" && row.communityId !== s.communityId) return null;
   const ids = await scopedSourceIds(s);
   if (ids && row.sourceId && !ids.includes(row.sourceId)) return null;
   return row;
@@ -130,9 +171,8 @@ async function eventsByStatus(
   const conds = [inArray(events.status, statuses)];
   if (ids) conds.push(inArray(events.sourceId, ids));
   // Explicit tenant wall so a scoping bug elsewhere can't leak across communities.
-  if (s.role !== "platform_admin" && s.communityId) {
-    conds.push(eq(events.communityId, s.communityId));
-  }
+  const active = await currentCommunityId(s);
+  if (active) conds.push(eq(events.communityId, active));
   if (filter.sourceId) conds.push(eq(events.sourceId, filter.sourceId));
   if (filter.eventType) conds.push(eq(events.eventType, filter.eventType));
   if (filter.q) {

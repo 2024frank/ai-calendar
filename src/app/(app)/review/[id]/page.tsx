@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { sources } from "@/db/schema";
+import { communities, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
 import { EventStatus } from "@/components/bits";
@@ -19,12 +19,17 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
   const [source] = ev.sourceId
     ? await db.select().from(sources).where(eq(sources.id, ev.sourceId)).limit(1)
     : [null];
+  const [community] = await db
+    .select()
+    .from(communities)
+    .where(eq(communities.id, ev.communityId))
+    .limit(1);
 
   return (
-    <div className="grid" style={{ gap: 18, maxWidth: 900 }}>
+    <div className="grid" style={{ gap: 18, maxWidth: 1200 }}>
       <div>
         <Link href="/review" className="muted" style={{ fontSize: 13 }}>
-          ← Review queue
+          ← Pending events
         </Link>
         <div className="spread" style={{ marginTop: 4 }}>
           <div className="page-title">{ev.title || "(untitled)"}</div>
@@ -66,6 +71,8 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
           rejectionReason: ev.rejectionReason,
         }}
         sourceName={source?.name ?? "Unknown source"}
+        publishEmail={process.env.PUBLISH_EMAIL ?? ""}
+        timezone={community?.timezone ?? "America/New_York"}
       />
     </div>
   );

@@ -4,10 +4,10 @@ import { SignJWT } from "jose";
 config({ path: new URL("../.env.local", import.meta.url) });
 
 const BASE = "http://localhost:3000";
-const c = await mysql.createConnection({
+const c = mysql.createPool({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),
   user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false },
+  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false }, connectionLimit: 2, enableKeepAlive: true, idleTimeout: 0,
 });
 
 // admin cookie

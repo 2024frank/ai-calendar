@@ -23,6 +23,8 @@ export type ExtractedEvent = {
   contactEmail?: string | null;
   phone?: string | null;
   cost?: string | null;
+  /** This event's own page on the source site, so it can be traced and fixed. */
+  calendarSourceUrl?: string | null;
 };
 
 /**
@@ -45,7 +47,18 @@ FIELDS
 - postTypeId: one or more category ids from this exact list, nothing else:
 ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 - sponsors: at least one organization name (the hosting organization).
-- website, registrationUrl, imageCdnUrl, contactEmail, phone: include when the source supports them.
+- website, registrationUrl, contactEmail, phone: include when the source supports them.
+- calendarSourceUrl: the URL of THIS event's own page on the source site, when it has one, so a person can open the original later to check or fix it. Give each event its own distinct URL; fall back to the listing page only if the event truly has no page of its own.
+- imageCdnUrl: REQUIRED. Every event has its own picture on the page.
+
+IMAGE RULES (read carefully, this is the most commonly gotten wrong)
+- EVERY event has a picture. An event without one is discarded and never reaches a human, so finding it is not optional.
+- When the source is JSON or an API, the picture is a field on the event object. Use it. Common names are photo_url, image, image_url, imageUrl, thumbnail, thumb, picture, cover, poster, featured_image, enclosure, media. Copy that value into imageCdnUrl verbatim. Never return an event as having no image while such a field is present and non-empty.
+- When the source is a web page, the content contains markers of the form [IMAGE: https://...]. Each marker is a real picture that appears at that exact spot on the page.
+- For each event, use the [IMAGE: ...] marker that belongs to THAT event, normally the one immediately before or inside that event's block. Put that URL in imageCdnUrl.
+- Every event gets its OWN image. Never reuse one image URL for several events. If two events would end up with the same URL, you have matched the wrong marker: look again for the picture that sits with each individual event.
+- Never use a site logo, header, banner, sharing image, or a generic "share.jpg"/"default.jpg" style graphic. Those are not event pictures.
+- Only if an event genuinely has no picture of its own anywhere on the page, leave imageCdnUrl empty rather than substituting another event's image.
 
 TITLE RULES
 - Announcements ("an") must have an ACTION-oriented title: "Register for...", "Participate in...", "Apply for...", "Recycle...". Never a bare noun when the source is announcing an opportunity. Never invent an action the source does not support.
@@ -99,6 +112,7 @@ export const EVENTS_SCHEMA = {
           contactEmail: { type: ["string", "null"] },
           phone: { type: ["string", "null"] },
           cost: { type: ["string", "null"] },
+          calendarSourceUrl: { type: ["string", "null"] },
         },
         required: [
           "eventType",
@@ -109,6 +123,13 @@ export const EVENTS_SCHEMA = {
           "display",
           "postTypeId",
           "sponsors",
+          // Required so the model must actively look for each event's own
+          // picture rather than silently omitting the field. It may still send
+          // null when an event genuinely has no image of its own.
+          "imageCdnUrl",
+          "contactEmail",
+          "phone",
+          "website",
         ],
         additionalProperties: false,
       },
@@ -174,6 +195,7 @@ export function normalizeEvent(raw: Record<string, unknown>): ExtractedEvent {
     contactEmail: clean(raw.contactEmail) || null,
     phone: clean(raw.phone) || null,
     cost: clean(raw.cost) || null,
+    calendarSourceUrl: clean(raw.calendarSourceUrl) || null,
   };
 }
 
@@ -186,6 +208,9 @@ export function validateEvent(e: ExtractedEvent): string[] {
   if (e.description.length > 200) issues.push("description_too_long");
   if (!e.sponsors.length) issues.push("sponsors_missing");
   if (!e.imageCdnUrl) issues.push("image_missing");
+  if (!e.website) issues.push("website_missing");
+  if (!e.contactEmail) issues.push("contact_email_missing");
+  if (!e.phone) issues.push("phone_missing");
   if (!e.postTypeId.length) issues.push("post_type_missing");
   if (e.postTypeId.some((id) => !POST_TYPE_IDS.includes(id))) issues.push("post_type_invalid");
   if (!e.sessions.length) issues.push("sessions_missing");

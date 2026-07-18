@@ -9,6 +9,8 @@ export type FetchedPage = {
   contentType: string;
   bytes: number;
   text: string;
+  /** Raw body, kept for sources parsed deterministically (e.g. Veezi). */
+  html: string;
   jsonLd: unknown[];
   feeds: { type: string; href: string }[];
   image: string | null;
@@ -36,8 +38,28 @@ function extractImage(html: string, base: string): string | null {
   return null;
 }
 
-const MAX_TEXT = 45_000;
+// Opus has a 1M context, so the old 45k cap was needlessly severe: a 360KB
+// events API was cut to its first ~10 records, dropping fields mid-object.
+// Structured payloads get far more room than prose-heavy HTML.
+const MAX_TEXT_HTML = 120_000;
+const MAX_TEXT_DATA = 400_000;
 const MAX_REDIRECTS = 4;
+
+/**
+ * Source URLs may carry a `{PLACEHOLDER}` for a credential that must not live in
+ * the database or be shown in the UI. Only this allowlist is ever substituted,
+ * so an admin cannot craft a source URL that exfiltrates arbitrary env vars.
+ */
+const URL_SECRETS = ["APOLLO_VEEZI_SITE_TOKEN"] as const;
+
+export function resolveUrlSecrets(url: string): string {
+  let out = url;
+  for (const key of URL_SECRETS) {
+    const value = process.env[key];
+    if (value) out = out.split(`{${key}}`).join(value);
+  }
+  return out;
+}
 
 /** Fast, synchronous reject of obviously-unsafe URLs (scheme, credentials, obvious private hosts). */
 export function isPublicHttpUrl(raw: string): boolean {
@@ -112,8 +134,41 @@ async function assertResolvesPublic(hostname: string): Promise<void> {
   }
 }
 
-function htmlToText(html: string): string {
-  return html
+/** Generic site furniture that must never be used as an event image. */
+export function isGenericImage(url: string): boolean {
+  // Icons are vector; event photos are not.
+  if (/\.svg(\?|$)/i.test(url)) return true;
+  // Chrome directories: headers, logos, icons, sprites.
+  if (/\/(headers?|logos?|icons?|sprites?|badges?|buttons?)\//i.test(url)) return true;
+  return /(\/|[-_])(share|logo|default|placeholder|banner|header|footer|icon|favicon|avatar|sprite|spacer|blank|bg|background)([-_.\d]|\/|$)/i.test(
+    url,
+  );
+}
+
+/**
+ * Keep each image's URL inline as a marker so the model can associate the real
+ * per-event photo with the event it sits next to. Stripping <img> entirely was
+ * why every event on a listing page fell back to the site's share graphic.
+ */
+function imageMarkers(html: string, base: string): string {
+  return html.replace(/<img\b[^>]*>/gi, (tag) => {
+    const raw =
+      /(?:\bdata-src|\bdata-lazy-src|\bdata-original|\bsrc)=["']([^"']+)["']/i.exec(tag)?.[1] ??
+      /\bsrcset=["']([^"'\s,]+)/i.exec(tag)?.[1];
+    if (!raw || raw.startsWith("data:")) return " ";
+    try {
+      const abs = new URL(raw, base).toString();
+      if (!/^https?:/i.test(abs)) return " ";
+      if (isGenericImage(abs)) return " ";
+      return ` [IMAGE: ${abs}] `;
+    } catch {
+      return " ";
+    }
+  });
+}
+
+function htmlToText(html: string, base = "https://example.org"): string {
+  return imageMarkers(html, base)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
@@ -170,15 +225,19 @@ function extractFeeds(html: string, base: string): { type: string; href: string 
   return feeds;
 }
 
-export async function fetchPage(url: string, timeoutMs = 20_000): Promise<FetchedPage> {
+export async function fetchPage(rawUrl: string, timeoutMs = 20_000): Promise<FetchedPage> {
+  // Fetch with the real credential, but report the placeholder form so the
+  // token never reaches run timelines, logs, or the UI.
+  const url = resolveUrlSecrets(rawUrl);
   const base: FetchedPage = {
     ok: false,
     status: 0,
-    url,
-    finalUrl: url,
+    url: rawUrl,
+    finalUrl: rawUrl,
     contentType: "",
     bytes: 0,
     text: "",
+    html: "",
     jsonLd: [],
     feeds: [],
     image: null,
@@ -226,15 +285,16 @@ export async function fetchPage(url: string, timeoutMs = 20_000): Promise<Fetche
     const contentType = res.headers.get("content-type") ?? "";
     const body = await res.text();
     const isHtml = /html/i.test(contentType) || /^\s*<(!doctype|html)/i.test(body);
-    const text = isHtml ? htmlToText(body) : body;
+    const text = isHtml ? htmlToText(body, current) : body;
     return {
       ok: res.ok,
       status: res.status,
-      url,
+      url: rawUrl,
       finalUrl: current,
       contentType,
       bytes: body.length,
-      text: text.slice(0, MAX_TEXT),
+      text: text.slice(0, isHtml ? MAX_TEXT_HTML : MAX_TEXT_DATA),
+      html: isHtml ? body : "",
       jsonLd: isHtml ? extractJsonLd(body) : [],
       feeds: isHtml ? extractFeeds(body, current) : [],
       image: isHtml ? extractImage(body, current) : null,

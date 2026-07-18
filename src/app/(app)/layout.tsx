@@ -1,10 +1,18 @@
+import { cookies } from "next/headers";
 import { requireUser } from "@/lib/auth";
 import { Nav } from "@/components/Nav";
+import { CommunitySwitcher } from "@/components/CommunitySwitcher";
+import { accessibleCommunities, activeCommunityId } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireUser();
+  const chosen = Number((await cookies()).get("ac_community")?.value) || null;
+  const [comms, activeId] = await Promise.all([
+    accessibleCommunities(s),
+    activeCommunityId(s, chosen),
+  ]);
   return (
     <div className="shell">
       <aside className="side" style={{ display: "flex", flexDirection: "column" }}>
@@ -29,6 +37,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
         <Nav role={s.role} />
+        <CommunitySwitcher
+          communities={comms.map((c) => ({ id: c.id, name: c.name }))}
+          activeId={activeId}
+        />
         <div style={{ flex: 1 }} />
         <div className="card" style={{ padding: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>

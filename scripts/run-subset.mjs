@@ -4,10 +4,10 @@ import { SignJWT } from "jose";
 config({ path: new URL("../.env.local", import.meta.url) });
 const BASE = "http://localhost:3000";
 const ids = process.argv.slice(2).map(Number);
-const c = await mysql.createConnection({
+const c = mysql.createPool({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),
   user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false },
+  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false }, connectionLimit: 2, enableKeepAlive: true, idleTimeout: 0,
 });
 const [[u]] = await c.query("SELECT id,email,name,role,community_id,can_review_all_sources FROM users WHERE email='fkusiapp@gmail.com' LIMIT 1");
 const secret = new TextEncoder().encode(process.env.AUTH_JWT_SECRET);

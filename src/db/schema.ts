@@ -163,6 +163,23 @@ export const sources = mysqlTable(
   ],
 );
 
+/**
+ * Extra communities a user may work in beyond `users.community_id`. A reviewer
+ * or admin can then switch between the communities they belong to.
+ */
+export const userCommunities = mysqlTable(
+  "user_communities",
+  {
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    communityId: int("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.communityId] })],
+);
+
 export const reviewerSources = mysqlTable(
   "reviewer_sources",
   {

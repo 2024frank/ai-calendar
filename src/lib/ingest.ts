@@ -10,21 +10,29 @@ import {
   validateEvent,
   type ExtractedEvent,
 } from "./contract";
-import { fetchPage, isPublicHttpUrl } from "./fetchPage";
+import { fetchPage, isGenericImage, isPublicHttpUrl } from "./fetchPage";
 import { emit } from "./runEvents";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
 const MAX_IMAGE_FETCHES = 24;
 
-// Structural minimums. An event missing any of these is not a completable
-// event, so it is auto-rejected at ingest instead of clogging the review queue.
-// Softer gaps (image, contact, description length) stay in review to be fixed.
+// Structural minimums. An event missing any of these is not a real, publishable
+// event, so it is auto-rejected at ingest instead of entering the review queue.
+// Every real event has a picture, so a missing image disqualifies it outright.
+// A missing image disqualifies an event outright: every real event has one.
+// Contact details are still required before publishing, but some organizations
+// genuinely publish no phone, so a reviewer fills those in rather than losing
+// the event entirely.
 const HARD_ISSUES = new Set([
   "title_missing",
+  "description_too_short",
   "sessions_missing",
   "session_start_invalid",
   "sponsors_missing",
+  "post_type_missing",
+  "image_missing",
+  "location_required",
 ]);
 
 export type IngestCounts = {
@@ -83,21 +91,33 @@ export async function ingestEvents(
   const existingByKey = new Map(existing.filter((e) => e.dedupKey).map((e) => [e.dedupKey!, e.id]));
 
   let imageFetches = 0;
+  // Each event needs its OWN picture. One URL reused across events is site
+  // furniture (a logo or share graphic), not an event photo.
+  const usedImages = new Set<string>();
+  const listingUrls = new Set(
+    [source.url, ...(Array.isArray(source.startUrls) ? (source.startUrls as string[]) : [])]
+      .filter(Boolean)
+      .map((u) => String(u).replace(/\/+$/, "")),
+  );
+  const isListing = (u: string) => listingUrls.has(u.replace(/\/+$/, ""));
 
   for (const raw of rawEvents) {
     const e: ExtractedEvent = normalizeEvent(raw);
 
-    // Every event must carry an image. When the source did not supply one,
-    // fetch the event's own detail/registration page and read its og:image.
+    // Drop site furniture the agent may still have picked up.
+    if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;
+
+    // Only enrich from a page belonging to THIS event. The source's own listing
+    // page is shared by every event, so its og:image is not a per-event photo.
     if (!e.imageCdnUrl && imageFetches < MAX_IMAGE_FETCHES) {
-      const detailUrl = [e.website, e.registrationUrl, e.urlLink].find(
-        (u): u is string => !!u && isPublicHttpUrl(u),
+      const detailUrl = [e.registrationUrl, e.urlLink, e.website].find(
+        (u): u is string => !!u && isPublicHttpUrl(u) && !isListing(u),
       );
       if (detailUrl) {
         imageFetches++;
         try {
           const page = await fetchPage(detailUrl, 12_000);
-          if (page.image) {
+          if (page.image && !isGenericImage(page.image)) {
             e.imageCdnUrl = page.image;
             await emit(runId, "image_enriched", `Image found for ${e.title}`, {
               title: e.title,
@@ -109,6 +129,29 @@ export async function ingestEvents(
           /* image enrichment is best-effort; missing image is flagged below */
         }
       }
+    }
+
+    // Never let two events share one picture.
+    if (e.imageCdnUrl) {
+      if (usedImages.has(e.imageCdnUrl)) {
+        await emit(runId, "image_rejected", `Shared image dropped for ${e.title}`, {
+          title: e.title,
+          image: e.imageCdnUrl,
+          reason: "same image already used by another event in this run",
+        });
+        e.imageCdnUrl = null;
+      } else {
+        usedImages.add(e.imageCdnUrl);
+      }
+    }
+
+    // Fall back to the organization's standing contact details so a whole run
+    // is not blocked just because a listing page omits them per event.
+    if (!e.contactEmail && source.orgContactEmail) e.contactEmail = source.orgContactEmail;
+    if (!e.phone && source.orgPhone) e.phone = source.orgPhone;
+    if (!e.website) e.website = source.orgWebsite ?? source.calendarSourceUrl ?? source.url;
+    if (!e.sponsors.length && (source.orgName ?? source.name)) {
+      e.sponsors = [source.orgName ?? source.name];
     }
 
     const issues = validateEvent(e);
@@ -203,7 +246,9 @@ export async function ingestEvents(
       duplicateOfEventId: duplicateOf,
       rejectionReason,
       calendarSourceName: source.calendarSourceName ?? source.name,
-      calendarSourceUrl: source.calendarSourceUrl ?? source.url,
+      // Prefer this event's own page so a reviewer can open the original and
+      // trace or fix it; fall back to the source's listing page.
+      calendarSourceUrl: e.calendarSourceUrl ?? source.calendarSourceUrl ?? source.url,
     });
     const newId = (res as { insertId: number }).insertId;
     if (status === "pending") {
