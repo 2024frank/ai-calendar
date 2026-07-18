@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
   const base = process.env.APP_URL || new URL(req.url).origin;
-  const link = `${base}/api/auth/verify?token=${rawToken}`;
+  const link = `${base}/set-password?token=${rawToken}`;
 
   let communityName = "AI Calendar";
   if (communityId) {

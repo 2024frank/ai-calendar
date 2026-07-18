@@ -1,35 +1,60 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
-  const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
-  const [devLink, setDevLink] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [devLink, setDevLink] = useState<string | null>(null);
 
-  async function submit(e: React.FormEvent) {
+  async function signIn(e: React.FormEvent) {
     e.preventDefault();
-    setState("sending");
+    setBusy(true);
+    setError(null);
+    setNeedsPassword(false);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        router.push("/dashboard");
+        return;
+      }
+      if (d.needsPassword) setNeedsPassword(true);
+      setError(d.error || "Could not sign in.");
+    } catch {
+      setError("Network error. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestLink() {
+    setBusy(true);
     setError(null);
     setDevLink(null);
     try {
-      const res = await fetch("/api/auth/request", {
+      const res = await fetch("/api/auth/forgot", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Something went wrong.");
-        setState("idle");
-        return;
-      }
-      setState("sent");
-      if (data.devLink) setDevLink(data.devLink);
+      const d = await res.json();
+      setSent(true);
+      if (d.devLink) setDevLink(d.devLink);
     } catch {
       setError("Network error. Try again.");
-      setState("idle");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -69,12 +94,12 @@ export default function LoginPage() {
         </div>
 
         <div className="card">
-          {state === "sent" ? (
+          {sent ? (
             <div>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Check your email</div>
               <p className="muted" style={{ marginTop: 0 }}>
-                If an account exists for <b>{email}</b>, a sign-in link is on its way. It expires in
-                15 minutes.
+                If an account exists for <b>{email}</b>, we sent a link to set your password. It is
+                valid for 24 hours.
               </p>
               {devLink && (
                 <div
@@ -86,26 +111,19 @@ export default function LoginPage() {
                   }}
                 >
                   <div className="label" style={{ marginBottom: 4 }}>
-                    Dev mode (no Resend key set)
+                    Email delivery is not configured yet, so use this link
                   </div>
                   <a href={devLink} style={{ color: "var(--accent)", wordBreak: "break-all" }}>
                     {devLink}
                   </a>
                 </div>
               )}
-              <button
-                className="btn"
-                style={{ marginTop: 14 }}
-                onClick={() => {
-                  setState("idle");
-                  setDevLink(null);
-                }}
-              >
-                Use a different email
+              <button className="btn" style={{ marginTop: 14 }} onClick={() => setSent(false)}>
+                Back to sign in
               </button>
             </div>
           ) : (
-            <form onSubmit={submit}>
+            <form onSubmit={signIn}>
               <label className="label" htmlFor="email">
                 Work email
               </label>
@@ -115,29 +133,55 @@ export default function LoginPage() {
                 type="email"
                 autoCapitalize="none"
                 autoCorrect="off"
+                autoComplete="username"
                 placeholder="you@example.org"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
+
+              <label className="label" htmlFor="password" style={{ marginTop: 12 }}>
+                Password
+              </label>
+              <input
+                id="password"
+                className="input"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+
               {error && (
-                <div className="badge bad" style={{ marginTop: 10 }}>
+                <div className="badge bad" style={{ marginTop: 12 }}>
                   {error}
                 </div>
               )}
+
               <button
                 className="btn primary"
                 type="submit"
-                disabled={state === "sending" || !email}
+                disabled={busy || !email || !password}
                 style={{ marginTop: 14, width: "100%", justifyContent: "center" }}
               >
-                {state === "sending" ? "Sending…" : "Send sign-in link"}
+                {busy ? "Signing in…" : "Sign in"}
+              </button>
+
+              <button
+                type="button"
+                className="btn"
+                onClick={requestLink}
+                disabled={busy || !email}
+                style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
+              >
+                {needsPassword ? "Set your password" : "First time here, or forgot password"}
               </button>
             </form>
           )}
         </div>
         <p className="muted" style={{ textAlign: "center", fontSize: 12, marginTop: 16 }}>
-          Access is managed by your admin. No password needed.
+          Access is managed by your admin.
         </p>
       </div>
     </div>

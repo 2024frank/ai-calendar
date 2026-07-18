@@ -95,6 +95,8 @@ export const users = mysqlTable(
     role: mysqlEnum("role", USER_ROLE).notNull().default("reviewer"),
     email: varchar("email", { length: 320 }).notNull().unique(),
     name: varchar("name", { length: 200 }),
+    passwordHash: varchar("password_hash", { length: 255 }),
+    mustSetPassword: boolean("must_set_password").notNull().default(true),
     canReviewAllSources: boolean("can_review_all_sources").notNull().default(false),
     status: mysqlEnum("status", USER_STATUS).notNull().default("active"),
     createdAt: timestamp("created_at").notNull().defaultNow(),

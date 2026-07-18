@@ -39,6 +39,18 @@ export async function sendMagicLink(email: string, link: string) {
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
 }
 
+export async function sendPasswordSetup(email: string, link: string, isReset: boolean) {
+  const title = isReset ? "Reset your password" : "Set your password";
+  const html = shell(
+    title,
+    `<p style="color:#333;font-size:14px">Click the button to ${isReset ? "choose a new password" : "set your password"} and sign in. This link expires in 24 hours.</p>
+     <p><a href="${link}" style="display:inline-block;background:#2f7d55;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px">${title}</a></p>
+     <p style="color:#888;font-size:12px;word-break:break-all">${link}</p>`,
+  );
+  const res = await send(email, `${title} — AI Calendar`, html);
+  return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
+}
+
 export async function sendInvite(email: string, link: string, communityName: string) {
   const html = shell(
     `You've been added to ${communityName}`,
