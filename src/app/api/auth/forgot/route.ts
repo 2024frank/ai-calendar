@@ -38,7 +38,8 @@ export async function POST(req: Request) {
     const base = process.env.APP_URL || new URL(req.url).origin;
     const link = `${base}/set-password?token=${rawToken}`;
     const res = await sendPasswordSetup(email, link, !user.mustSetPassword);
-    devLink = res.devLink;
+    // Only echo the link back to the (unauthenticated) caller in development.
+    if (process.env.NODE_ENV !== "production") devLink = res.devLink;
   }
 
   return NextResponse.json({ ok: true, ...(devLink ? { devLink } : {}) });

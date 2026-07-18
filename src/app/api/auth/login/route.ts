@@ -16,7 +16,12 @@ export async function POST(req: Request) {
   if (!email || !password) {
     return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
   }
-  if (!rateLimit(`login:${clientKey(req)}:${email}`, 8, 10 * 60_000)) {
+  // Per-IP and per-account throttles: the account bucket blunts a distributed
+  // spray that rotates IPs to dodge the per-IP limit.
+  const throttled =
+    !rateLimit(`login:${clientKey(req)}:${email}`, 8, 10 * 60_000) ||
+    !rateLimit(`login-acct:${email}`, 20, 15 * 60_000);
+  if (throttled) {
     return NextResponse.json(
       { error: "Too many attempts. Wait a few minutes and try again." },
       { status: 429 },
@@ -29,15 +34,9 @@ export async function POST(req: Request) {
     .where(and(eq(users.email, email), eq(users.status, "active")))
     .limit(1);
 
-  // No password yet: tell the client to run the set-password flow.
-  if (user && (!user.passwordHash || user.mustSetPassword)) {
-    return NextResponse.json(
-      { error: "You need to set a password first.", needsPassword: true },
-      { status: 409 },
-    );
-  }
-
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  // Uniform failure for wrong password, unknown account, and not-yet-set
+  // password, so login can't be used to enumerate who has an account.
+  if (!user || !user.passwordHash || user.mustSetPassword || !verifyPassword(password, user.passwordHash)) {
     return NextResponse.json({ error: "Email or password is incorrect." }, { status: 401 });
   }
 

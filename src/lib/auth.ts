@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 const COOKIE = "ac_session";
-const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 export type Role = "platform_admin" | "community_admin" | "reviewer";
 export type Session = {
@@ -32,7 +32,7 @@ export async function createSession(s: Session) {
   const token = await new SignJWT({ ...s })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("30d")
+    .setExpirationTime("7d")
     .sign(secret());
   (await cookies()).set(COOKIE, token, {
     httpOnly: true,

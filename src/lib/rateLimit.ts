@@ -21,11 +21,16 @@ export function rateLimit(key: string, max: number, windowMs: number): boolean {
   return true;
 }
 
-/** Coarse client identifier from proxy headers, falling back to a constant. */
+/**
+ * Client identifier. Prefer `x-real-ip`, which Vercel's edge sets to the true
+ * client address and a client cannot forge. The leftmost `x-forwarded-for`
+ * value is client-controlled, so it is only a last-resort (local dev) fallback.
+ */
 export function clientKey(req: Request): string {
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
   const xff = req.headers.get("x-forwarded-for") ?? "";
-  const ip = xff.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
-  return ip;
+  return xff.split(",")[0].trim() || "unknown";
 }
 
 // Opportunistic cleanup so the map cannot grow without bound.

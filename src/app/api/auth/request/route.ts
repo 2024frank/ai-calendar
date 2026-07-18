@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     const base = process.env.APP_URL || new URL(req.url).origin;
     const link = `${base}/api/auth/verify?token=${rawToken}`;
     const res = await sendMagicLink(email, link);
-    devLink = res.devLink;
+    if (process.env.NODE_ENV !== "production") devLink = res.devLink;
   }
 
   return NextResponse.json({ ok: true, ...(devLink ? { devLink } : {}) });

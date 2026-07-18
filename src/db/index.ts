@@ -11,13 +11,19 @@ import * as schema from "./schema";
 const globalForDb = globalThis as unknown as { __aiCalendarPool?: mysql.Pool };
 
 function createPool() {
+  // Verify the managed-DB certificate when a CA is provided (recommended in
+  // production); otherwise fall back to encrypted-but-unverified TLS.
+  const ca = process.env.DATABASE_CA_CERT;
+  const ssl = ca
+    ? { ca: ca.replace(/\\n/g, "\n"), rejectUnauthorized: true }
+    : { rejectUnauthorized: false };
   return mysql.createPool({
     host: process.env.DATABASE_HOST,
     port: Number(process.env.DATABASE_PORT || 25060),
     user: process.env.DATABASE_USERNAME,
     password: process.env.DATABASE_PASSWORD,
     database: process.env.DATABASE_NAME,
-    ssl: { rejectUnauthorized: false },
+    ssl,
     waitForConnections: true,
     connectionLimit: Number(process.env.DB_POOL_SIZE || 3),
     queueLimit: 0,

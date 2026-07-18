@@ -22,8 +22,11 @@ function shell(title: string, body: string) {
 async function send(to: string, subject: string, html: string): Promise<{ delivered: boolean }> {
   const key = process.env.RESEND_API_KEY;
   if (!key) {
-    // Dev fallback: no Resend key yet, so surface the content in server logs.
-    console.log(`\n[email:dev] to=${to} subject="${subject}"\n${html.replace(/<[^>]+>/g, " ").trim()}\n`);
+    // No provider configured. Never log the body (it carries a login token),
+    // and only note the attempt in development.
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[email:dev] to=${to} subject="${subject}" (token redacted)`);
+    }
     return { delivered: false };
   }
   const resend = new Resend(key);

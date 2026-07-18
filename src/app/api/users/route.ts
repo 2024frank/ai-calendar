@@ -58,11 +58,28 @@ export async function POST(req: Request) {
   }
 
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+
+  // A non-platform admin must never touch a user from another community or a
+  // platform admin, and must never relocate an existing user to their own
+  // community. Otherwise inviting by a known email would hijack that account.
+  if (existing && s.role !== "platform_admin") {
+    if (existing.communityId !== s.communityId || existing.role === "platform_admin") {
+      return NextResponse.json({ error: "That email belongs to another workspace." }, { status: 403 });
+    }
+  }
+
   let userId: number;
   if (existing) {
+    const nextCommunity = s.role === "platform_admin" ? communityId : existing.communityId;
     await db
       .update(users)
-      .set({ name: name ?? existing.name, role: role as never, communityId, status: "active" })
+      .set({
+        name: name ?? existing.name,
+        role: role as never,
+        communityId: nextCommunity,
+        canReviewAllSources: role !== "reviewer",
+        status: "active",
+      })
       .where(eq(users.id, existing.id));
     userId = existing.id;
   } else {

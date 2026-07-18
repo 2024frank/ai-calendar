@@ -119,8 +119,11 @@ export async function getEventScoped(s: Session, id: number) {
 export async function reviewQueue(s: Session, limit = 100) {
   const ids = await scopedSourceIds(s);
   if (ids && ids.length === 0) return [];
-  const where = ids
-    ? and(eq(events.status, "pending"), inArray(events.sourceId, ids))
-    : eq(events.status, "pending");
-  return db.select().from(events).where(where).orderBy(desc(events.createdAt)).limit(limit);
+  const conds = [eq(events.status, "pending")];
+  if (ids) conds.push(inArray(events.sourceId, ids));
+  // Explicit tenant wall so a scoping bug elsewhere can't leak across communities.
+  if (s.role !== "platform_admin" && s.communityId) {
+    conds.push(eq(events.communityId, s.communityId));
+  }
+  return db.select().from(events).where(and(...conds)).orderBy(desc(events.createdAt)).limit(limit);
 }
