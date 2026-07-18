@@ -60,8 +60,13 @@ export default async function SourcesPage() {
                 <td>{communityName.get(r.communityId) ?? r.communityId}</td>
                 <td>{r.sourceType}</td>
                 <td>{r.mode ?? <span className="muted">inherit</span>}</td>
-                <td>
+                <td style={{ maxWidth: 320 }}>
                   <DiscoveryStatus status={r.discoveryStatus} />
+                  {r.discoveryStatus === "failed" && r.discoveryError && (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 4, lineHeight: 1.3 }}>
+                      {r.discoveryError}
+                    </div>
+                  )}
                 </td>
                 <td>
                   {r.active ? (

@@ -78,15 +78,27 @@ const RECIPE_SCHEMA = {
 /** Discovery Agent: probe the source and write a reusable extraction recipe. */
 export async function runDiscovery(runId: number) {
   const started = Date.now();
+  let sourceId: number | null = null;
+  // Mark the source (not just the run) failed so it never sticks on "discovering".
+  const failDisc = async (reason: string) => {
+    if (sourceId) {
+      await db
+        .update(sources)
+        .set({ discoveryStatus: "failed", discoveryError: reason })
+        .where(eq(sources.id, sourceId));
+    }
+    return fail(runId, reason);
+  };
   try {
     const { source, community } = await loadContext(runId);
+    sourceId = source.id;
     await emit(runId, "run_started", `Discovering how to extract ${source.name}`, {
       sourceId: source.id,
       url: source.url,
       model: MODEL,
     });
 
-    if (!source.url) return fail(runId, "This source has no link to probe.");
+    if (!source.url) return failDisc("This source has no link to probe.");
 
     await emit(runId, "fetch_issued", `Fetching ${source.url}`, { url: source.url });
     const page = await fetchPage(source.url);
@@ -98,7 +110,7 @@ export async function runDiscovery(runId: number) {
         : `Fetch failed: ${page.error ?? page.status}`,
       { status: page.status, bytes: page.bytes, feeds: page.feeds, jsonLd: page.jsonLd.length },
     );
-    if (!page.ok || !page.text) return fail(runId, `Could not read the page (${page.error ?? page.status}).`);
+    if (!page.ok || !page.text) return failDisc(`Could not read the page (${page.error ?? page.status}).`);
 
     const prompt = `You are the Discovery Agent. Decide the BEST way to pull events from this source, then write the extraction instructions the Source Agent will replay on every scheduled run.
 
@@ -167,7 +179,7 @@ Write "instruction_block" as concrete, durable guidance for extracting THIS sour
       elapsedMs: Date.now() - started,
     });
   } catch (e) {
-    await fail(runId, (e as Error).message);
+    await failDisc((e as Error).message);
   }
 }
 
@@ -235,13 +247,18 @@ ${page.text}
 Only include events that have a real date. Skip anything already past. If there are no upcoming events, return an empty list.`;
 
     await emit(runId, "model_turn", "Extracting normalized events", { phase: "extraction" });
-    const res = await client().messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      output_config: { format: { type: "json_schema", schema: EVENTS_SCHEMA } },
-      messages: [{ role: "user", content: prompt }],
-    } as Anthropic.MessageCreateParamsNonStreaming);
+    // Stream so large pages (which can take >10 min with adaptive thinking) are
+    // not rejected by the non-streaming timeout, and so the JSON is never
+    // truncated mid-array.
+    const res = await client()
+      .messages.stream({
+        model: MODEL,
+        max_tokens: 32000,
+        thinking: { type: "adaptive" },
+        output_config: { format: { type: "json_schema", schema: EVENTS_SCHEMA } },
+        messages: [{ role: "user", content: prompt }],
+      } as unknown as Anthropic.MessageStreamParams)
+      .finalMessage();
 
     const usage = res.usage;
     await emit(runId, "budget_checkpoint", `Tokens in ${usage.input_tokens} / out ${usage.output_tokens}`, {

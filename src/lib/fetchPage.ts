@@ -11,8 +11,30 @@ export type FetchedPage = {
   text: string;
   jsonLd: unknown[];
   feeds: { type: string; href: string }[];
+  image: string | null;
   error?: string;
 };
+
+function extractImage(html: string, base: string): string | null {
+  const patterns = [
+    /<meta[^>]+property=["']og:image(?::url)?["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::url)?["']/i,
+    /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i,
+    /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(html);
+    if (m?.[1]) {
+      try {
+        const u = new URL(m[1], base).toString();
+        if (u.startsWith("https://") || u.startsWith("http://")) return u;
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return null;
+}
 
 const MAX_TEXT = 45_000;
 const MAX_REDIRECTS = 4;
@@ -159,6 +181,7 @@ export async function fetchPage(url: string, timeoutMs = 20_000): Promise<Fetche
     text: "",
     jsonLd: [],
     feeds: [],
+    image: null,
   };
   if (!isPublicHttpUrl(url)) return { ...base, error: "blocked_non_public_url" };
 
@@ -178,10 +201,13 @@ export async function fetchPage(url: string, timeoutMs = 20_000): Promise<Fetche
         signal: ctrl.signal,
         redirect: "manual",
         headers: {
+          // A realistic browser UA: several venue sites sit behind WAFs that
+          // 403 any obviously-automated agent string.
           "user-agent":
-            "Mozilla/5.0 (compatible; AI-Calendar/1.0; +https://ai-calendar.uhurued.com)",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
           accept:
             "text/html,application/xhtml+xml,application/xml,text/calendar,application/json;q=0.9,*/*;q=0.8",
+          "accept-language": "en-US,en;q=0.9",
         },
       });
 
@@ -211,6 +237,7 @@ export async function fetchPage(url: string, timeoutMs = 20_000): Promise<Fetche
       text: text.slice(0, MAX_TEXT),
       jsonLd: isHtml ? extractJsonLd(body) : [],
       feeds: isHtml ? extractFeeds(body, current) : [],
+      image: isHtml ? extractImage(body, current) : null,
     };
   } catch (e) {
     const name = (e as Error).name === "AbortError" ? "timeout" : (e as Error).message;

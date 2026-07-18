@@ -185,6 +185,7 @@ export function validateEvent(e: ExtractedEvent): string[] {
   if (!e.description || e.description.length < 10) issues.push("description_too_short");
   if (e.description.length > 200) issues.push("description_too_long");
   if (!e.sponsors.length) issues.push("sponsors_missing");
+  if (!e.imageCdnUrl) issues.push("image_missing");
   if (!e.postTypeId.length) issues.push("post_type_missing");
   if (e.postTypeId.some((id) => !POST_TYPE_IDS.includes(id))) issues.push("post_type_invalid");
   if (!e.sessions.length) issues.push("sessions_missing");

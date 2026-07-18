@@ -1,0 +1,10 @@
+import { config } from "dotenv"; import mysql from "mysql2/promise"; import Anthropic from "@anthropic-ai/sdk";
+config({ path: new URL("../.env.local", import.meta.url) });
+const a = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const c = await mysql.createConnection({ host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060), user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD, database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false } });
+const [[s]] = await c.query("SELECT legacy_agent_id FROM sources WHERE slug = ?", [process.argv[2]]);
+const ag = await a.beta.agents.retrieve(s.legacy_agent_id);
+const sys = typeof ag.system === "string" ? ag.system : JSON.stringify(ag.system);
+const lines = sys.split("\n").filter(l => /veezi|feed|api|http|token|url|fetch/i.test(l));
+console.log(lines.slice(0, 25).join("\n"));
+await c.end();

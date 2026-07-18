@@ -29,14 +29,25 @@ async function send(to: string, subject: string, html: string): Promise<{ delive
     }
     return { delivered: false };
   }
-  const resend = new Resend(key);
-  await resend.emails.send({
-    from: process.env.EMAIL_FROM || "AI Calendar <noreply@uhurued.com>",
-    to: [to],
-    subject,
-    html,
-  });
-  return { delivered: true };
+  try {
+    const resend = new Resend(key);
+    const { error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM || "AI Calendar <noreply@uhurued.com>",
+      to: [to],
+      subject,
+      html,
+    });
+    if (error) {
+      // Bad key, unverified domain, etc. Fall back to the copyable link so the
+      // admin flow never hard-fails. Never log the html (it carries a token).
+      console.error(`[email] send failed to=${to}: ${error.name} ${error.message}`);
+      return { delivered: false };
+    }
+    return { delivered: true };
+  } catch (e) {
+    console.error(`[email] send threw to=${to}: ${(e as Error).message}`);
+    return { delivered: false };
+  }
 }
 
 export async function sendMagicLink(email: string, link: string) {

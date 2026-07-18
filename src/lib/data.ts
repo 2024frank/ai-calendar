@@ -116,14 +116,42 @@ export async function getEventScoped(s: Session, id: number) {
   return row;
 }
 
-export async function reviewQueue(s: Session, limit = 100) {
+type EventStatus = "pending" | "approved" | "submitted" | "duplicate" | "rejected" | "auto_rejected";
+type EventFilter = { sourceId?: number; eventType?: string; q?: string };
+
+async function eventsByStatus(
+  s: Session,
+  statuses: EventStatus[],
+  filter: EventFilter = {},
+  limit = 200,
+) {
   const ids = await scopedSourceIds(s);
   if (ids && ids.length === 0) return [];
-  const conds = [eq(events.status, "pending")];
+  const conds = [inArray(events.status, statuses)];
   if (ids) conds.push(inArray(events.sourceId, ids));
   // Explicit tenant wall so a scoping bug elsewhere can't leak across communities.
   if (s.role !== "platform_admin" && s.communityId) {
     conds.push(eq(events.communityId, s.communityId));
   }
+  if (filter.sourceId) conds.push(eq(events.sourceId, filter.sourceId));
+  if (filter.eventType) conds.push(eq(events.eventType, filter.eventType));
+  if (filter.q) {
+    const like = `%${filter.q}%`;
+    conds.push(sql`(${events.title} like ${like} or ${events.location} like ${like})`);
+  }
   return db.select().from(events).where(and(...conds)).orderBy(desc(events.createdAt)).limit(limit);
+}
+
+export async function reviewQueue(s: Session, filter: EventFilter = {}, limit = 200) {
+  return eventsByStatus(s, ["pending"], filter, limit);
+}
+
+/** Events kept as duplicates — viewable, not discarded. */
+export async function duplicatesQueue(s: Session, filter: EventFilter = {}, limit = 200) {
+  return eventsByStatus(s, ["duplicate"], filter, limit);
+}
+
+/** Any status tab (approved, submitted, rejected+auto_rejected). */
+export async function eventsForTab(s: Session, statuses: EventStatus[], filter: EventFilter = {}) {
+  return eventsByStatus(s, statuses, filter);
 }

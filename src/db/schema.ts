@@ -196,6 +196,9 @@ export const events = mysqlTable(
     startTimeMax: int("start_time_max"), // latest session start (unix secs) for expiry sweeps
     locationType: varchar("location_type", { length: 8 }),
     location: text("location"),
+    placeName: varchar("place_name", { length: 200 }),
+    roomNum: varchar("room_num", { length: 120 }),
+    geoScope: varchar("geo_scope", { length: 20 }),
     urlLink: varchar("url_link", { length: 2048 }),
     displayType: varchar("display_type", { length: 8 }),
     postTypeIds: json("post_type_ids"),

@@ -15,11 +15,18 @@ const TEXT_FIELDS = [
   "extendedDescription",
   "location",
   "locationType",
+  "placeName",
+  "roomNum",
+  "geoScope",
   "urlLink",
+  "displayType",
   "website",
   "registrationUrl",
+  "imageCdnUrl",
   "contactEmail",
   "phone",
+  "calendarSourceName",
+  "calendarSourceUrl",
   "eventType",
 ] as const;
 
@@ -75,6 +82,39 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         oldValue: JSON.stringify(prev),
         newValue: JSON.stringify(next),
       });
+    }
+  }
+
+  if (Array.isArray(body.screensIds)) {
+    const next = (body.screensIds as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const prev = (ev.screensIds ?? []) as number[];
+    if (JSON.stringify(prev) !== JSON.stringify(next)) {
+      patch.screensIds = next;
+      changes.push({ field: "screensIds", oldValue: JSON.stringify(prev), newValue: JSON.stringify(next) });
+    }
+  }
+
+  if (Array.isArray(body.buttons)) {
+    const next = (body.buttons as { title?: unknown; link?: unknown }[])
+      .map((b) => ({ title: String(b.title ?? "").trim(), link: String(b.link ?? "").trim() }))
+      .filter((b) => b.title && b.link);
+    const prev = (ev.buttons ?? []) as { title: string; link: string }[];
+    if (JSON.stringify(prev) !== JSON.stringify(next)) {
+      patch.buttons = next;
+      changes.push({ field: "buttons", oldValue: JSON.stringify(prev), newValue: JSON.stringify(next) });
+    }
+  }
+
+  if (Array.isArray(body.sessions)) {
+    const next = (body.sessions as { startTime?: unknown; endTime?: unknown }[])
+      .map((s) => ({ startTime: Number(s.startTime), endTime: Number(s.endTime) }))
+      .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0);
+    const prev = (ev.sessions ?? []) as { startTime: number; endTime: number }[];
+    if (JSON.stringify(prev) !== JSON.stringify(next)) {
+      patch.sessions = next;
+      // Keep the expiry sweep and the queue's "when" column in sync.
+      patch.startTimeMax = next.length ? Math.max(...next.map((s) => s.startTime)) : null;
+      changes.push({ field: "sessions", oldValue: JSON.stringify(prev), newValue: JSON.stringify(next) });
     }
   }
 

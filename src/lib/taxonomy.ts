@@ -33,6 +33,20 @@ export const LOCATION_TYPES = [
   { value: "ne", label: "No location" },
 ] as const;
 
+export const DISPLAY_TYPES = [
+  { value: "all", label: "All public screens" },
+  { value: "ps", label: "School screens" },
+  { value: "sps", label: "School + public screens" },
+  { value: "ss", label: "Specific screens" },
+] as const;
+
+export const GEO_SCOPES = [
+  { value: "hyper_local", label: "Hyper-local" },
+  { value: "city_wide", label: "City-wide" },
+  { value: "county", label: "County" },
+  { value: "regional", label: "Regional" },
+] as const;
+
 export const REJECT_REASONS = [
   { code: "not_an_event", label: "Not an event" },
   { code: "duplicate_missed", label: "Duplicate of an existing event" },
