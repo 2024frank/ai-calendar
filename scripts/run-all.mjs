@@ -19,9 +19,11 @@ const COOKIE = `ac_session=${jwt}`;
 
 const log = (...a) => console.log(new Date().toISOString().slice(11,19), ...a);
 
-// Clean slate: remove stale test events so this run's analysis is clean.
-const [del] = await c.query("DELETE FROM events");
-log(`cleared ${del.affectedRows} stale event(s)`);
+// Never wipe before collecting. Each source's previous events are replaced only
+// after that source has successfully produced new ones, so a failed run (or an
+// API outage) can never leave the calendar empty.
+const runStartedAt = new Date();
+log(`collecting; existing events are replaced per source only on success`);
 
 async function post(path) {
   const r = await fetch(BASE + path, { method: "POST", headers: { cookie: COOKIE } });
@@ -79,6 +81,15 @@ for (const s of srcs) {
     row.duplicate = er.events_duplicate; row.invalid = er.events_invalid;
     row.extractionLast = await lastEmit(e.runId);
     log(`[${s.name}] extraction ${er.status} — found=${er.events_found} review=${er.events_extracted} dup=${er.events_duplicate} issues=${er.events_invalid}`);
+
+    // Success: drop this source's older events, keeping only what this run found.
+    if (er.status === "completed" && Number(er.events_found) > 0) {
+      const [swap] = await c.query(
+        "DELETE FROM events WHERE source_id = ? AND created_at < ?",
+        [s.id, runStartedAt],
+      );
+      if (swap.affectedRows) log(`[${s.name}] replaced ${swap.affectedRows} older event(s)`);
+    }
   } catch (err) {
     row.error = String(err.message||err);
     log(`[${s.name}] ERROR ${row.error}`);
