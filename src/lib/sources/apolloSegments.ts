@@ -38,7 +38,7 @@ export interface ApolloAnnouncement {
 }
 
 interface Day { y: number; mo: number; d: number } // mo 0-11
-interface Run { title: string; rating: string | null; start: Day; end: Day }
+interface Run { key: string; title: string; rating: string | null; start: Day; end: Day }
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
   'july', 'august', 'september', 'october', 'november', 'december'];
@@ -88,10 +88,22 @@ function toRun(f: VeeziFilm, today: Day): Run | null {
   const days = f.showtimes.map(s => parseVeeziDay(s.date, today)).filter((x): x is Day => !!x);
   if (!days.length) return null;
   const nums = days.map(dayNum).sort((a, b) => a - b);
-  return { title: f.title, rating: f.rating, start: fromNum(nums[0]), end: fromNum(nums[nums.length - 1]) };
+  return { key: f.code ?? f.title.toLowerCase().trim(), title: f.title, rating: f.rating, start: fromNum(nums[0]), end: fromNum(nums[nums.length - 1]) };
 }
 
-export function buildApolloAnnouncements(films: VeeziFilm[], now: Date = new Date()): ApolloAnnouncement[] {
+/** Real opened/ended dates gathered across runs, keyed by film key. */
+export type TrackedRuns = Map<string, { openedOn: string; endedOn: string | null }>;
+
+const isoToDay = (s: string): Day | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? { y: +m[1], mo: +m[2] - 1, d: +m[3] } : null;
+};
+
+export function buildApolloAnnouncements(
+  films: VeeziFilm[],
+  now: Date = new Date(),
+  tracked: TrackedRuns = new Map(),
+): ApolloAnnouncement[] {
   const today = todayInET(now);
   const T = dayNum(today);
   const allRuns = films.map(f => toRun(f, today)).filter((r): r is Run => !!r);
@@ -128,11 +140,23 @@ export function buildApolloAnnouncements(films: VeeziFilm[], now: Date = new Dat
         .filter(r => dayNum(r.start) <= ws && dayNum(r.end) >= we)
         .sort((a, b) => dayNum(a.end) - dayNum(b.end) || a.title.localeCompare(b.title));
       if (!lineup.length) continue;
-      // Show the dates each film runs, start to stop. No em or en dashes. The
-      // stop date is the last day currently on sale; a film at the edge of the
-      // published schedule may later be extended.
+      // Dates each film runs. The opened date comes from the first run that ever
+      // saw the film, not from this week's window, which would claim a long
+      // running film "starts" today. A stop date is only shown when it is real:
+      // either the film disappeared from a later run, or it ends inside this
+      // window while others continue. A film still on sale at the edge of the
+      // published schedule has no observed end, so none is invented.
       const description = lineup
-        .map(r => `${r.title}: ${fmt(r.start)} to ${fmt(r.end)}`)
+        .map(r => {
+          const t = tracked.get(r.key);
+          const opened = (t?.openedOn && isoToDay(t.openedOn)) || r.start;
+          const confirmedEnd = t?.endedOn ? isoToDay(t.endedOn) : null;
+          const endsInWindow = dayNum(r.end) < horizon ? r.end : null;
+          const stop = confirmedEnd ?? endsInWindow;
+          return stop
+            ? `${r.title}: ${fmt(opened)} to ${fmt(stop)}`
+            : `${r.title}: from ${fmt(opened)}`;
+        })
         .join(' · ');
       out.push({
         kind: 'showing_now', title: 'Playing Now at the Apollo', description,

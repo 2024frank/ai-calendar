@@ -6,6 +6,7 @@ import { communities, runs, sources } from "@/db/schema";
 import { EVENTS_SCHEMA, NORMALIZED_EVENT_CONTRACT } from "./contract";
 import { fetchPage } from "./fetchPage";
 import { buildApolloAnnouncements } from "./sources/apolloSegments";
+import { trackFilmRuns } from "./sources/apolloTracking";
 import { dedupeFilms, parseVeeziSessions } from "./sources/veezi";
 import { mergePosterImages } from "./mergePosters";
 import { ingestEvents } from "./ingest";
@@ -360,7 +361,15 @@ export async function runExtraction(runId: number) {
         if (!f?.code || !token) return null;
         return `https://ticketing.uswest.veezi.com/Media/Poster?siteToken=${token}&code=${f.code.padStart(10, "0")}`;
       };
-      const announcements = buildApolloAnnouncements(films);
+      // Record what is showing so a film's real opening date survives, and so a
+      // film that vanishes from a later run gets a confirmed end.
+      const tracked = await trackFilmRuns(films);
+      const ended = [...tracked.values()].filter((t) => t.endedOn).length;
+      await emit(runId, "candidates_parsed", `Tracked ${tracked.size} film run(s), ${ended} with a confirmed end`, {
+        tracked: tracked.size,
+        confirmedEnds: ended,
+      });
+      const announcements = buildApolloAnnouncements(films, new Date(), tracked);
       // One picture per announcement showing EVERY film in it, exactly as the
       // legacy agent did: collect a poster per movie, then merge them.
       const merged = await Promise.all(
