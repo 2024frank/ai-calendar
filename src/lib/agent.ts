@@ -7,12 +7,17 @@ import { EVENTS_SCHEMA, NORMALIZED_EVENT_CONTRACT } from "./contract";
 import { fetchPage } from "./fetchPage";
 import { buildApolloAnnouncements } from "./sources/apolloSegments";
 import { dedupeFilms, parseVeeziSessions } from "./sources/veezi";
+import { mergePosterImages } from "./mergePosters";
 import { ingestEvents } from "./ingest";
 import { buildFeedbackBlock } from "./learning";
 import { emit } from "./runEvents";
 
 const MODEL = "claude-opus-4-8";
-const RUN_BUDGET_MS = 220_000;
+// A run is never cut off by us. Some sources legitimately take many minutes:
+// the hosted fetcher walks several pages before extraction even begins. The
+// only ceiling is the hosting platform's own request limit.
+// deadline_at is recorded for display, not enforced.
+const RUN_DEADLINE_DISPLAY_MS = 3_600_000;
 
 function client() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -59,7 +64,7 @@ export async function startRun(
     runKind: kind,
     status: "running",
     phase: "fetching",
-    deadlineAt: new Date(Date.now() + RUN_BUDGET_MS),
+    deadlineAt: new Date(Date.now() + RUN_DEADLINE_DISPLAY_MS),
   });
   return (res as { insertId: number }).insertId;
 }
@@ -316,7 +321,9 @@ export async function runExtraction(runId: number) {
     );
     // Blocked by the site? Retry through Anthropic's hosted fetcher.
     let sourceText = page.text;
+    let usedHostedFetch = false;
     if (!page.ok || !page.text) {
+      usedHostedFetch = true;
       await emit(
         runId,
         "fetch_issued",
@@ -338,8 +345,6 @@ export async function runExtraction(runId: number) {
       );
     }
 
-    if (Date.now() - started > RUN_BUDGET_MS) return fail(runId, "Exceeded the run time budget.");
-
     // Apollo: the Veezi schedule is segmented deterministically, exactly as the
     // legacy agent expected. A model hand-reading that grid silently drops
     // showings, so no model runs here. Two announcements come out:
@@ -356,7 +361,27 @@ export async function runExtraction(runId: number) {
         return `https://ticketing.uswest.veezi.com/Media/Poster?siteToken=${token}&code=${f.code.padStart(10, "0")}`;
       };
       const announcements = buildApolloAnnouncements(films);
-      const list = announcements.map((a) => ({
+      // One picture per announcement showing EVERY film in it, exactly as the
+      // legacy agent did: collect a poster per movie, then merge them.
+      const merged = await Promise.all(
+        announcements.map(async (a) => {
+          const posters = a.movies.map((m) => posterFor(m.title)).filter((u): u is string => !!u);
+          if (!posters.length) return null;
+          try {
+            const buf = await mergePosterImages(posters);
+            return buf ? buf.toString("base64") : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      await emit(
+        runId,
+        "image_enriched",
+        `Merged posters for ${merged.filter(Boolean).length} of ${announcements.length} announcement(s)`,
+        { merged: merged.map((m) => (m ? m.length : 0)) },
+      );
+      const list = announcements.map((a, i) => ({
         eventType: "an",
         title: a.title,
         description: a.description,
@@ -367,7 +392,8 @@ export async function runExtraction(runId: number) {
         display: "all",
         postTypeId: [5],
         sponsors: [source.orgName ?? "Apollo Theater"],
-        imageCdnUrl: posterFor(a.movies[0]?.title),
+        imageData: merged[i],
+        imageCdnUrl: merged[i] ? null : posterFor(a.movies[0]?.title),
         website: source.orgWebsite ?? source.url,
         contactEmail: source.orgContactEmail,
         phone: source.orgPhone,
@@ -458,8 +484,42 @@ Only include events that have a real date. Skip anything already past. If there 
     } catch {
       return fail(runId, "The model did not return valid JSON.");
     }
-    const list = Array.isArray(parsed.events) ? parsed.events : [];
+    let list = Array.isArray(parsed.events) ? parsed.events : [];
     await emit(runId, "candidates_parsed", `${list.length} candidate event(s)`, { count: list.length });
+
+    // The page loaded but held nothing we could read, which is what a
+    // JavaScript-rendered listing looks like from a plain fetch. Try once more
+    // through the hosted fetcher, which runs the page properly.
+    if (list.length === 0 && !usedHostedFetch) {
+      await emit(runId, "fetch_issued", "No events in the raw page; retrying with the hosted fetcher", {
+        url: target,
+        via: "web_fetch",
+      });
+      const rendered = await fetchViaModel(runId, target);
+      if (rendered) {
+        const retry = await client()
+          .messages.stream({
+            model: MODEL,
+            max_tokens: 32000,
+            thinking: { type: "adaptive" },
+            output_config: { format: { type: "json_schema", schema: EVENTS_SCHEMA } },
+            messages: [
+              { role: "user", content: prompt.replace(sourceText, rendered) },
+            ],
+          } as unknown as Anthropic.MessageStreamParams)
+          .finalMessage();
+        try {
+          const again = JSON.parse(textOf(retry) || "{}") as { events?: Record<string, unknown>[] };
+          list = Array.isArray(again.events) ? again.events : [];
+        } catch {
+          /* keep the empty list */
+        }
+        await emit(runId, "candidates_parsed", `${list.length} candidate event(s) after rendering`, {
+          count: list.length,
+          via: "web_fetch",
+        });
+      }
+    }
 
     const counts = await ingestEvents(runId, source, community, list);
 

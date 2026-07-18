@@ -30,6 +30,9 @@ export async function GET(req: Request) {
 
   const deleted = await sweepExpiredEvents();
 
+  // The hosting plan allows a single daily cron, so this one tick starts every
+  // source that is due. Each run is still bounded by the platform's per-request
+  // limit; a source that needs longer is run manually until that limit lifts.
   const due = await dueScheduledSources();
   const started: { sourceId: number; runId: number }[] = [];
   for (const s of due) {

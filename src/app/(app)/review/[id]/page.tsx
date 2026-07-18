@@ -63,6 +63,7 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
           website: ev.website,
           registrationUrl: ev.registrationUrl,
           imageCdnUrl: ev.imageCdnUrl,
+          hasImageData: !!ev.imageData,
           contactEmail: ev.contactEmail,
           phone: ev.phone,
           calendarSourceName: ev.calendarSourceName,

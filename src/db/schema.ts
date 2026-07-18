@@ -223,6 +223,8 @@ export const events = mysqlTable(
     sponsors: json("sponsors"),
     buttons: json("buttons"),
     imageCdnUrl: varchar("image_cdn_url", { length: 2048 }),
+    // Base64 JPEG for images we build ourselves, e.g. merged Apollo posters.
+    imageData: text("image_data"),
     website: varchar("website", { length: 2048 }),
     registrationUrl: varchar("registration_url", { length: 2048 }),
     contactEmail: varchar("contact_email", { length: 320 }),

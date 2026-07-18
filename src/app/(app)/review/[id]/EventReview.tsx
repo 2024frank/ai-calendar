@@ -38,6 +38,7 @@ type EventRow = {
   website: string | null;
   registrationUrl: string | null;
   imageCdnUrl: string | null;
+  hasImageData: boolean;
   contactEmail: string | null;
   phone: string | null;
   calendarSourceName: string | null;
@@ -228,7 +229,7 @@ export function EventReview({
     sessions: cleanSessions.length === 0,
     location: needsAddress && !f.location.trim(),
     website: !f.website.trim(),
-    imageCdnUrl: !f.imageCdnUrl.trim(),
+    imageCdnUrl: !f.imageCdnUrl.trim() && !event.hasImageData,
     contactEmail: !f.contactEmail.trim(),
     phone: !f.phone.trim(),
     sponsors: cleanSponsors.length === 0,
@@ -495,10 +496,10 @@ export function EventReview({
         <Section title="Contact and media">
           <Field label="Event image" required missing={m("imageCdnUrl")}>
             <input className="input" value={f.imageCdnUrl} onChange={set("imageCdnUrl")} placeholder="https://…/photo.jpg" />
-            {f.imageCdnUrl.trim() ? (
+            {(f.imageCdnUrl.trim() || event.hasImageData) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={f.imageCdnUrl}
+                src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image`}
                 alt="Event"
                 style={{ marginTop: 8, maxHeight: 220, maxWidth: "100%", borderRadius: 8, border: "1px solid var(--line)", objectFit: "cover" }}
                 onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
@@ -636,10 +637,10 @@ export function EventReview({
       {/* RIGHT: readiness + payload preview */}
       <div className="grid" style={{ gap: 16, position: "sticky", top: 16 }}>
         <div className="card">
-          {f.imageCdnUrl.trim() && (
+          {(f.imageCdnUrl.trim() || event.hasImageData) && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={f.imageCdnUrl}
+              src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image`}
               alt="Event"
               style={{ width: "100%", maxHeight: 150, objectFit: "cover", borderRadius: 8, marginBottom: 10 }}
               onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}

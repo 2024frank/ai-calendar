@@ -33,14 +33,13 @@ async function runStatus(runId) {
   const [[r]] = await c.query("SELECT status,phase,events_found,events_extracted,events_duplicate,events_invalid FROM runs WHERE id=?", [runId]);
   return r;
 }
-async function waitRun(runId, timeoutMs=300000) {
-  const t0 = Date.now();
+async function waitRun(runId) {
+  // Never give up on a run: some sources legitimately take many minutes.
   for (;;) {
     const r = await runStatus(runId);
     if (!r) return { status: "missing" };
     if (r.status !== "running") return r;
-    if (Date.now()-t0 > timeoutMs) return { ...r, status: "timeout" };
-    await new Promise(res => setTimeout(res, 3000));
+    await new Promise((res) => setTimeout(res, 5000));
   }
 }
 async function lastEmit(runId) {

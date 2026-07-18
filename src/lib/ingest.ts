@@ -11,6 +11,7 @@ import {
   type ExtractedEvent,
 } from "./contract";
 import { fetchPage, isGenericImage, isPublicHttpUrl } from "./fetchPage";
+import { fetchDestinationInventory } from "./inventory";
 import { emit } from "./runEvents";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
@@ -90,6 +91,14 @@ export async function ingestEvents(
 
   const existingByKey = new Map(existing.filter((e) => e.dedupKey).map((e) => [e.dedupKey!, e.id]));
 
+  // What the endpoint already published, so we never repost it.
+  const remoteInventory = await fetchDestinationInventory(source.communityId);
+  if (remoteInventory.length) {
+    await emit(runId, "dedup_outcome", `Checked against ${remoteInventory.length} live post(s) on the endpoint`, {
+      inventory: remoteInventory.length,
+    });
+  }
+
   let imageFetches = 0;
   // Each event needs its OWN picture. One URL reused across events is site
   // furniture (a logo or share graphic), not an event photo.
@@ -106,6 +115,7 @@ export async function ingestEvents(
 
     // Drop site furniture the agent may still have picked up.
     if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;
+    if (e.imageData) e.imageCdnUrl = e.imageCdnUrl ?? null;
 
     // Only enrich from a page belonging to THIS event. The source's own listing
     // page is shared by every event, so its og:image is not a per-event photo.
@@ -187,8 +197,24 @@ export async function ingestEvents(
       }
     }
 
-    if (duplicateOf) {
-      await emit(runId, "dedup_outcome", `Duplicate of #${duplicateOf} (${dupReason})`, {
+    // 3) already published on the community's endpoint
+    let remoteDup = false;
+    if (!duplicateOf) {
+      for (const r of remoteInventory) {
+        const m = contentMatches(
+          { title: e.title, startTimes, location: e.location ?? null },
+          { title: r.title, startTimes: r.startTimes, location: r.location },
+        );
+        if (m.match) {
+          remoteDup = true;
+          dupReason = `already on the endpoint (${m.reason})`;
+          break;
+        }
+      }
+    }
+
+    if (duplicateOf || remoteDup) {
+      await emit(runId, "dedup_outcome", `Duplicate${duplicateOf ? ` of #${duplicateOf}` : ""} (${dupReason})`, {
         title: e.title,
         duplicateOfEventId: duplicateOf,
         reason: dupReason,
@@ -203,17 +229,17 @@ export async function ingestEvents(
 
     // Restricted mode keeps every completable event in review. Duplicates are
     // preserved. Structurally-broken events are kept as auto_rejected.
-    const status = duplicateOf
+    const status = duplicateOf || remoteDup
       ? "duplicate"
       : hardIssues.length
         ? "auto_rejected"
         : "pending";
     if (issues.length) counts.invalid++;
-    if (duplicateOf) counts.duplicate++;
+    if (duplicateOf || remoteDup) counts.duplicate++;
     if (!duplicateOf && hardIssues.length) counts.autoRejected++;
 
-    const rejectionReason = duplicateOf
-      ? null
+    const rejectionReason = duplicateOf || remoteDup
+      ? (remoteDup ? `Already published: ${dupReason}` : null)
       : hardIssues.length
         ? `Auto-rejected (incomplete): ${hardIssues.join(", ")}`
         : issues.length
@@ -239,6 +265,7 @@ export async function ingestEvents(
       website: e.website,
       registrationUrl: e.registrationUrl,
       imageCdnUrl: e.imageCdnUrl,
+      imageData: e.imageData ?? null,
       contactEmail: e.contactEmail,
       phone: e.phone,
       dedupKey,
@@ -251,6 +278,19 @@ export async function ingestEvents(
       calendarSourceUrl: e.calendarSourceUrl ?? source.calendarSourceUrl ?? source.url,
     });
     const newId = (res as { insertId: number }).insertId;
+
+    // An image we generated only exists as bytes until it has a URL. Point the
+    // image field at this app's own endpoint so it renders in the review editor
+    // and can be sent to CommunityHub like any other picture.
+    if (e.imageData && !e.imageCdnUrl) {
+      const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
+      const served = `${appUrl}/api/events/${newId}/image`;
+      await db.update(events).set({ imageCdnUrl: served }).where(eq(events.id, newId));
+      await emit(runId, "image_enriched", `Merged image published at ${served}`, {
+        eventId: newId,
+        image: served,
+      });
+    }
     if (status === "pending") {
       counts.inserted++;
       existingByKey.set(dedupKey, newId);
@@ -259,7 +299,7 @@ export async function ingestEvents(
     await emit(
       runId,
       "queue_outcome",
-      duplicateOf
+      duplicateOf || remoteDup
         ? `Kept as duplicate (#${newId})`
         : status === "auto_rejected"
           ? `Auto-rejected as incomplete (#${newId}): ${hardIssues.join(", ")}`

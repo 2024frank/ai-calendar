@@ -25,6 +25,8 @@ export type ExtractedEvent = {
   cost?: string | null;
   /** This event's own page on the source site, so it can be traced and fixed. */
   calendarSourceUrl?: string | null;
+  /** Base64 JPEG we generated ourselves (merged posters); satisfies the image rule. */
+  imageData?: string | null;
 };
 
 /**
@@ -196,6 +198,7 @@ export function normalizeEvent(raw: Record<string, unknown>): ExtractedEvent {
     phone: clean(raw.phone) || null,
     cost: clean(raw.cost) || null,
     calendarSourceUrl: clean(raw.calendarSourceUrl) || null,
+    imageData: typeof raw.imageData === "string" && raw.imageData ? raw.imageData : null,
   };
 }
 
@@ -207,7 +210,7 @@ export function validateEvent(e: ExtractedEvent): string[] {
   if (!e.description || e.description.length < 10) issues.push("description_too_short");
   if (e.description.length > 200) issues.push("description_too_long");
   if (!e.sponsors.length) issues.push("sponsors_missing");
-  if (!e.imageCdnUrl) issues.push("image_missing");
+  if (!e.imageCdnUrl && !e.imageData) issues.push("image_missing");
   if (!e.website) issues.push("website_missing");
   if (!e.contactEmail) issues.push("contact_email_missing");
   if (!e.phone) issues.push("phone_missing");

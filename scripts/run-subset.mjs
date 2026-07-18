@@ -16,7 +16,7 @@ const jwt = await new SignJWT({ uid:u.id,email:u.email,name:u.name??null,role:u.
 const COOKIE=`ac_session=${jwt}`;
 const log=(...a)=>console.log(new Date().toISOString().slice(11,19),...a);
 async function post(p){const r=await fetch(BASE+p,{method:"POST",headers:{cookie:COOKIE}});let j;try{j=JSON.parse(await r.text())}catch{j={}}return{status:r.status,...j};}
-async function waitRun(id,to=300000){const t0=Date.now();for(;;){const[[r]]=await c.query("SELECT status,events_found,events_extracted,events_duplicate,events_invalid FROM runs WHERE id=?",[id]);if(!r)return{status:"missing"};if(r.status!=="running")return r;if(Date.now()-t0>to)return{...r,status:"timeout"};await new Promise(s=>setTimeout(s,3000));}}
+async function waitRun(id){for(;;){const[[r]]=await c.query("SELECT status,events_found,events_extracted,events_duplicate,events_invalid FROM runs WHERE id=?",[id]);if(!r)return{status:"missing"};if(r.status!=="running")return r;await new Promise(s=>setTimeout(s,5000));}}
 async function last(id){const[[e]]=await c.query("SELECT kind,label FROM run_events WHERE run_id=? ORDER BY id DESC LIMIT 1",[id]);return e?`${e.kind}: ${e.label}`:"";}
 for(const id of ids){
   const [[s]]=await c.query("SELECT id,name,discovery_status FROM sources WHERE id=?",[id]);

@@ -1,8 +1,12 @@
+/** Oberlin local time, so every timestamp in the app reads the same way. */
+export const APP_TZ = "America/New_York";
+
 export function fmtDate(d: unknown) {
   if (!d) return "—";
   const dt = new Date(d as string);
   if (isNaN(dt.getTime())) return "—";
   return dt.toLocaleString("en-US", {
+    timeZone: APP_TZ,
     month: "short",
     day: "numeric",
     hour: "numeric",

@@ -94,6 +94,7 @@ export function LiveTimeline({ runId }: { runId: number }) {
             <div key={ev.id} className="row" style={{ alignItems: "flex-start", gap: 12 }}>
               <div className="muted" style={{ fontSize: 11, width: 62, flexShrink: 0 }}>
                 {new Date(ev.ts).toLocaleTimeString("en-US", {
+                  timeZone: "America/New_York",
                   hour: "2-digit",
                   minute: "2-digit",
                   second: "2-digit",
