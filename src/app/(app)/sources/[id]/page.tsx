@@ -10,6 +10,7 @@ import { DiscoveryStatus, RunStatus, fmtDate, Badge } from "@/components/bits";
 import { RunActions } from "./RunActions";
 import { SourceSettings } from "./SourceSettings";
 import { EditSource } from "./EditSource";
+import { SourcePrompt } from "./SourcePrompt";
 
 export const dynamic = "force-dynamic";
 
@@ -109,6 +110,8 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
         }
         special={source.specialInstructions ?? ""}
       />
+
+      <SourcePrompt sourceId={source.id} initial={source.specialInstructions ?? ""} />
 
       {recipe?.instruction_block && (
         <div className="card">

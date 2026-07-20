@@ -186,6 +186,21 @@ export async function reviewQueue(s: Session, filter: EventFilter = {}, limit = 
   return eventsByStatus(s, ["pending"], filter, limit);
 }
 
+/** How many events are waiting for review, for the nav badge. */
+export async function pendingCount(s: Session): Promise<number> {
+  const ids = await scopedSourceIds(s);
+  if (ids && ids.length === 0) return 0;
+  const conds = [eq(events.status, "pending")];
+  if (ids) conds.push(inArray(events.sourceId, ids));
+  const active = await currentCommunityId(s);
+  if (active) conds.push(eq(events.communityId, active));
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(events)
+    .where(and(...conds));
+  return Number(row?.n ?? 0);
+}
+
 /** Events kept as duplicates — viewable, not discarded. */
 export async function duplicatesQueue(s: Session, filter: EventFilter = {}, limit = 200) {
   return eventsByStatus(s, ["duplicate"], filter, limit);

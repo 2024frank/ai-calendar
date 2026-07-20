@@ -11,7 +11,7 @@ const items = [
   { href: "/communities", label: "Communities", platformOnly: true },
 ];
 
-export function Nav({ role }: { role: string }) {
+export function Nav({ role, pending = 0 }: { role: string; pending?: number }) {
   const p = usePathname();
   const admin = role === "platform_admin" || role === "community_admin";
   return (
@@ -22,7 +22,14 @@ export function Nav({ role }: { role: string }) {
           const active = p === i.href || p.startsWith(i.href + "/");
           return (
             <Link key={i.href} href={i.href} className={active ? "active" : ""}>
-              {i.label}
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                {i.label}
+                {i.href === "/review" && pending > 0 && (
+                  <span className="badge good" style={{ minWidth: 20, textAlign: "center" }}>
+                    {pending}
+                  </span>
+                )}
+              </span>
             </Link>
           );
         })}

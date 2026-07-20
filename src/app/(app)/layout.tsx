@@ -2,16 +2,17 @@ import { cookies } from "next/headers";
 import { requireUser } from "@/lib/auth";
 import { Nav } from "@/components/Nav";
 import { CommunitySwitcher } from "@/components/CommunitySwitcher";
-import { accessibleCommunities, activeCommunityId } from "@/lib/data";
+import { accessibleCommunities, activeCommunityId, pendingCount } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireUser();
   const chosen = Number((await cookies()).get("ac_community")?.value) || null;
-  const [comms, activeId] = await Promise.all([
+  const [comms, activeId, pending] = await Promise.all([
     accessibleCommunities(s),
     activeCommunityId(s, chosen),
+    pendingCount(s),
   ]);
   return (
     <div className="shell">
@@ -36,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             AI Calendar
           </div>
         </div>
-        <Nav role={s.role} />
+        <Nav role={s.role} pending={pending} />
         <CommunitySwitcher
           communities={comms.map((c) => ({ id: c.id, name: c.name }))}
           activeId={activeId}
