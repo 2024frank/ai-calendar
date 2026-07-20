@@ -132,7 +132,7 @@ async function main() {
     `INSERT INTO users (community_id, role, email, name, can_review_all_sources, status)
      VALUES (NULL, 'platform_admin', ?, ?, true, 'active')
      ON DUPLICATE KEY UPDATE role = 'platform_admin', name = VALUES(name), can_review_all_sources = true`,
-    ["fkusiapp@gmail.com", "Frank Kusi Appiah"],
+    ["fkusiapp@oberlin.edu", "Frank Kusi Appiah"],
   );
 
   // 4) Import Oberlin sources from backup
@@ -187,7 +187,7 @@ async function main() {
   console.log("SEED COMPLETE");
   console.log(`  communities: ${nc} (oberlin=${oberlinId}, cleveland=${clevelandId})`);
   console.log(`  destinations: ${nd}`);
-  console.log(`  users: ${nu} (platform_admin: fkusiapp@gmail.com)`);
+  console.log(`  users: ${nu} (platform_admin: fkusiapp@oberlin.edu)`);
   console.log(`  sources imported into Oberlin: ${imported} (total sources: ${ns})`);
   await c.end();
 }

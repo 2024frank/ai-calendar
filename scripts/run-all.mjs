@@ -11,7 +11,7 @@ const c = mysql.createPool({
 });
 
 // admin cookie
-const [[u]] = await c.query("SELECT id,email,name,role,community_id,can_review_all_sources FROM users WHERE email='fkusiapp@gmail.com' LIMIT 1");
+const [[u]] = await c.query("SELECT id,email,name,role,community_id,can_review_all_sources FROM users WHERE email='fkusiapp@oberlin.edu' LIMIT 1");
 const secret = new TextEncoder().encode(process.env.AUTH_JWT_SECRET);
 const jwt = await new SignJWT({ uid:u.id,email:u.email,name:u.name??null,role:u.role,communityId:u.community_id??null,canReviewAllSources:!!u.can_review_all_sources })
   .setProtectedHeader({alg:"HS256"}).setIssuedAt().setExpirationTime("7d").sign(secret);
