@@ -2,7 +2,7 @@ import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import Anthropic from "@anthropic-ai/sdk";
 
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 
 const APPLY = process.argv.includes("apply");
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });

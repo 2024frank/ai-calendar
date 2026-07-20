@@ -1,7 +1,7 @@
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import Anthropic from "@anthropic-ai/sdk";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const c = await mysql.createConnection({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),

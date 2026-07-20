@@ -1,7 +1,7 @@
 import { config } from "dotenv";
 import { parseVeeziSessions, dedupeFilms } from "../src/lib/sources/veezi";
 import { buildApolloAnnouncements } from "../src/lib/sources/apolloSegments";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 
 const token = process.env.APOLLO_VEEZI_SITE_TOKEN!;
 const res = await fetch(`https://ticketing.uswest.veezi.com/sessions/?siteToken=${token}`, {

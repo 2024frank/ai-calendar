@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const APPLY = process.argv.includes("apply");
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 

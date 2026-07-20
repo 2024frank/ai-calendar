@@ -1,5 +1,5 @@
 import { config } from "dotenv";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const key = process.env.PERPLEXITY_API_KEY;
 if (!key) { console.log("NO KEY"); process.exit(1); }
 const res = await fetch("https://api.perplexity.ai/v1/agent", {

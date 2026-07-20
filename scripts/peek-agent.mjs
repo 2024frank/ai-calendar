@@ -1,5 +1,5 @@
 import { config } from "dotenv"; import mysql from "mysql2/promise"; import Anthropic from "@anthropic-ai/sdk";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const a = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const c = await mysql.createConnection({ host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060), user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD, database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false } });
 const [[s]] = await c.query("SELECT legacy_agent_id FROM sources WHERE slug = ?", [process.argv[2]]);

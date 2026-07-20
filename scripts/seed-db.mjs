@@ -2,7 +2,7 @@ import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import { readdirSync, readFileSync } from "fs";
 
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 
 const ssl = { rejectUnauthorized: false };
 const SCRATCH =

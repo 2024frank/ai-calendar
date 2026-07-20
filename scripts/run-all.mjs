@@ -1,7 +1,7 @@
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import { SignJWT } from "jose";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 
 const BASE = "http://localhost:3000";
 const c = mysql.createPool({

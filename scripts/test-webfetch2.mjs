@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 import Anthropic from "@anthropic-ai/sdk";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const c = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const url = process.argv[2];
 const res = await c.messages.create({

@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "dotenv";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const c = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const targets = [
   ["Oberlin Public Library", "https://www.oberlinlibrary.org/"],

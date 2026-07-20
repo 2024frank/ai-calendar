@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const ids = process.argv.slice(2).map(Number);
 const c = await mysql.createConnection({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),

@@ -1,7 +1,7 @@
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 
-config({ path: new URL("../.env.local", import.meta.url) });
+config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 
 const [, , slug, url] = process.argv;
 if (!slug || !url) {
