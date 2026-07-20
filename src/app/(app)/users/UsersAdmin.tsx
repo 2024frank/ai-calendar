@@ -10,6 +10,8 @@ type UserRow = {
   role: string;
   communityId: number | null;
   status: string;
+  canReviewAllSources: boolean;
+  sourceIds: number[];
 };
 type Opt = { id: number; name: string };
 
@@ -19,12 +21,14 @@ export function UsersAdmin({
   sources,
   isPlatformAdmin,
   myCommunityId,
+  myUserId,
 }: {
   users: UserRow[];
   communities: Opt[];
   sources: Opt[];
   isPlatformAdmin: boolean;
   myCommunityId: number | null;
+  myUserId: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -125,7 +129,8 @@ export function UsersAdmin({
           {role === "reviewer" && (
             <div>
               <label className="label">
-                Which sources can they review? (none selected means all in their community)
+                Which sources can they review? (choose at least one, or make them a community admin
+                to review everything)
               </label>
               <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
                 {sources.map((s) => {
@@ -179,36 +184,161 @@ export function UsersAdmin({
       )}
       {emailed && !inviteLink && <div className="badge good">Invitation email sent.</div>}
 
-      <div className="card" style={{ padding: 0 }}>
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Email</th>
-              <th>Name</th>
-              <th>Role</th>
-              <th>Community</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td style={{ fontWeight: 600 }}>{u.email}</td>
-                <td>{u.name ?? "—"}</td>
-                <td>{u.role.replace(/_/g, " ")}</td>
-                <td className="muted">
-                  {u.communityId ? (communityName.get(u.communityId) ?? u.communityId) : "all"}
-                </td>
-                <td>
-                  <span className={`badge ${u.status === "active" ? "good" : "neutral"}`}>
-                    {u.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid" style={{ gap: 10 }}>
+        {users.map((u) => (
+          <UserCard
+            key={u.id}
+            user={u}
+            sources={sources}
+            communityName={communityName}
+            isSelf={u.id === myUserId}
+          />
+        ))}
       </div>
+    </div>
+  );
+}
+
+/** One user row that expands into an access editor. */
+function UserCard({
+  user,
+  sources,
+  communityName,
+  isSelf,
+}: {
+  user: UserRow;
+  sources: Opt[];
+  communityName: Map<number, string>;
+  isSelf: boolean;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [role, setRole] = useState(user.role);
+  const [reviewAll, setReviewAll] = useState(user.canReviewAllSources);
+  const [sourceIds, setSourceIds] = useState<number[]>(user.sourceIds);
+  const [status, setStatus] = useState(user.status);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role, canReviewAllSources: reviewAll, status, sourceIds }),
+    });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return setMsg(d.error || "Could not save.");
+    setMsg("Saved.");
+    router.refresh();
+    setTimeout(() => setMsg(null), 2000);
+  }
+
+  async function remove() {
+    if (!confirm(`Delete ${user.email}? This cannot be undone.`)) return;
+    setBusy(true);
+    const res = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return setMsg(d.error || "Could not delete.");
+    router.refresh();
+  }
+
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <div className="spread">
+        <div>
+          <div style={{ fontWeight: 600 }}>{user.email}</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            {(user.name ? user.name + " · " : "") + user.role.replace(/_/g, " ")}
+            {user.communityId ? ` · ${communityName.get(user.communityId) ?? user.communityId}` : ""}
+            {user.status !== "active" ? ` · ${user.status}` : ""}
+          </div>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          {msg && <span className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>}
+          <button className="btn" type="button" onClick={() => setOpen((v) => !v)}>
+            {open ? "Close" : "Edit access"}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="grid" style={{ gap: 12, marginTop: 12, borderTop: "1px solid var(--line, #eee)", paddingTop: 12 }}>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <label className="label">Role</label>
+              <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="reviewer">Reviewer</option>
+                <option value="community_admin">Community admin</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Status</label>
+              <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="active">Active</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </div>
+          </div>
+
+          {role === "reviewer" && (
+            <>
+              <label className="row" style={{ gap: 8, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={reviewAll} onChange={(e) => setReviewAll(e.target.checked)} />
+                <span>Can review every source in their community</span>
+              </label>
+              {!reviewAll && (
+                <div>
+                  <label className="label">Sources they can review</label>
+                  <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                    {sources.map((s) => {
+                      const on = sourceIds.includes(s.id);
+                      return (
+                        <button
+                          type="button"
+                          key={s.id}
+                          className={`badge ${on ? "good" : "neutral"}`}
+                          style={{ border: "none", cursor: "pointer" }}
+                          onClick={() =>
+                            setSourceIds(on ? sourceIds.filter((x) => x !== s.id) : [...sourceIds, s.id])
+                          }
+                        >
+                          {s.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {sourceIds.length === 0 && (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      With no sources selected and review-all off, this reviewer sees nothing.
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn primary" type="button" onClick={save} disabled={busy}>
+              {busy ? "Saving…" : "Save access"}
+            </button>
+            {!isSelf && (
+              <button
+                className="btn"
+                type="button"
+                onClick={remove}
+                disabled={busy}
+                style={{ color: "var(--bad, #b42318)" }}
+              >
+                Delete user
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

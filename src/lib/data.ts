@@ -63,18 +63,14 @@ export async function scopedSourceIds(s: Session): Promise<number[] | null> {
       .where(eq(sources.communityId, active ?? s.communityId ?? -1));
     return rows.map((r) => r.id);
   }
-  // A reviewer restricted to specific sources sees only those.
+  // A reviewer sees only the sources explicitly assigned to them. An admin grants
+  // access by assigning sources (or the review-all flag); no assignment means no
+  // access, by design.
   const assigned = await db
     .select({ id: reviewerSources.sourceId })
     .from(reviewerSources)
     .where(eq(reviewerSources.userId, s.uid));
-  if (assigned.length) return assigned.map((r) => r.id);
-  // No explicit restriction: a reviewer added to a community reviews all of it.
-  const all = await db
-    .select({ id: sources.id })
-    .from(sources)
-    .where(eq(sources.communityId, active ?? s.communityId ?? -1));
-  return all.map((r) => r.id);
+  return assigned.map((r) => r.id);
 }
 
 export async function listCommunities() {
