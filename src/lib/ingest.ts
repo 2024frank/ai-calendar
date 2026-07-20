@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, sources } from "@/db/schema";
+import { communities, events, sources, users } from "@/db/schema";
 import {
   computeDedupKey,
   contentMatches,
@@ -13,6 +13,7 @@ import {
 import { fetchPage, hasImageExtension, isGenericImage, isPublicHttpUrl } from "./fetchPage";
 import { mergePosterImages } from "./mergePosters";
 import { fetchDestinationInventory } from "./inventory";
+import { sendNewEventsDigest } from "./email";
 import { emit } from "./runEvents";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
@@ -70,6 +71,7 @@ export async function ingestEvents(
     autoRejected: 0,
   };
   const mode = effectiveMode(source, community);
+  const newlyPending: { title: string; when: string }[] = [];
 
   // Existing events in this community used for content-based duplicate checking.
   const existing = await db
@@ -339,6 +341,20 @@ export async function ingestEvents(
     if (status === "pending") {
       counts.inserted++;
       existingByKey.set(dedupKey, newId);
+      // Collect for the reviewer digest email.
+      const first = e.sessions[0]?.startTime;
+      newlyPending.push({
+        title: e.title,
+        when: first
+          ? new Date(first * 1000).toLocaleString("en-US", {
+              timeZone: community.timezone,
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })
+          : "date to set",
+      });
     }
 
     await emit(
@@ -355,5 +371,41 @@ export async function ingestEvents(
     );
   }
 
+  if (newlyPending.length) {
+    await notifyReviewers(source, community, newlyPending);
+  }
+
   return counts;
+}
+
+/** Email the community's reviewers a digest of the new pending events. */
+async function notifyReviewers(
+  source: SourceRow,
+  community: CommunityRow,
+  events: { title: string; when: string }[],
+) {
+  try {
+    const recipients = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(
+        and(
+          eq(users.status, "active"),
+          eq(users.communityId, community.id),
+          inArray(users.role, ["reviewer", "community_admin"]),
+        ),
+      );
+    const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
+    for (const r of recipients) {
+      if (!r.email) continue;
+      await sendNewEventsDigest(r.email, {
+        communityName: community.name,
+        sourceName: source.name,
+        events,
+        reviewUrl: `${appUrl}/review`,
+      });
+    }
+  } catch {
+    /* a digest failure must never fail the run */
+  }
 }

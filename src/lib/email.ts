@@ -9,14 +9,56 @@ function esc(s: string) {
     .replace(/"/g, "&quot;");
 }
 
-function shell(title: string, body: string) {
+const BRAND = "#2f6d4f";
+const INK = "#14201a";
+const MUTED = "#6b7a72";
+
+/**
+ * A professional, email-client-safe shell. Table layout and inline styles,
+ * because Gmail/Outlook strip <style> and modern CSS. A logo header on the brand
+ * colour, a white card, an optional call-to-action button, and a footer.
+ */
+function shell(opts: {
+  title: string;
+  intro?: string;
+  bodyHtml?: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
+  preheader?: string;
+}) {
   const base = process.env.APP_URL || "https://ai-calendar.uhurued.com";
-  return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px">
-  <img src="${base}/brand/communityhub-wordmark.png" alt="CommunityHub" width="180" style="display:block;border:0;margin:0 0 20px" />
-  <h2 style="margin:0 0 12px;font-size:18px;color:#111">${title}</h2>
-  ${body}
-  <p style="color:#888;font-size:12px;margin-top:24px;border-top:1px solid #eee;padding-top:12px">AI Calendar · CommunityHub</p>
-</div>`;
+  const { title, intro, bodyHtml, ctaLabel, ctaUrl, preheader } = opts;
+
+  const cta =
+    ctaLabel && ctaUrl
+      ? `<tr><td style="padding:8px 0 4px">
+           <a href="${ctaUrl}" style="display:inline-block;background:${BRAND};color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-size:15px;font-weight:600">${ctaLabel}</a>
+         </td></tr>`
+      : "";
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;padding:0;background:#eef2ef">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(preheader ?? title)}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2ef;padding:28px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%">
+        <tr><td style="background:${BRAND};border-radius:16px 16px 0 0;padding:22px 28px" align="left">
+          <img src="${base}/brand/communityhub-wordmark.png" alt="CommunityHub" width="170" style="display:block;border:0;filter:brightness(0) invert(1)" />
+        </td></tr>
+        <tr><td style="background:#ffffff;padding:28px 28px 24px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+          <h1 style="margin:0 0 10px;font-size:20px;line-height:1.3;color:${INK};font-weight:700">${esc(title)}</h1>
+          ${intro ? `<p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#33413a">${intro}</p>` : ""}
+          ${bodyHtml ?? ""}
+          <table role="presentation" cellpadding="0" cellspacing="0">${cta}</table>
+        </td></tr>
+        <tr><td style="background:#ffffff;border-radius:0 0 16px 16px;border-top:1px solid #eef2ef;padding:16px 28px;font-family:-apple-system,Segoe UI,Roboto,sans-serif">
+          <p style="margin:0;color:${MUTED};font-size:12px;line-height:1.5">AI Calendar for CommunityHub. You are receiving this because you review events for a community here.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
 }
 
 async function send(to: string, subject: string, html: string): Promise<{ delivered: boolean }> {
@@ -50,37 +92,85 @@ async function send(to: string, subject: string, html: string): Promise<{ delive
   }
 }
 
+function linkLine(link: string) {
+  return `<p style="margin:14px 0 0;color:${MUTED};font-size:12px;line-height:1.5;word-break:break-all">Or paste this link: ${link}</p>`;
+}
+
 export async function sendMagicLink(email: string, link: string) {
-  const html = shell(
-    "Sign in to AI Calendar",
-    `<p style="color:#333;font-size:14px">Click the button to sign in. This link expires in 15 minutes.</p>
-     <p><a href="${link}" style="display:inline-block;background:#2f6d4f;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px">Sign in</a></p>
-     <p style="color:#888;font-size:12px;word-break:break-all">${link}</p>`,
-  );
+  const html = shell({
+    title: "Sign in to AI Calendar",
+    intro: "Use the button below to sign in. For your security, this link expires in 15 minutes.",
+    ctaLabel: "Sign in",
+    ctaUrl: link,
+    bodyHtml: linkLine(link),
+    preheader: "Your sign-in link (expires in 15 minutes)",
+  });
   const res = await send(email, "Your AI Calendar sign-in link", html);
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
 }
 
 export async function sendPasswordSetup(email: string, link: string, isReset: boolean) {
   const title = isReset ? "Reset your password" : "Set your password";
-  const html = shell(
+  const html = shell({
     title,
-    `<p style="color:#333;font-size:14px">Click the button to ${isReset ? "choose a new password" : "set your password"} and sign in. This link expires in 24 hours.</p>
-     <p><a href="${link}" style="display:inline-block;background:#2f7d55;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px">${title}</a></p>
-     <p style="color:#888;font-size:12px;word-break:break-all">${link}</p>`,
-  );
+    intro: `Use the button below to ${isReset ? "choose a new password" : "set your password"} and sign in. This link expires in 24 hours.`,
+    ctaLabel: title,
+    ctaUrl: link,
+    bodyHtml: linkLine(link),
+    preheader: `${title} for AI Calendar`,
+  });
   const res = await send(email, `${title} — AI Calendar`, html);
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
 }
 
 export async function sendInvite(email: string, link: string, communityName: string) {
   const safeName = esc(communityName);
-  const html = shell(
-    `You've been added to ${safeName}`,
-    `<p style="color:#333;font-size:14px">You now have access to the ${safeName} calendar workspace. Click to sign in.</p>
-     <p><a href="${link}" style="display:inline-block;background:#2f6d4f;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px">Open AI Calendar</a></p>
-     <p style="color:#888;font-size:12px;word-break:break-all">${link}</p>`,
-  );
+  const html = shell({
+    title: `You've been added to ${safeName}`,
+    intro: `You now have access to the ${safeName} calendar workspace. Use the button below to sign in.`,
+    ctaLabel: "Open AI Calendar",
+    ctaUrl: link,
+    bodyHtml: linkLine(link),
+    preheader: `You've been added to ${safeName}`,
+  });
   const res = await send(email, `You've been added to ${communityName} on AI Calendar`, html);
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
+}
+
+/**
+ * A digest emailed to reviewers when a run brings in new pending events.
+ * Lists each new event with its date, and links to the review queue.
+ */
+export async function sendNewEventsDigest(
+  to: string,
+  opts: {
+    communityName: string;
+    sourceName: string;
+    events: { title: string; when: string }[];
+    reviewUrl: string;
+  },
+) {
+  const { communityName, sourceName, events, reviewUrl } = opts;
+  const n = events.length;
+  const rows = events
+    .slice(0, 20)
+    .map(
+      (e) => `<tr>
+        <td style="padding:10px 0;border-bottom:1px solid #eef2ef;font-size:14px;color:${INK};font-weight:600">${esc(e.title)}</td>
+        <td style="padding:10px 0;border-bottom:1px solid #eef2ef;font-size:13px;color:${MUTED};text-align:right;white-space:nowrap">${esc(e.when)}</td>
+      </tr>`,
+    )
+    .join("");
+  const more = n > 20 ? `<p style="margin:12px 0 0;color:${MUTED};font-size:13px">and ${n - 20} more.</p>` : "";
+
+  const html = shell({
+    title: `${n} new event${n === 1 ? "" : "s"} to review`,
+    intro: `${esc(sourceName)} just brought in ${n} new event${n === 1 ? "" : "s"} for ${esc(communityName)}. They are waiting in your review queue.`,
+    bodyHtml: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px">${rows}</table>${more}`,
+    ctaLabel: "Review events",
+    ctaUrl: reviewUrl,
+    preheader: `${n} new event${n === 1 ? "" : "s"} from ${sourceName}`,
+  });
+  const res = await send(to, `${n} new event${n === 1 ? "" : "s"} to review — ${communityName}`, html);
+  return { delivered: res.delivered };
 }
