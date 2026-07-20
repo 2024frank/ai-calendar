@@ -14,7 +14,7 @@ function esc(s: string) {
  * As plain as an email gets: no logo, no heading, no button, no colours. Just a
  * couple of sentences and a text link, like a person typed it.
  */
-function shell(opts: { title: string; intro?: string; bodyHtml?: string; ctaLabel?: string; ctaUrl?: string }) {
+function shell(opts: { title?: string; intro?: string; bodyHtml?: string; ctaLabel?: string; ctaUrl?: string }) {
   const { intro, bodyHtml, ctaLabel, ctaUrl } = opts;
   const link = ctaLabel && ctaUrl ? `<p style="margin:12px 0 0"><a href="${ctaUrl}">${esc(ctaLabel)}</a></p>` : "";
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111">
