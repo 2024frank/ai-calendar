@@ -111,7 +111,7 @@ export async function ingestEvents(
   const isListing = (u: string) => listingUrls.has(u.replace(/\/+$/, ""));
 
   for (const raw of rawEvents) {
-    const e: ExtractedEvent = normalizeEvent(raw);
+    const e: ExtractedEvent = normalizeEvent(raw, community.timezone);
 
     // Drop site furniture the agent may still have picked up.
     if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;

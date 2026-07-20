@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 
 import { POST_TYPES, POST_TYPE_IDS } from "./taxonomy";
+import { toUnixSeconds } from "./time";
 
 export { POST_TYPES, POST_TYPE_IDS };
 
@@ -59,7 +60,7 @@ FIELDS
 - title: 1-60 characters.
 - description: the SHORT description, one complete factual sentence, 10-200 characters.
 - extendedDescription: optional factual detail, at most 1000 characters.
-- sessions: non-empty array of { startTime, endTime } as INTEGER Unix seconds (never ISO strings, never 13-digit milliseconds), interpreted in America/New_York. endTime must not precede startTime. ALWAYS take the stated end time. If an EVENT gives a start but no end, use the start value for BOTH; a person then sets the real end, because an event whose end equals its start cannot be published. NEVER estimate or invent a duration. An announcement uses its display window as the session.
+- sessions: non-empty array of { start, end }. Write each as the date and time EXACTLY as the page states it, in ISO wall-clock form "YYYY-MM-DDThh:mm" (24-hour), for example "2026-07-27T18:30". Do NOT convert to a number, a Unix timestamp, or another timezone; copy the calendar date and clock time the page shows and let the server handle the rest. Include the year the page gives; if the page shows only a month and day, still write a four-digit year, choosing the next occurrence that is today or later. endTime must not precede startTime. ALWAYS take the stated end time. If an EVENT gives a start but no end, use the start value for BOTH; a person then sets the real end. NEVER estimate or invent a duration. An announcement uses its display window as the session.
 - Include only records that are future or currently ongoing: at least one session must not have ended.
 - locationType: "ph2" physical only, "on" online only, "bo" both, "ne" neither.
 - location: required when locationType is "ph2" or "bo" (street address or venue address).
@@ -121,10 +122,12 @@ export const EVENTS_SCHEMA = {
             items: {
               type: "object",
               properties: {
-                startTime: { type: "integer" },
-                endTime: { type: "integer" },
+                // ISO local wall-clock, exactly as written on the page, e.g.
+                // "2026-07-27T12:30". The server converts to a real instant.
+                start: { type: "string" },
+                end: { type: "string" },
               },
-              required: ["startTime", "endTime"],
+              required: ["start", "end"],
               additionalProperties: false,
             },
           },
@@ -221,16 +224,24 @@ function clean(s: unknown): string {
 }
 
 /** Deterministic normalization applied before validation. */
-export function normalizeEvent(raw: Record<string, unknown>): ExtractedEvent {
+export function normalizeEvent(
+  raw: Record<string, unknown>,
+  timeZone = "America/New_York",
+  nowMs?: number,
+): ExtractedEvent {
+  const ref = nowMs ?? Date.now();
   const sessions = (Array.isArray(raw.sessions) ? raw.sessions : [])
     .map((s) => {
       const o = s as Record<string, unknown>;
-      let start = Number(o.startTime);
-      let end = Number(o.endTime);
-      // Reject millisecond timestamps (13 digits) by converting down.
-      if (start > 1e12) start = Math.floor(start / 1000);
-      if (end > 1e12) end = Math.floor(end / 1000);
-      return { startTime: start, endTime: end };
+      // The model now writes ISO wall-clock strings and the server converts
+      // them; older numeric fields are still accepted so nothing breaks.
+      const startRaw = o.start ?? o.startTime;
+      const endRaw = o.end ?? o.endTime;
+      const startTime = toUnixSeconds(String(startRaw ?? ""), timeZone, ref);
+      let endTime = toUnixSeconds(String(endRaw ?? ""), timeZone, ref);
+      // An end before the start is a mis-read end, not a real one; a person sets it.
+      if (!endTime || endTime < startTime) endTime = startTime;
+      return { startTime, endTime };
     })
     .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0);
 
