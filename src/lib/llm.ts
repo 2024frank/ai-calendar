@@ -25,6 +25,27 @@ export const MODEL_CHAIN = [
   "openai/gpt-5.6-sol",
 ];
 
+/**
+ * If a model in the chain is ever retired or renamed, the API rejects the whole
+ * request at validation (it does not skip the bad entry). Rather than have every
+ * run fail, hand the request to Perplexity's own selection instead.
+ */
+const FALLBACK_PRESET = "high";
+
+function isUnsupportedModelError(message: string): boolean {
+  return /model .* is not supported|models\[\d+\]/i.test(message);
+}
+
+/** The models this key may use, straight from the API. */
+export async function listModels(): Promise<string[]> {
+  const res = await fetch("https://api.perplexity.ai/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey()}`, Accept: "application/json" },
+  });
+  if (!res.ok) return [];
+  const body = (await res.json()) as { data?: { id?: string }[] };
+  return (body.data ?? []).map((m) => String(m.id)).filter(Boolean);
+}
+
 export type LlmUsage = { input: number; output: number; costUsd: number | null };
 
 export type LlmResult = {
@@ -120,9 +141,29 @@ export async function llmComplete(call: LlmCall): Promise<LlmResult> {
     signal: AbortSignal.timeout(600_000),
   });
 
-  const raw = await res.text();
+  let raw = await res.text();
   if (!res.ok) {
-    throw new Error(`Perplexity ${res.status}: ${raw.slice(0, 400)}`);
+    // A retired or renamed model fails validation for the whole request. Retry
+    // once letting Perplexity pick, so a model going away is not an outage.
+    if (res.status === 400 && isUnsupportedModelError(raw)) {
+      const { models: _dropped, ...rest } = body as Record<string, unknown>;
+      const retry = await fetch(AGENT_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey()}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ...rest, preset: FALLBACK_PRESET }),
+        signal: AbortSignal.timeout(600_000),
+      });
+      const retryRaw = await retry.text();
+      if (!retry.ok) {
+        throw new Error(`Perplexity ${retry.status}: ${retryRaw.slice(0, 400)}`);
+      }
+      raw = retryRaw;
+    } else {
+      throw new Error(`Perplexity ${res.status}: ${raw.slice(0, 400)}`);
+    }
   }
 
   let parsed: Record<string, unknown>;
