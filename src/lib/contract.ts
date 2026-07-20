@@ -117,6 +117,7 @@ export const EVENTS_SCHEMA = {
           extendedDescription: { type: ["string", "null"] },
           sessions: {
             type: "array",
+            minItems: 1,
             items: {
               type: "object",
               properties: {
@@ -131,8 +132,8 @@ export const EVENTS_SCHEMA = {
           location: { type: ["string", "null"] },
           urlLink: { type: ["string", "null"] },
           display: { type: "string", enum: ["all", "ps", "sps", "ss"] },
-          postTypeId: { type: "array", items: { type: "integer" } },
-          sponsors: { type: "array", items: { type: "string" } },
+          postTypeId: { type: "array", minItems: 1, items: { type: "integer" } },
+          sponsors: { type: "array", minItems: 1, items: { type: "string" } },
           website: { type: ["string", "null"] },
           registrationUrl: { type: ["string", "null"] },
           imageCdnUrl: { type: ["string", "null"] },

@@ -10,6 +10,8 @@ import "server-only";
  *   - a fallback chain: if the first model is unavailable or out of quota the
  *     next one takes over, instead of the whole run dying.
  */
+import { toPortableSchema } from "./jsonSchema";
+
 const AGENT_URL = "https://api.perplexity.ai/v1/agent";
 
 /**
@@ -35,27 +37,6 @@ export type LlmResult = {
 
 type JsonSchema = Record<string, unknown>;
 
-/**
- * Perplexity's schema validator rejects two things our contract used:
- * union types written as `type: ["string","null"]`, and objects whose property
- * names are not enumerated. Rewrite unions into `anyOf`, which is the form the
- * documentation demonstrates.
- */
-export function toPortableSchema(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(toPortableSchema);
-  if (!node || typeof node !== "object") return node;
-
-  const src = node as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(src)) {
-    if (key === "type" && Array.isArray(value)) {
-      out.anyOf = value.map((t) => ({ type: t }));
-      continue;
-    }
-    out[key] = toPortableSchema(value);
-  }
-  return out;
-}
 
 function apiKey(): string {
   const key = process.env.PERPLEXITY_API_KEY;

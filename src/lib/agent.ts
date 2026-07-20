@@ -72,33 +72,58 @@ const RECIPE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/** A fetch that came back empty or with the model saying it could not read. */
+function looksUnfetched(text: string): boolean {
+  if (text.trim().length < 400) return true;
+  return /unable to retrieve|did not succeed|timed out|could not (fetch|access|retrieve)/i.test(
+    text.slice(0, 600),
+  );
+}
+
 /**
  * Some venue sites block server-side fetching outright (HTTP 403) no matter the
- * user-agent. Perplexity's fetch_url retrieves the page on its side, so the
- * source stays readable without us running a scraper.
+ * user-agent. Perplexity's fetch_url retrieves the page on its side.
+ *
+ * It is explicitly best-effort: the same URL can time out once and return a full
+ * page moments later (observed on the Library). So a failure is retried once
+ * before the source is given up on.
  */
 async function fetchViaModel(runId: number, url: string): Promise<string> {
-  const res = await llmComplete({
-    prompt: `Fetch ${url} and write out every event published on it.
+  const ask = `Fetch ${url} and write out every event published on it.
 
 Follow the listing's own pagination to the end so no event is missed.
 For each event give, on its own lines: the title, the full date and start/end time,
 the location, the description, any registration or ticket link, and the event's own
 page URL. When an event has its own picture, add a line [IMAGE: <full image url>].
 Separate events with a blank line. Report the page's own facts only, never invent
-or summarise, and do not leave any event out.`,
-    fetchUrls: 10,
-    maxSteps: 12,
-    maxTokens: 16000,
-  });
+or summarise, and do not leave any event out.`;
 
-  await emit(
-    runId,
-    "fetch_result",
-    `Fetched ${res.fetched.length} page(s), ${res.text.length} characters`,
-    { via: "fetch_url", chars: res.text.length, pages: res.fetched.map((f) => f.url) },
-  );
-  return res.text;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const res = await llmComplete({
+      prompt: ask,
+      fetchUrls: 10,
+      maxSteps: 12,
+      maxTokens: 16000,
+    });
+
+    if (!looksUnfetched(res.text)) {
+      await emit(
+        runId,
+        "fetch_result",
+        `Fetched ${res.fetched.length} page(s), ${res.text.length} characters`,
+        { via: "fetch_url", chars: res.text.length, pages: res.fetched.map((f) => f.url), attempt },
+      );
+      return res.text;
+    }
+
+    await emit(
+      runId,
+      "fetch_result",
+      attempt === 1 ? "Fetcher came back empty; trying once more" : "Fetcher could not read the page",
+      { via: "fetch_url", chars: res.text.length, attempt },
+    );
+  }
+  return "";
 }
 
 /**
