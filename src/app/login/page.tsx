@@ -49,6 +49,11 @@ export default function LoginPage() {
         body: JSON.stringify({ email }),
       });
       const d = await res.json();
+      if (!res.ok) {
+        // e.g. the email is not in the system -> not authorized.
+        setError(d.error || "Could not send the reset email.");
+        return;
+      }
       setSent(true);
       if (d.devLink) setDevLink(d.devLink);
     } catch {

@@ -25,22 +25,26 @@ export async function POST(req: Request) {
     .where(and(eq(users.email, email), eq(users.status, "active")))
     .limit(1);
 
-  // Always respond ok so we never reveal who has an account.
-  let devLink: string | undefined;
-  if (user) {
-    const rawToken = randomBytes(32).toString("hex");
-    await db.insert(loginTokens).values({
-      userId: user.id,
-      kind: "magic",
-      tokenHash: createHash("sha256").update(rawToken).digest("hex"),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    });
-    const base = process.env.APP_URL || new URL(req.url).origin;
-    const link = `${base}/set-password?token=${rawToken}`;
-    const res = await sendPasswordSetup(email, link, !user.mustSetPassword);
-    // Only echo the link back to the (unauthenticated) caller in development.
-    if (process.env.NODE_ENV !== "production") devLink = res.devLink;
+  // Only people already added here may set or reset a password. An unknown email
+  // is told plainly it is not authorized, rather than a quiet "check your inbox".
+  if (!user) {
+    return NextResponse.json(
+      { error: "This email is not authorized. Ask an admin to add you." },
+      { status: 401 },
+    );
   }
+
+  const rawToken = randomBytes(32).toString("hex");
+  await db.insert(loginTokens).values({
+    userId: user.id,
+    kind: "magic",
+    tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  });
+  const base = process.env.APP_URL || new URL(req.url).origin;
+  const link = `${base}/set-password?token=${rawToken}`;
+  const res = await sendPasswordSetup(email, link, !user.mustSetPassword);
+  const devLink = process.env.NODE_ENV !== "production" ? res.devLink : undefined;
 
   return NextResponse.json({ ok: true, ...(devLink ? { devLink } : {}) });
 }

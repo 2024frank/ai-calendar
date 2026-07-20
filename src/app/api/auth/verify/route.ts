@@ -30,12 +30,10 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL("/login?e=inactive", base));
   }
 
-  // First time in, or after a reset: send them to choose a password.
-  // The token stays unconsumed so the set-password page can use it.
-  if (!user.passwordHash || user.mustSetPassword) {
-    return NextResponse.redirect(new URL(`/set-password?token=${raw}`, base));
-  }
-
+  // A magic link always logs the person in directly, even on their first visit.
+  // The token is a proof of email ownership, so a session is created here and
+  // they land where the link points (e.g. an email digest -> /review). Setting a
+  // password is optional and lives behind the separate forgot-password flow.
   await db.update(loginTokens).set({ consumedAt: new Date() }).where(eq(loginTokens.id, tok.id));
 
   await createSession({
