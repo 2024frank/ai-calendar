@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, runs } from "@/db/schema";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { getSource } from "@/lib/data";
 import { cronToLabel, cronToValue } from "@/lib/schedule";
 import { DiscoveryStatus, RunStatus, fmtDate, Badge } from "@/components/bits";
@@ -26,6 +26,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 export default async function SourceDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const s = await requireUser();
+  if (!isAdmin(s)) redirect("/review");
   const source = await getSource(s, Number(id));
   if (!source) notFound();
 

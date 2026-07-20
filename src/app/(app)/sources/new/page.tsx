@@ -1,4 +1,5 @@
-import { requireUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { listCommunities } from "@/lib/data";
 import { NewSourceForm } from "./NewSourceForm";
 
@@ -6,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function NewSourcePage() {
   const s = await requireUser();
+  if (!isAdmin(s)) redirect("/review");
   const comms =
     s.role === "platform_admin"
       ? await listCommunities()

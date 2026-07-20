@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { requireUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { listCommunities, listSources } from "@/lib/data";
 import { DiscoveryStatus, Badge } from "@/components/bits";
 
@@ -7,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
   const s = await requireUser();
+  if (!isAdmin(s)) redirect("/review");
   const [rows, comms] = await Promise.all([listSources(s), listCommunities()]);
   const communityName = new Map(comms.map((c) => [c.id, c.name]));
 
