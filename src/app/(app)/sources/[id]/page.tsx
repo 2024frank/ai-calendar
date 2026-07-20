@@ -9,6 +9,7 @@ import { cronToLabel, cronToValue } from "@/lib/schedule";
 import { DiscoveryStatus, RunStatus, fmtDate, Badge } from "@/components/bits";
 import { RunActions } from "./RunActions";
 import { SourceSettings } from "./SourceSettings";
+import { EditSource } from "./EditSource";
 
 export const dynamic = "force-dynamic";
 
@@ -96,12 +97,18 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
         communityDefaultMode={community?.defaultMode ?? "restricted"}
       />
 
-      {source.specialInstructions && (
-        <div className="card">
-          <div className="label">Special instructions</div>
-          <div>{source.specialInstructions}</div>
-        </div>
-      )}
+      <EditSource
+        sourceId={source.id}
+        name={source.name}
+        urls={
+          Array.isArray(source.startUrls) && (source.startUrls as string[]).length
+            ? (source.startUrls as string[])
+            : source.url
+              ? [source.url]
+              : []
+        }
+        special={source.specialInstructions ?? ""}
+      />
 
       {recipe?.instruction_block && (
         <div className="card">

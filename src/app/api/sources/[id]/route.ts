@@ -32,12 +32,36 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ? String(body.specialInstructions).slice(0, 4000)
       : null;
   }
-  if ("url" in body && body.url) patch.url = String(body.url).slice(0, 2048);
+  if ("name" in body && String(body.name).trim()) {
+    patch.name = String(body.name).trim().slice(0, 200);
+  }
+
+  // Links: accept a list or a newline/comma string; the first is the primary.
+  let linksChanged = false;
+  if ("urls" in body || "url" in body) {
+    const urls = (
+      Array.isArray(body.urls) ? body.urls : String(body.url ?? "").split(/[\n,]+/)
+    )
+      .map((u: unknown) => String(u).trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    if (urls.length) {
+      patch.url = urls[0].slice(0, 2048);
+      patch.startUrls = urls;
+      linksChanged = true;
+    }
+  }
+
   if ("destinationId" in body) {
     patch.destinationId = body.destinationId ? Number(body.destinationId) : null;
   }
 
   if (!Object.keys(patch).length) return NextResponse.json({ ok: true });
+
+  // If the links changed, the saved extraction recipe may no longer fit, so mark
+  // discovery pending. The caller can re-run discovery to rebuild it.
+  if (linksChanged) patch.discoveryStatus = "pending";
+
   await db.update(sources).set(patch).where(eq(sources.id, source.id));
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, rediscover: linksChanged });
 }
