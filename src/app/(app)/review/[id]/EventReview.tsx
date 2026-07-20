@@ -501,7 +501,7 @@ export function EventReview({
             {(f.imageCdnUrl.trim() || event.hasImageData) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image`}
+                src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}
                 alt="Event"
                 style={{ marginTop: 8, maxHeight: 220, maxWidth: "100%", borderRadius: 8, border: "1px solid var(--line)", objectFit: "cover" }}
                 onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
@@ -647,7 +647,7 @@ export function EventReview({
           {(f.imageCdnUrl.trim() || event.hasImageData) && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image`}
+              src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}
               alt="Event"
               style={{ width: "100%", maxHeight: 150, objectFit: "cover", borderRadius: 8, marginBottom: 10 }}
               onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}

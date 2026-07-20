@@ -134,6 +134,20 @@ async function assertResolvesPublic(hostname: string): Promise<void> {
   }
 }
 
+/**
+ * Does the URL path end in a real image extension? CommunityHub rejects an
+ * image URL without one ("Unsupported image extension ''"), so any URL that
+ * fails this must be re-hosted by us as a .jpg.
+ */
+export function hasImageExtension(url: string): boolean {
+  try {
+    const path = new URL(url).pathname;
+    return /\.(jpe?g|png|webp|gif|avif)$/i.test(path);
+  } catch {
+    return /\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(url);
+  }
+}
+
 /** Generic site furniture that must never be used as an event image. */
 export function isGenericImage(url: string): boolean {
   // Icons are vector; event photos are not.

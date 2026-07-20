@@ -10,7 +10,7 @@ import {
   validateEvent,
   type ExtractedEvent,
 } from "./contract";
-import { fetchPage, isGenericImage, isPublicHttpUrl } from "./fetchPage";
+import { fetchPage, hasImageExtension, isGenericImage, isPublicHttpUrl } from "./fetchPage";
 import { mergePosterImages } from "./mergePosters";
 import { fetchDestinationInventory } from "./inventory";
 import { emit } from "./runEvents";
@@ -137,6 +137,21 @@ export async function ingestEvents(
     }
     // A single picture in the list is just the image.
     if (!e.imageData && !e.imageCdnUrl && pics.length === 1) e.imageCdnUrl = pics[0];
+
+    // CommunityHub needs the image URL to end in a real extension. If our chosen
+    // image is a query-based or extension-less URL (e.g. a Veezi poster), pull it
+    // into imageData so it serves from our own /image.jpg endpoint.
+    if (!e.imageData && e.imageCdnUrl && !hasImageExtension(e.imageCdnUrl)) {
+      try {
+        const buf = await mergePosterImages([e.imageCdnUrl]);
+        if (buf) {
+          e.imageData = buf.toString("base64");
+          e.imageCdnUrl = null;
+        }
+      } catch {
+        /* leave the URL as-is; a reviewer can replace it */
+      }
+    }
 
     // Only enrich from a page belonging to THIS event. The source's own listing
     // page is shared by every event, so its og:image is not a per-event photo.
@@ -311,11 +326,11 @@ export async function ingestEvents(
       ingestedPostUrl: `${appUrl}/review/${newId}`,
     };
     if (e.imageData && !e.imageCdnUrl) {
-      patch.imageCdnUrl = `${appUrl}/api/events/${newId}/image`;
+      patch.imageCdnUrl = `${appUrl}/api/events/${newId}/image.jpg`;
     }
     await db.update(events).set(patch).where(eq(events.id, newId));
     if (e.imageData && !e.imageCdnUrl) {
-      const served = `${appUrl}/api/events/${newId}/image`;
+      const served = `${appUrl}/api/events/${newId}/image.jpg`;
       await emit(runId, "image_enriched", `Merged image published at ${served}`, {
         eventId: newId,
         image: served,

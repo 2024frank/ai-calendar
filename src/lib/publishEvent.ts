@@ -22,7 +22,7 @@ export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string)
   const screensIds = (ev.screensIds ?? []) as number[];
 
   // An image we generated ourselves is served from this app.
-  const image = ev.imageData ? `${appUrl}/api/events/${ev.id}/image` : (ev.imageCdnUrl ?? undefined);
+  const image = ev.imageData ? `${appUrl}/api/events/${ev.id}/image.jpg` : (ev.imageCdnUrl ?? undefined);
 
   const payload: Record<string, unknown> = {
     eventType: ev.eventType ?? "ot",
