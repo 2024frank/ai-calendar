@@ -11,18 +11,16 @@ function esc(s: string) {
 }
 
 /**
- * Minimal, plain email. No logo, no colours, no card, just readable text and a
- * link, so it reads like a person wrote it, not a marketing template.
+ * As plain as an email gets: no logo, no heading, no button, no colours. Just a
+ * couple of sentences and a text link, like a person typed it.
  */
 function shell(opts: { title: string; intro?: string; bodyHtml?: string; ctaLabel?: string; ctaUrl?: string }) {
-  const { title, intro, bodyHtml, ctaLabel, ctaUrl } = opts;
-  const link =
-    ctaLabel && ctaUrl ? `<p style="margin:16px 0"><a href="${ctaUrl}">${esc(ctaLabel)}</a></p>` : "";
-  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:460px">
-  <p style="font-weight:600;margin:0 0 8px">${esc(title)}</p>
-  ${intro ? `<p style="margin:0 0 8px">${intro}</p>` : ""}
-  ${bodyHtml ?? ""}
-  ${link}
+  const { intro, bodyHtml, ctaLabel, ctaUrl } = opts;
+  const link = ctaLabel && ctaUrl ? `<p style="margin:12px 0 0"><a href="${ctaUrl}">${esc(ctaLabel)}</a></p>` : "";
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111">
+${intro ? `<p style="margin:0">${intro}</p>` : ""}
+${bodyHtml ?? ""}
+${link}
 </div>`;
 }
 
@@ -73,17 +71,11 @@ async function send(to: string, subject: string, html: string): Promise<{ delive
   return { delivered: false };
 }
 
-function linkLine(link: string) {
-  return `<p style="margin:10px 0 0;color:#888;font-size:12px;word-break:break-all">Or paste this link: ${link}</p>`;
-}
-
 export async function sendMagicLink(email: string, link: string) {
   const html = shell({
-    title: "Sign in to AI Calendar",
-    intro: "Use the link below to sign in. For your security, this link expires in 15 minutes.",
+    intro: "Here is your sign-in link for AI Calendar. It expires in 15 minutes.",
     ctaLabel: "Sign in",
     ctaUrl: link,
-    bodyHtml: linkLine(link)
   });
   const res = await send(email, "Your AI Calendar sign-in link", html);
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
@@ -92,11 +84,9 @@ export async function sendMagicLink(email: string, link: string) {
 export async function sendPasswordSetup(email: string, link: string, isReset: boolean) {
   const title = isReset ? "Reset your password" : "Set your password";
   const html = shell({
-    title,
-    intro: `Use the link below to ${isReset ? "choose a new password" : "set your password"} and sign in. This link expires in 24 hours.`,
+    intro: `Use this link to ${isReset ? "choose a new password" : "set your password"} for AI Calendar. It expires in 24 hours.`,
     ctaLabel: title,
     ctaUrl: link,
-    bodyHtml: linkLine(link)
   });
   const res = await send(email, `${title} — AI Calendar`, html);
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
@@ -105,11 +95,9 @@ export async function sendPasswordSetup(email: string, link: string, isReset: bo
 export async function sendInvite(email: string, link: string, communityName: string) {
   const safeName = esc(communityName);
   const html = shell({
-    title: `You've been added to ${safeName}`,
-    intro: `You now have access to the ${safeName} calendar workspace. Use the link below to sign in.`,
-    ctaLabel: "Open AI Calendar",
+    intro: `You've been added to the ${safeName} calendar on AI Calendar. Use this link to sign in.`,
+    ctaLabel: "Sign in",
     ctaUrl: link,
-    bodyHtml: linkLine(link)
   });
   const res = await send(email, `You've been added to ${communityName} on AI Calendar`, html);
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
