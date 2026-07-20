@@ -56,7 +56,7 @@ async function send(to: string, subject: string, html: string): Promise<{ delive
     try {
       const resend = new Resend(key);
       const { error } = await resend.emails.send({
-        from: process.env.EMAIL_FROM || `${FROM_NAME} <noreply@uhurued.com>`,
+        from: process.env.EMAIL_FROM || `${FROM_NAME} <ai-calendar@uhurued.com>`,
         to: [to],
         subject,
         html,
