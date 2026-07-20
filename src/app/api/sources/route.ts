@@ -35,7 +35,12 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const name = String(body.name ?? "").trim();
-  const url = String(body.url ?? "").trim();
+  // One source can publish across several pages (a listing plus its extra
+  // pages, or a separate calendar). The first is the primary link.
+  const urls = (Array.isArray(body.urls) ? body.urls : String(body.url ?? "").split(/[\n,]+/))
+    .map((u: unknown) => String(u).trim())
+    .filter(Boolean);
+  const url = urls[0] ?? "";
   const specialInstructions = String(body.specialInstructions ?? "").trim() || null;
   const sourceType = body.sourceType === "email" ? "email" : "web";
   const communityId =
@@ -64,7 +69,7 @@ export async function POST(req: Request) {
     url: url || null,
     specialInstructions,
     discoveryStatus: "pending",
-    startUrls: url ? [url] : null,
+    startUrls: urls.length ? urls : null,
   });
 
   const id = (res as { insertId: number }).insertId;

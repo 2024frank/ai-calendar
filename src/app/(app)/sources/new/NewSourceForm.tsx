@@ -14,7 +14,7 @@ export function NewSourceForm({
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
+  const [urls, setUrls] = useState("");
   const [sourceType, setSourceType] = useState<"web" | "email">("web");
   const [special, setSpecial] = useState("");
   const [communityId, setCommunityId] = useState<number>(communities[0]?.id ?? 0);
@@ -29,7 +29,13 @@ export function NewSourceForm({
       const res = await fetch("/api/sources", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, url, sourceType, specialInstructions: special, communityId }),
+        body: JSON.stringify({
+          name,
+          urls: urls.split(/[\n,]+/).map((u) => u.trim()).filter(Boolean),
+          sourceType,
+          specialInstructions: special,
+          communityId,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -88,14 +94,18 @@ export function NewSourceForm({
 
       {sourceType === "web" && (
         <div>
-          <label className="label">Event page link</label>
-          <input
+          <label className="label">Links</label>
+          <textarea
             className="input"
-            placeholder="https://…"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            rows={3}
+            placeholder={"https://example.org/events\nhttps://example.org/calendar"}
+            value={urls}
+            onChange={(e) => setUrls(e.target.value)}
             autoCapitalize="none"
           />
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            One per line. Add every page this organization publishes events on. The first is the main one.
+          </div>
         </div>
       )}
 
@@ -104,10 +114,16 @@ export function NewSourceForm({
         <textarea
           className="input"
           rows={3}
-          placeholder="Anything the extractor should know — e.g. 'events live under the Calendar tab', 'sponsor is always the Library', 'ignore past events'."
+          placeholder={"Only what is unusual about THIS source. For example: the sponsor is always the Library, ignore the staff-only section, dates are day/month order."}
           value={special}
           onChange={(e) => setSpecial(e.target.value)}
         />
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          Leave this empty unless the source needs it. Every agent already knows the
+          house rules: what counts as an event, an announcement and a job, the
+          required fields, that each event needs its own picture, and the writing
+          rules including no em dashes. Only add what is specific to this source.
+        </div>
       </div>
 
       {error && <div className="badge bad">{error}</div>}
