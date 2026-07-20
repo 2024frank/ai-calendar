@@ -28,6 +28,8 @@ export type ExtractedEvent = {
   calendarSourceUrl?: string | null;
   /** Base64 JPEG we generated ourselves (merged posters); satisfies the image rule. */
   imageData?: string | null;
+  /** Several pictures the server merges side by side into one (e.g. movie posters). */
+  imageUrls?: string[];
   placeName?: string | null;
   roomNum?: string | null;
   buttons?: { title: string; link: string }[];
@@ -77,6 +79,7 @@ ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 - buttons: [{ title, link }] when the page offers one (Register, Buy Tickets).
 - calendarSourceUrl: THIS event's own page on the source, so a person can open the original. A distinct URL per event; fall back to the listing only if it has none.
 - imageCdnUrl: REQUIRED (see IMAGES).
+- imageUrls: when ONE item covers several things that each have their own picture (for example an announcement listing several movies), give a list of one picture URL per thing here instead of imageCdnUrl. The server merges them side by side into one image. Use this so an item about two movies shows both posters, not one.
 - fieldNotes: optional array of { field, reason }. When you leave a field empty because the source genuinely has no value, add one short factual sentence why, for example [{"field":"imageCdnUrl","reason":"No image on the page or its share data."}]. State only what you checked. Never carry a real value here, never invent a reason.
 
 WRITING
@@ -208,6 +211,7 @@ export const EVENTS_SCHEMA = {
           website: { type: ["string", "null"] },
           registrationUrl: { type: ["string", "null"] },
           imageCdnUrl: { type: ["string", "null"] },
+          imageUrls: { type: "array", items: { type: "string" } },
           contactEmail: { type: ["string", "null"] },
           phone: { type: ["string", "null"] },
           cost: { type: ["string", "null"] },
@@ -348,6 +352,9 @@ export function normalizeEvent(
     cost: clean(raw.cost) || null,
     calendarSourceUrl: clean(raw.calendarSourceUrl) || null,
     imageData: typeof raw.imageData === "string" && raw.imageData ? raw.imageData : null,
+    imageUrls: (Array.isArray(raw.imageUrls) ? raw.imageUrls : [])
+      .map((u) => String(u).trim())
+      .filter((u) => /^https?:\/\//i.test(u)),
     placeName: clean(raw.placeName) || null,
     roomNum: clean(raw.roomNum) || null,
     buttons: (Array.isArray(raw.buttons) ? raw.buttons : [])

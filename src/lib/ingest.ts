@@ -11,6 +11,7 @@ import {
   type ExtractedEvent,
 } from "./contract";
 import { fetchPage, isGenericImage, isPublicHttpUrl } from "./fetchPage";
+import { mergePosterImages } from "./mergePosters";
 import { fetchDestinationInventory } from "./inventory";
 import { emit } from "./runEvents";
 
@@ -116,6 +117,26 @@ export async function ingestEvents(
     // Drop site furniture the agent may still have picked up.
     if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;
     if (e.imageData) e.imageCdnUrl = e.imageCdnUrl ?? null;
+
+    // Several pictures for one item (e.g. two movie posters) -> merge into one.
+    const pics = (e.imageUrls ?? []).filter((u) => !isGenericImage(u));
+    if (!e.imageData && pics.length > 1) {
+      try {
+        const buf = await mergePosterImages(pics);
+        if (buf) {
+          e.imageData = buf.toString("base64");
+          e.imageCdnUrl = null;
+          await emit(runId, "image_enriched", `Merged ${pics.length} pictures for ${e.title}`, {
+            title: e.title,
+            count: pics.length,
+          });
+        }
+      } catch {
+        /* fall through to the single-image handling below */
+      }
+    }
+    // A single picture in the list is just the image.
+    if (!e.imageData && !e.imageCdnUrl && pics.length === 1) e.imageCdnUrl = pics[0];
 
     // Only enrich from a page belonging to THIS event. The source's own listing
     // page is shared by every event, so its og:image is not a per-event photo.
