@@ -77,7 +77,7 @@ async function send(to: string, subject: string, html: string): Promise<{ delive
 
 export async function sendMagicLink(email: string, link: string) {
   const html = shell({
-    intro: "Here is your sign-in link for AI Calendar. It expires in 15 minutes.",
+    intro: "Your sign-in link for AI Calendar. It expires in 15 minutes.",
     ctaLabel: "Sign in",
     ctaUrl: link,
   });
@@ -99,7 +99,7 @@ export async function sendPasswordSetup(email: string, link: string, isReset: bo
 export async function sendInvite(email: string, link: string, communityName: string) {
   const safeName = esc(communityName);
   const html = shell({
-    intro: `You've been added to the ${safeName} calendar on AI Calendar. Use this link to sign in.`,
+    intro: `You've been added to ${safeName} on AI Calendar. Sign in below to get started.`,
     ctaLabel: "Sign in",
     ctaUrl: link,
   });
@@ -135,7 +135,7 @@ export async function sendNewEventsDigest(
 
   const html = shell({
     title: `${n} new event${n === 1 ? "" : "s"} to review`,
-    intro: `${esc(sourceName)} just brought in ${n} new event${n === 1 ? "" : "s"} for ${esc(communityName)}. They are waiting in your review queue.`,
+    intro: `${esc(sourceName)} brought in ${n} new event${n === 1 ? "" : "s"} for ${esc(communityName)}, waiting in your review queue.`,
     bodyHtml: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px">${rows}</table>${more}`,
     ctaLabel: "Review events",
     ctaUrl: reviewUrl
