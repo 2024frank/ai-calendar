@@ -313,9 +313,18 @@ export function EventReview({
       body: JSON.stringify(body()),
     });
     const res = await fetch(`/api/events/${event.id}/approve`, { method: "POST" });
+    const d = await res.json().catch(() => ({}));
     setBusy(null);
-    if (res.ok) router.push("/review");
-    else setMsg("Could not approve.");
+    if (res.ok) {
+      setMsg(
+        d.status === "submitted"
+          ? "Approved and submitted to CommunityHub."
+          : "Approved. It is in your calendar (no CommunityHub endpoint, so not sent there).",
+      );
+      setTimeout(() => router.push("/review"), 1400);
+    } else {
+      setMsg(d.error ? `Could not approve: ${d.error}` : "Could not approve.");
+    }
   }
 
   async function reject() {
@@ -325,9 +334,14 @@ export function EventReview({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reasonCode: reason, note }),
     });
+    const d = await res.json().catch(() => ({}));
     setBusy(null);
-    if (res.ok) router.push("/review");
-    else setMsg("Could not reject.");
+    if (res.ok) {
+      setMsg("Rejected. The agent learns from this for next time.");
+      setTimeout(() => router.push("/review"), 1200);
+    } else {
+      setMsg(d.error ? `Could not reject: ${d.error}` : "Could not reject.");
+    }
   }
 
   const m = (k: keyof typeof missing) => showErrors && missing[k];

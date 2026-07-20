@@ -14,6 +14,7 @@ import {
 import { fetchPage, hasImageExtension, isGenericImage, isPublicHttpUrl } from "./fetchPage";
 import { mergePosterImages } from "./mergePosters";
 import { fetchDestinationInventory } from "./inventory";
+import { publishEvent } from "./publishEvent";
 import { sendNewEventsDigest } from "./email";
 import { emit } from "./runEvents";
 
@@ -342,20 +343,41 @@ export async function ingestEvents(
     if (status === "pending") {
       counts.inserted++;
       existingByKey.set(dedupKey, newId);
-      // Collect for the reviewer digest email.
-      const first = e.sessions[0]?.startTime;
-      newlyPending.push({
-        title: e.title,
-        when: first
-          ? new Date(first * 1000).toLocaleString("en-US", {
-              timeZone: community.timezone,
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            })
-          : "date to set",
-      });
+
+      if (mode === "unrestricted") {
+        // No human review: send it straight to CommunityHub. On success the
+        // event becomes 'submitted'; on failure it stays pending for a person.
+        try {
+          const pub = await publishEvent(newId);
+          await emit(
+            runId,
+            "queue_outcome",
+            pub.state === "succeeded"
+              ? `Auto-submitted to CommunityHub (#${newId})`
+              : `Auto-submit ${pub.state}, left for review (#${newId}): ${pub.message}`,
+            { eventId: newId, publish: pub.state },
+          );
+        } catch {
+          await emit(runId, "queue_outcome", `Auto-submit failed, left for review (#${newId})`, {
+            eventId: newId,
+          });
+        }
+      } else {
+        // Restricted: it waits for a reviewer. Collect for the digest email.
+        const first = e.sessions[0]?.startTime;
+        newlyPending.push({
+          title: e.title,
+          when: first
+            ? new Date(first * 1000).toLocaleString("en-US", {
+                timeZone: community.timezone,
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })
+            : "date to set",
+        });
+      }
     }
 
     await emit(
