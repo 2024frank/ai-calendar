@@ -47,5 +47,9 @@ export async function GET(req: Request) {
     canReviewAllSources: user.canReviewAllSources,
   });
 
-  return NextResponse.redirect(new URL("/dashboard", base));
+  // Honor a same-site redirect (e.g. an email digest links straight to /review).
+  // Only relative paths are allowed, so a token link can never bounce off-site.
+  const next = url.searchParams.get("next");
+  const dest = next && /^\/[^/]/.test(next) ? next : "/dashboard";
+  return NextResponse.redirect(new URL(dest, base));
 }

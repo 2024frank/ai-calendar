@@ -1,7 +1,8 @@
 import "server-only";
+import { createHash, randomBytes } from "crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, sources, users } from "@/db/schema";
+import { communities, events, loginTokens, sources, users } from "@/db/schema";
 import {
   computeDedupKey,
   contentMatches,
@@ -386,7 +387,7 @@ async function notifyReviewers(
 ) {
   try {
     const recipients = await db
-      .select({ email: users.email })
+      .select({ id: users.id, email: users.email })
       .from(users)
       .where(
         and(
@@ -398,11 +399,21 @@ async function notifyReviewers(
     const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
     for (const r of recipients) {
       if (!r.email) continue;
+      // A one-time, 24h login link straight to the review queue, so the reviewer
+      // does not have to sign in first. Consumed on first use, then invalid.
+      const rawToken = randomBytes(32).toString("hex");
+      await db.insert(loginTokens).values({
+        userId: r.id,
+        kind: "magic",
+        tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      const reviewUrl = `${appUrl}/api/auth/verify?token=${rawToken}&next=${encodeURIComponent("/review")}`;
       await sendNewEventsDigest(r.email, {
         communityName: community.name,
         sourceName: source.name,
         events,
-        reviewUrl: `${appUrl}/review`,
+        reviewUrl,
       });
     }
   } catch {
