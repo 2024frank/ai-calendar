@@ -105,6 +105,10 @@ export type LlmCall = {
   maxTokens?: number;
   /** Let the model retrieve pages itself (for sources that block our server). */
   fetchUrls?: number;
+  /** Give the agent a sandbox to run curl and python (fetch inventories, dedupe). */
+  sandbox?: boolean;
+  /** Let the agent search the web (e.g. to find a poster). */
+  webSearch?: boolean;
   /** How many tool/reasoning steps the agent may take. */
   maxSteps?: number;
 };
@@ -118,7 +122,12 @@ export async function llmComplete(call: LlmCall): Promise<LlmResult> {
   };
   if (call.instructions) body.instructions = call.instructions;
   if (call.maxSteps) body.max_steps = call.maxSteps;
-  if (call.fetchUrls) body.tools = [{ type: "fetch_url", max_urls: call.fetchUrls }];
+
+  const tools: Record<string, unknown>[] = [];
+  if (call.fetchUrls) tools.push({ type: "fetch_url", max_urls: call.fetchUrls });
+  if (call.sandbox) tools.push({ type: "sandbox" });
+  if (call.webSearch) tools.push({ type: "web_search" });
+  if (tools.length) body.tools = tools;
   if (call.schema) {
     body.response_format = {
       type: "json_schema",

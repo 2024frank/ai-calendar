@@ -1,8 +1,9 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, runs, sources } from "@/db/schema";
-import { EVENTS_SCHEMA, buildSystemPrompt } from "./contract";
+import { communities, destinations, runs, sources } from "@/db/schema";
+import { buildSystemPrompt } from "./contract";
+import { runToken } from "./agentToken";
 import { fetchPage } from "./fetchPage";
 import { buildApolloAnnouncements } from "./sources/apolloSegments";
 import { trackFilmRuns } from "./sources/apolloTracking";
@@ -71,6 +72,46 @@ const RECIPE_SCHEMA = {
   required: ["extraction_method", "instruction_block"],
   additionalProperties: false,
 } as const;
+
+/**
+ * Recover an events array from the agent's reply when it did not post back.
+ * Tries a clean parse, then a ```json fenced block, then the first {...} that
+ * contains an "events" array.
+ */
+function extractEventsArray(text: string): Record<string, unknown>[] {
+  const tryParse = (s: string): Record<string, unknown>[] | null => {
+    try {
+      const o = JSON.parse(s) as { events?: unknown };
+      return Array.isArray(o.events) ? (o.events as Record<string, unknown>[]) : null;
+    } catch {
+      return null;
+    }
+  };
+  const direct = tryParse(text);
+  if (direct) return direct;
+
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  if (fence) {
+    const fromFence = tryParse(fence[1].trim());
+    if (fromFence) return fromFence;
+  }
+
+  const start = text.indexOf('{"events"');
+  const alt = start >= 0 ? start : text.search(/\{\s*"events"/);
+  if (alt >= 0) {
+    // Walk to the matching brace.
+    let depth = 0;
+    for (let i = alt; i < text.length; i++) {
+      if (text[i] === "{") depth++;
+      else if (text[i] === "}" && --depth === 0) {
+        const fromSub = tryParse(text.slice(alt, i + 1));
+        if (fromSub) return fromSub;
+        break;
+      }
+    }
+  }
+  return [];
+}
 
 /** A fetch that came back empty or with the model saying it could not read. */
 function looksUnfetched(text: string): boolean {
@@ -483,9 +524,30 @@ export async function runExtraction(runId: number) {
       contact_email: source.orgContactEmail,
       phone: source.orgPhone,
     };
-    // System prompt: the generic contract plus this source's special
-    // instructions (placeholders filled). Everything the model must obey.
-    const systemPrompt = buildSystemPrompt(fillTemplate(source.specialInstructions ?? "", extractionVars));
+    // Where the agent reads and writes: the two inventories to dedupe against,
+    // and the endpoint it posts its results to. All source-driven, no literals.
+    const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
+    const [dest] = await db
+      .select()
+      .from(destinations)
+      .where(and(eq(destinations.communityId, community.id), eq(destinations.active, true)))
+      .limit(1);
+    const destCfg = (dest ? (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) : {}) as {
+      inventory_url?: string;
+    };
+
+    // System prompt: the agentic template, every value filled from this source.
+    const systemPrompt = buildSystemPrompt({
+      sourceName: source.name,
+      urls: [target, ...secondary],
+      calendarSourceName: source.calendarSourceName ?? source.orgName ?? source.name,
+      communityHubInventoryUrl: destCfg.inventory_url ?? null,
+      aiCalendarApprovedUrl: `${appUrl}/api/public/events?status=approved,submitted&community=${community.slug}`,
+      ingestUrl: `${appUrl}/api/agent/ingest`,
+      runId,
+      runToken: runToken(runId),
+      specialInstructions: fillTemplate(source.specialInstructions ?? "", extractionVars),
+    });
 
     // Input: the context and the untrusted page content, kept as data.
     const prompt = `Extract every upcoming event, announcement and job from this source and return them in the required JSON shape.
@@ -509,12 +571,16 @@ ${sourceText}
 
 Only include events that have a real date. Skip anything already past. If there are no upcoming events, return an empty list.`;
 
-    await emit(runId, "model_turn", "Extracting normalized events", { phase: "extraction" });
+    await emit(runId, "model_turn", "Running the extraction agent (sandbox: read inventories, dedupe, post back)", {
+      phase: "extraction",
+    });
     const res = await llmComplete({
       prompt,
       instructions: systemPrompt,
-      schema: EVENTS_SCHEMA as unknown as Record<string, unknown>,
-      schemaName: "normalized_events",
+      sandbox: true,
+      fetchUrls: 10,
+      webSearch: true,
+      maxSteps: 40,
       maxTokens: 32000,
     });
 
@@ -525,45 +591,21 @@ Only include events that have a real date. Skip anything already past. If there 
       { input: res.usage.input, output: res.usage.output, model: res.model, costUsd: res.usage.costUsd },
     );
 
-    let parsed: { events?: Record<string, unknown>[] };
-    try {
-      parsed = JSON.parse(res.text || "{}");
-    } catch {
-      return fail(runId, "The model did not return valid JSON.");
-    }
-    let list = Array.isArray(parsed.events) ? parsed.events : [];
-    await emit(runId, "candidates_parsed", `${list.length} candidate event(s)`, { count: list.length });
+    // If the agent posted its results, the ingest endpoint already completed the
+    // run. Nothing more to do.
+    const [afterPost] = await db
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    if (afterPost?.status === "completed") return;
 
-    // The page loaded but held nothing we could read, which is what a
-    // JavaScript-rendered listing looks like from a plain fetch. Try once more
-    // through the hosted fetcher, which runs the page properly.
-    if (list.length === 0 && !usedHostedFetch) {
-      await emit(runId, "fetch_issued", "No events in the raw page; retrying with the hosted fetcher", {
-        url: target,
-        via: "fetch_url",
-      });
-      const rendered = await fetchViaModel(runId, target);
-      if (rendered) {
-        const retry = await llmComplete({
-          prompt: prompt.replace(sourceText, rendered),
-          instructions: systemPrompt,
-          schema: EVENTS_SCHEMA as unknown as Record<string, unknown>,
-          schemaName: "normalized_events",
-          maxTokens: 32000,
-        });
-        try {
-          const again = JSON.parse(retry.text || "{}") as { events?: Record<string, unknown>[] };
-          list = Array.isArray(again.events) ? again.events : [];
-        } catch {
-          /* keep the empty list */
-        }
-        await emit(runId, "candidates_parsed", `${list.length} candidate event(s) after rendering`, {
-          count: list.length,
-          via: "fetch_url",
-        });
-      }
-    }
-
+    // Fallback: the agent did not post. Recover the events from its reply so a
+    // run is never lost, and ingest them server-side.
+    await emit(runId, "candidates_parsed", "Agent did not post back; recovering events from its reply", {
+      fallback: true,
+    });
+    const list = extractEventsArray(res.text);
     const counts = await ingestEvents(runId, source, community, list);
 
     await db
