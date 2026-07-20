@@ -124,6 +124,25 @@ export function NewSourceForm({
           required fields, that each event needs its own picture, and the writing
           rules including no em dashes. Only add what is specific to this source.
         </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          The links above are added to the instructions automatically. You can also
+          drop these into your text and they get filled in:{" "}
+          {["{source_name}", "{url}", "{urls}", "{today}", "{org_name}", "{contact_email}", "{phone}"].map(
+            (p) => (
+              <code
+                key={p}
+                style={{
+                  background: "var(--chip, rgba(0,0,0,.06))",
+                  padding: "1px 5px",
+                  borderRadius: 4,
+                  marginRight: 4,
+                }}
+              >
+                {p}
+              </code>
+            ),
+          )}
+        </div>
       </div>
 
       {error && <div className="badge bad">{error}</div>}
