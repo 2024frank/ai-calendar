@@ -63,11 +63,18 @@ export async function scopedSourceIds(s: Session): Promise<number[] | null> {
       .where(eq(sources.communityId, active ?? s.communityId ?? -1));
     return rows.map((r) => r.id);
   }
-  const rows = await db
+  // A reviewer restricted to specific sources sees only those.
+  const assigned = await db
     .select({ id: reviewerSources.sourceId })
     .from(reviewerSources)
     .where(eq(reviewerSources.userId, s.uid));
-  return rows.map((r) => r.id);
+  if (assigned.length) return assigned.map((r) => r.id);
+  // No explicit restriction: a reviewer added to a community reviews all of it.
+  const all = await db
+    .select({ id: sources.id })
+    .from(sources)
+    .where(eq(sources.communityId, active ?? s.communityId ?? -1));
+  return all.map((r) => r.id);
 }
 
 export async function listCommunities() {
