@@ -24,6 +24,9 @@ ${link}
 </div>`;
 }
 
+// Friendly display name shown as the sender, whichever transport delivers.
+const FROM_NAME = "AI Calendar";
+
 /** Send over Hostinger SMTP with the mailbox added to the server. */
 async function sendViaHostinger(to: string, subject: string, html: string): Promise<boolean> {
   const user = process.env.HOSTINGER_EMAIL?.trim();
@@ -35,7 +38,8 @@ async function sendViaHostinger(to: string, subject: string, html: string): Prom
     secure: true, // port 465 is implicit TLS
     auth: { user, pass },
   });
-  await transport.sendMail({ from: user, to, subject, html });
+  // Show "AI Calendar" as the sender, from the authenticated mailbox.
+  await transport.sendMail({ from: { name: FROM_NAME, address: user }, to, subject, html });
   return true;
 }
 
@@ -52,7 +56,7 @@ async function send(to: string, subject: string, html: string): Promise<{ delive
     try {
       const resend = new Resend(key);
       const { error } = await resend.emails.send({
-        from: process.env.EMAIL_FROM || "AI Calendar <noreply@uhurued.com>",
+        from: process.env.EMAIL_FROM || `${FROM_NAME} <noreply@uhurued.com>`,
         to: [to],
         subject,
         html,
