@@ -5,10 +5,6 @@ import { communities, destinations, runs, sources } from "@/db/schema";
 import { buildSystemPrompt } from "./contract";
 import { runToken } from "./agentToken";
 import { fetchPage } from "./fetchPage";
-import { buildApolloAnnouncements } from "./sources/apolloSegments";
-import { trackFilmRuns } from "./sources/apolloTracking";
-import { dedupeFilms, parseVeeziSessions } from "./sources/veezi";
-import { mergePosterImages } from "./mergePosters";
 import { ingestEvents } from "./ingest";
 import { buildFeedbackBlock } from "./learning";
 import { llmComplete } from "./llm";
@@ -420,90 +416,6 @@ export async function runExtraction(runId: number) {
         `Compacted the feed from ${Math.round(before / 1024)} KB to ${Math.round(sourceText.length / 1024)} KB`,
         { before, after: sourceText.length },
       );
-    }
-
-    // Apollo: the Veezi schedule is segmented deterministically, exactly as the
-    // legacy agent expected. A model hand-reading that grid silently drops
-    // showings, so no model runs here. Two announcements come out:
-    // "Now Playing at the Apollo" and "Coming Soon to the Apollo".
-    if (/veezi\.com/i.test(target)) {
-      const films = dedupeFilms(parseVeeziSessions(page.html));
-      await emit(runId, "candidates_parsed", `${films.length} film(s) in the Veezi schedule`, {
-        films: films.map((f) => ({ title: f.title, showtimes: f.showtimes.length })),
-      });
-      const token = process.env.APOLLO_VEEZI_SITE_TOKEN;
-      const posterFor = (title?: string) => {
-        const f = films.find((x) => x.title === title);
-        if (!f?.code || !token) return null;
-        return `https://ticketing.uswest.veezi.com/Media/Poster?siteToken=${token}&code=${f.code.padStart(10, "0")}`;
-      };
-      // Record what is showing so a film's real opening date survives, and so a
-      // film that vanishes from a later run gets a confirmed end.
-      const tracked = await trackFilmRuns(films);
-      const ended = [...tracked.values()].filter((t) => t.endedOn).length;
-      await emit(runId, "candidates_parsed", `Tracked ${tracked.size} film run(s), ${ended} with a confirmed end`, {
-        tracked: tracked.size,
-        confirmedEnds: ended,
-      });
-      const announcements = buildApolloAnnouncements(films, new Date(), tracked);
-      // One picture per announcement showing EVERY film in it, exactly as the
-      // legacy agent did: collect a poster per movie, then merge them.
-      const merged = await Promise.all(
-        announcements.map(async (a) => {
-          const posters = a.movies.map((m) => posterFor(m.title)).filter((u): u is string => !!u);
-          if (!posters.length) return null;
-          try {
-            const buf = await mergePosterImages(posters);
-            return buf ? buf.toString("base64") : null;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      await emit(
-        runId,
-        "image_enriched",
-        `Merged posters for ${merged.filter(Boolean).length} of ${announcements.length} announcement(s)`,
-        { merged: merged.map((m) => (m ? m.length : 0)) },
-      );
-      const list = announcements.map((a, i) => ({
-        eventType: "an",
-        title: a.title,
-        description: a.description,
-        sessions: [{ startTime: a.startTime, endTime: a.endTime }],
-        locationType: "ph2",
-        location: "19 East College Street, Oberlin, OH 44074",
-        placeName: "Apollo Theatre",
-        display: "all",
-        postTypeId: [5],
-        sponsors: [source.orgName ?? "Apollo Theater"],
-        imageData: merged[i],
-        imageCdnUrl: merged[i] ? null : posterFor(a.movies[0]?.title),
-        website: source.orgWebsite ?? source.url,
-        contactEmail: source.orgContactEmail,
-        phone: source.orgPhone,
-      })) as unknown as Record<string, unknown>[];
-
-      const counts = await ingestEvents(runId, source, community, list);
-      await db
-        .update(runs)
-        .set({
-          status: "completed",
-          phase: "done",
-          finishedAt: new Date(),
-          eventsFound: counts.found,
-          eventsExtracted: counts.inserted,
-          eventsDuplicate: counts.duplicate,
-          eventsInvalid: counts.invalid,
-        })
-        .where(eq(runs.id, runId));
-      await emit(
-        runId,
-        "run_finished",
-        `${counts.inserted} announcement(s) from ${films.length} film(s), no model needed`,
-        { ...counts, elapsedMs: Date.now() - started },
-      );
-      return;
     }
 
     const feedback = await buildFeedbackBlock(source.id);
