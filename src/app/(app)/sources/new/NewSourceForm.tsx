@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { SCHEDULE_OPTIONS } from "@/lib/schedule";
 
 type Community = { id: number; name: string };
 
@@ -17,6 +18,7 @@ export function NewSourceForm({
   const [urls, setUrls] = useState("");
   const [sourceType, setSourceType] = useState<"web" | "email">("web");
   const [special, setSpecial] = useState("");
+  const [schedule, setSchedule] = useState("daily");
   const [communityId, setCommunityId] = useState<number>(communities[0]?.id ?? 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +36,7 @@ export function NewSourceForm({
           urls: urls.split(/[\n,]+/).map((u) => u.trim()).filter(Boolean),
           sourceType,
           specialInstructions: special,
+          schedule,
           communityId,
         }),
       });
@@ -108,6 +111,20 @@ export function NewSourceForm({
           </div>
         </div>
       )}
+
+      <div>
+        <label className="label">How often to check</label>
+        <select className="input" value={schedule} onChange={(e) => setSchedule(e.target.value)}>
+          {SCHEDULE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          The scheduled run picks this source up automatically. You can change it later on the source page.
+        </div>
+      </div>
 
       <div>
         <label className="label">Special instructions (optional)</label>

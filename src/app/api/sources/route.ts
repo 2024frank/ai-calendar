@@ -5,6 +5,7 @@ import { sources } from "@/db/schema";
 import { runDiscovery, startRun } from "@/lib/agent";
 import { getSession } from "@/lib/auth";
 import { listSources } from "@/lib/data";
+import { valueToCron } from "@/lib/schedule";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
   const url = urls[0] ?? "";
   const specialInstructions = String(body.specialInstructions ?? "").trim() || null;
   const sourceType = body.sourceType === "email" ? "email" : "web";
+  const scheduleCron = "schedule" in body ? valueToCron(String(body.schedule)) : null;
   const communityId =
     s.role === "platform_admin" ? Number(body.communityId) : (s.communityId ?? 0);
 
@@ -70,6 +72,7 @@ export async function POST(req: Request) {
     specialInstructions,
     discoveryStatus: "pending",
     startUrls: urls.length ? urls : null,
+    scheduleCron,
   });
 
   const id = (res as { insertId: number }).insertId;
