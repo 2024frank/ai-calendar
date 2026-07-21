@@ -6,12 +6,12 @@ Built for [CommunityHub](https://www.communityhub.cloud/) communities. Oberlin a
 
 ## What it does
 
-You give it a **source** (a name and a link). Two agents take it from there:
+You add a **source** through a short setup wizard: name, link, how often to check, and how far ahead to look. The wizard hands you a research prompt to paste into ChatGPT or Claude; that model studies the site and returns a short, specific extraction recipe you save as the source's instructions. From then on:
 
-1. **Discovery Agent** probes the site once and works out the cheapest reliable way to read its events, preferring a public JSON API, then an iCal or RSS feed, then JSON-LD markup, and only falling back to parsing HTML. It writes a durable extraction recipe for that source.
-2. **Source Agent** replays that recipe on a schedule, returning normalized events.
+1. On a schedule, an **extraction agent** runs with its own sandbox (curl and Python), URL fetching, and web search. It replays the recipe, reads both the community calendar and the destination to avoid reposting, and returns normalized events. Bot-walled sites (Cloudflare, WAFs) are read with a full browser-fingerprint request; images behind blocked hosts are shipped inline as base64.
+2. The agent judges duplicates by **meaning** across both inventories, not by string equality, and reports each match with a link so a reviewer can confirm it.
 
-Every event is deterministically validated and deduplicated by content (date and location first), then routed by the source's **mode**:
+Every event is also deterministically validated on the server (required fields, one image each, contacts, no links in descriptions, sane dates) and deduplicated as a safety net, then routed by the source's **mode**:
 
 - `restricted` (default): the event waits in a human review queue.
 - `unrestricted`: clean, non-duplicate events publish automatically.
@@ -37,7 +37,7 @@ Roles are `platform_admin` (all communities), `community_admin` (one community; 
 
 ## Stack
 
-Next.js (App Router) and TypeScript, Drizzle ORM on MySQL 8, and the Anthropic API for the agents. Authentication is passwordless email sign-in with a JWT session cookie. Deployed on Vercel.
+Next.js (App Router) and TypeScript, Drizzle ORM on MySQL 8, and the [Perplexity Agent API](https://docs.perplexity.ai/docs/agent-api) (running Claude and other frontier models in a managed sandbox) for the agents. Authentication is passwordless email sign-in with a JWT session cookie. Deployed on Vercel, with a daily cron for scheduled runs and retention.
 
 ## Getting started
 
