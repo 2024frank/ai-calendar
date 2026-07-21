@@ -202,7 +202,7 @@ export async function sendPasswordSetup(email: string, link: string, isReset: bo
 export async function sendInvite(email: string, link: string, communityName: string) {
   const html = emailShell({
     context: "Welcome",
-    preheader: `Your access to ${communityName} is ready.`,
+    preheader: "Your account is ready. Sign in to get started.",
     body: `
       ${heading("Welcome to AI Calendar")}
       ${paragraph(`You have been added to ${communityName}. Sign in below to get started.`)}
@@ -216,12 +216,10 @@ export async function sendInvite(email: string, link: string, communityName: str
     `,
   });
   const text = `Welcome to AI Calendar\n\nYou have been added to ${communityName}. Sign in to get started.\n\n${link}\n\nAI Calendar, CommunityHub, Oberlin, Ohio`;
-  const res = await send(
-    email,
-    `You have been added to ${communityName} on AI Calendar`,
-    html,
-    text,
-  );
+  // The subject stays plain. Naming the community there read as though the
+  // person had been added to the town; which community it is belongs in the
+  // body, where there is room for it to make sense.
+  const res = await send(email, "You've been added to AI Calendar", html, text);
   return { delivered: res.delivered, devLink: res.delivered ? undefined : link };
 }
 
