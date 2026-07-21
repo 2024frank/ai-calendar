@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
-import { runExtraction, startRun } from "@/lib/agent";
 import { getSession, isAdmin } from "@/lib/auth";
 import { getSource } from "@/lib/data";
+import { enqueueExtraction, processJob } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,9 +29,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     );
   }
 
-  const runId = await startRun(source.id, source.communityId, "extraction");
+  const { jobId, runId, deduplicated } = await enqueueExtraction(source.id, source.communityId);
   after(async () => {
-    await runExtraction(runId);
+    await processJob(jobId);
   });
-  return NextResponse.json({ runId });
+  return NextResponse.json(
+    { runId, jobId, deduplicated },
+    { status: deduplicated ? 200 : 202 },
+  );
 }

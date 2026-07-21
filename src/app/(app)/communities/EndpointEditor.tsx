@@ -62,7 +62,7 @@ export function EndpointEditor({
         <span>Publish approved events to this endpoint</span>
       </label>
       <div className="muted" style={{ fontSize: 12 }}>
-        Paste the community's CommunityHub base URL. The submit and inventory paths follow the standard
+        Paste the community&apos;s CommunityHub base URL. The submit and inventory paths follow the standard
         pattern automatically. Turn it on and this community is ready: add sources and their events flow
         here. Leave it off to keep events in the AI calendar only.
       </div>

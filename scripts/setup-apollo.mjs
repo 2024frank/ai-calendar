@@ -8,7 +8,7 @@ const c = await mysql.createConnection({
 });
 // wipe
 for (const q of ["DELETE FROM publish_submissions","DELETE FROM events","DELETE FROM run_events","DELETE FROM runs","DELETE FROM apollo_film_runs","DELETE FROM sources"]) {
-  try { await c.query(q); } catch (e) { /* table may not exist */ }
+  try { await c.query(q); } catch { /* table may not exist */ }
 }
 const url = "https://ticketing.uswest.veezi.com/sessions/?siteToken=qag5g529fjpr8w719hbz5dgwcg";
 const special = `Apollo Theatre, 19 East College Street, Oberlin OH, operated by Cleveland Cinemas. The first link is the Veezi ticketing page: a rolling ~12-day window of films and their dates, no pagination. Fetch it and read every film and every date it shows.

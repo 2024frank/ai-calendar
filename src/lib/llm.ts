@@ -157,7 +157,8 @@ export async function llmComplete(call: LlmCall): Promise<LlmResult> {
     // A retired or renamed model fails validation for the whole request. Retry
     // once letting Perplexity pick, so a model going away is not an outage.
     if (res.status === 400 && isUnsupportedModelError(raw)) {
-      const { models: _dropped, ...rest } = body as Record<string, unknown>;
+      const rest = { ...body };
+      delete rest.models;
       const retry = await fetch(AGENT_URL, {
         method: "POST",
         headers: {

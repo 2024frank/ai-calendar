@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -47,8 +46,8 @@ const SUBMISSION_STATE = [
   "failed",
   "accepted_unreconciled",
 ] as const;
-
-const now3 = () => timestamp("placeholder", { fsp: 3 });
+const JOB_KIND = ["extract_source"] as const;
+const JOB_STATUS = ["queued", "running", "succeeded", "failed"] as const;
 
 /* ------------------------------------------------------------------ *
  * Tenancy
@@ -322,6 +321,53 @@ export const runState = mysqlTable("run_state", {
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
+/**
+ * Durable hand-off between HTTP/scheduler requests and expensive extraction.
+ *
+ * `dedupeKey` is populated only while a job is active. Its unique constraint
+ * prevents two app instances from scheduling the same source concurrently;
+ * workers clear it when the job reaches a terminal state.
+ */
+export const jobs = mysqlTable(
+  "jobs",
+  {
+    id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+    runId: int("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" })
+      .unique(),
+    kind: mysqlEnum("kind", JOB_KIND).notNull(),
+    status: mysqlEnum("status", JOB_STATUS).notNull().default("queued"),
+    dedupeKey: varchar("dedupe_key", { length: 191 }).unique(),
+    attempts: int("attempts").notNull().default(0),
+    maxAttempts: int("max_attempts").notNull().default(2),
+    availableAt: timestamp("available_at", { fsp: 3 }).notNull().defaultNow(),
+    lockedAt: timestamp("locked_at", { fsp: 3 }),
+    lockedBy: varchar("locked_by", { length: 120 }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { fsp: 3 }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { fsp: 3 }).notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => [
+    index("idx_jobs_available").on(t.status, t.availableAt),
+    index("idx_jobs_stale").on(t.status, t.lockedAt),
+  ],
+);
+
+/** Fixed-window counters shared by every web/worker instance. */
+export const rateLimitBuckets = mysqlTable(
+  "rate_limit_buckets",
+  {
+    // Hash the logical key so IP addresses and emails are not stored as keys.
+    keyHash: varchar("key_hash", { length: 64 }).primaryKey(),
+    windowStartedAtMs: bigint("window_started_at_ms", { mode: "number" }).notNull(),
+    count: int("count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { fsp: 3 }).notNull(),
+    updatedAt: timestamp("updated_at", { fsp: 3 }).notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => [index("idx_rate_limit_expiry").on(t.expiresAt)],
+);
+
 /* ------------------------------------------------------------------ *
  * Learning loop
  * ------------------------------------------------------------------ */
@@ -430,8 +476,6 @@ export const publishSubmissions = mysqlTable(
   },
   (t) => [uniqueIndex("uq_submission").on(t.eventId, t.destinationId, t.payloadHash)],
 );
-
-void now3;
 
 /** Simple platform-wide key/value settings (e.g. the active model). */
 export const appSettings = mysqlTable("app_settings", {

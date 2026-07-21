@@ -147,7 +147,8 @@ export async function dashboardStats(s: Session) {
 export async function getEventScoped(s: Session, id: number) {
   const [row] = await db.select().from(events).where(eq(events.id, id)).limit(1);
   if (!row) return null;
-  if (s.role !== "platform_admin" && row.communityId !== s.communityId) return null;
+  const active = await currentCommunityId(s);
+  if (active && row.communityId !== active) return null;
   const ids = await scopedSourceIds(s);
   if (ids && row.sourceId && !ids.includes(row.sourceId)) return null;
   return row;

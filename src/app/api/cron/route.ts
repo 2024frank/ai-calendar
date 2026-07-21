@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
-import { runExtraction, startRun } from "@/lib/agent";
 import { getSession } from "@/lib/auth";
+import { drainJobs, enqueueExtraction, requeueStaleJobs } from "@/lib/jobs";
+import { sweepRateLimitBuckets } from "@/lib/rateLimit";
 import { dueScheduledSources, reapStaleRuns, sweepExpiredEvents } from "@/lib/retention";
 
 export const runtime = "nodejs";
@@ -28,26 +29,33 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const recoveredJobs = await requeueStaleJobs();
   const reaped = await reapStaleRuns();
   const deleted = await sweepExpiredEvents();
+  const expiredRateLimitsDeleted = await sweepRateLimitBuckets();
 
   // The hosting plan allows a single daily cron, so this one tick starts every
   // source that is due. Each run is still bounded by the platform's per-request
   // limit; a source that needs longer is run manually until that limit lifts.
   const due = await dueScheduledSources();
-  const started: { sourceId: number; runId: number }[] = [];
+  const started: { sourceId: number; runId: number; jobId: number; deduplicated: boolean }[] = [];
   for (const s of due) {
-    const runId = await startRun(s.id, s.communityId, "extraction");
-    started.push({ sourceId: s.id, runId });
-    after(async () => {
-      await runExtraction(runId);
-    });
+    const queued = await enqueueExtraction(s.id, s.communityId);
+    started.push({ sourceId: s.id, ...queued });
   }
+  // This keeps the current one-deployment setup responsive. The durable rows
+  // remain safe if the invocation is terminated, and /api/internal/jobs can be
+  // called by dedicated workers as traffic grows.
+  after(async () => {
+    await drainJobs(2);
+  });
 
   return NextResponse.json({
     ok: true,
     staleRunsFailed: reaped,
+    recoveredJobs,
     expiredDeleted: deleted,
+    expiredRateLimitsDeleted,
     scheduledRunsStarted: started.length,
     started,
   });

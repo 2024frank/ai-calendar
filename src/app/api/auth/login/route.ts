@@ -19,8 +19,8 @@ export async function POST(req: Request) {
   // Per-IP and per-account throttles: the account bucket blunts a distributed
   // spray that rotates IPs to dodge the per-IP limit.
   const throttled =
-    !rateLimit(`login:${clientKey(req)}:${email}`, 8, 10 * 60_000) ||
-    !rateLimit(`login-acct:${email}`, 20, 15 * 60_000);
+    !(await rateLimit(`login:${clientKey(req)}:${email}`, 8, 10 * 60_000)) ||
+    !(await rateLimit(`login-acct:${email}`, 20, 15 * 60_000));
   if (throttled) {
     return NextResponse.json(
       { error: "Too many attempts. Wait a few minutes and try again." },

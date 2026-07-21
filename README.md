@@ -50,16 +50,19 @@ Three roles: platform admin (everything), community admin (their own community),
 
 Next.js and TypeScript, Drizzle on MySQL, and the [Perplexity Agent API](https://docs.perplexity.ai/docs/agent-api) for the agent (it runs Claude and other models in a managed sandbox). Sign-in is a passwordless email link. Runs on Vercel with a daily cron for the scheduled checks and cleanup.
 
+The production topology, data flows, API boundaries, schema ownership, cache policy, reliability model, and scaling path are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Running it locally
 
 ```bash
 npm install
 cp .env.example .env.local   # fill in your values
-npm run db:generate
-node scripts/rebuild-db.mjs   # builds the schema; drops existing tables first
+npm run db:migrate            # non-destructive migrations
 node scripts/seed-db.mjs      # first community, destination, admin user
 npm run dev
 ```
+
+`scripts/rebuild-db.mjs` is a destructive local-development reset and must not be used against a populated environment.
 
 ### Environment
 

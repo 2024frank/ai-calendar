@@ -16,7 +16,7 @@ for (const id of ids) {
   let sys = "";
   try { const a = await anthropic.beta.agents.retrieve(s.legacy_agent_id);
     sys = typeof a.system === "string" ? a.system : JSON.stringify(a.system ?? ""); }
-  catch (e) { console.log(`#${id} ${s.name}: retrieve failed`); continue; }
+  catch { console.log(`#${id} ${s.name}: retrieve failed`); continue; }
   const spec = sys.slice(sys.search(/^##\s*Source-specific/im));
   const urls = [...new Set((spec.match(/https?:\/\/[^\s"'`)<>\]]+/gi) || [])
     .map(u => u.replace(/[.,;:]+$/,"")).filter(u => !EXCLUDE.test(u)))];

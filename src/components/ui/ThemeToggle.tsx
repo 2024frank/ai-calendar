@@ -15,7 +15,10 @@ function preferredTheme(): Theme {
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("light");
 
-  useEffect(() => setTheme(preferredTheme()), []);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setTheme(preferredTheme()));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark";

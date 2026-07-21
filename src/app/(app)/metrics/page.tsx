@@ -152,8 +152,8 @@ export default async function MetricsPage() {
             );
           })()}
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Read it simply: pick the model with a long green "usable output" bar and a long green "cost per
-            event" bar. That one gives you the most good events for the least money.
+            Read it simply: pick the model with a long green &ldquo;usable output&rdquo; bar and a long green &ldquo;cost per
+            event&rdquo; bar. That one gives you the most good events for the least money.
           </div>
         </div>
       )}

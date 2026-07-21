@@ -395,7 +395,6 @@ export async function runExtraction(runId: number) {
     // server to hand the model page content to work from.
     const hasPlaybook = Boolean(source.specialInstructions);
     let sourceText = "";
-    let usedHostedFetch = false;
     let jsonLd: unknown[] = [];
 
     if (hasPlaybook) {
@@ -421,7 +420,6 @@ export async function runExtraction(runId: number) {
       sourceText = page.text;
       jsonLd = page.jsonLd ?? [];
       if (!page.ok || !page.text) {
-        usedHostedFetch = true;
         await emit(
           runId,
           "fetch_issued",

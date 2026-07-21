@@ -56,13 +56,10 @@ type EventRow = {
  * reviewer's own timezone. Showing a browser-local time would silently shift
  * every event for anyone not sitting in Eastern.
  */
-// The community's own timezone (Oberlin is Eastern), never the viewer's.
-let TZ = "America/New_York";
-
 /** Offset (ms) of the zone at a given instant, DST included. */
-function tzOffsetMs(utcMs: number): number {
+function tzOffsetMs(utcMs: number, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: TZ,
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -76,10 +73,10 @@ function tzOffsetMs(utcMs: number): number {
   return asUtc - utcMs;
 }
 
-function toLocalInput(sec: number): string {
+function toLocalInput(sec: number, timeZone: string): string {
   if (!sec) return "";
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -91,14 +88,14 @@ function toLocalInput(sec: number): string {
   return `${g("year")}-${g("month")}-${g("day")}T${(g("hour") === "24" ? "00" : g("hour"))}:${g("minute")}`;
 }
 
-function fromLocalInput(s: string): number {
+function fromLocalInput(s: string, timeZone: string): number {
   if (!s) return 0;
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
   if (!m) return 0;
   const [, y, mo, d, h, mi] = m.map(Number) as unknown as number[];
   // Treat the typed wall time as Oberlin time, then convert to a real instant.
   const guess = Date.UTC(y, mo - 1, d, h, mi);
-  return Math.floor((guess - tzOffsetMs(guess)) / 1000);
+  return Math.floor((guess - tzOffsetMs(guess, timeZone)) / 1000);
 }
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -185,7 +182,7 @@ export function EventReview({
   publishEmail: string;
   timezone: string;
 }) {
-  TZ = timezone || "America/New_York";
+  const communityTimezone = timezone || "America/New_York";
   const router = useRouter();
 
   const [f, setF] = useState({
@@ -471,7 +468,7 @@ export function EventReview({
           </Field>
         </Section>
 
-        <Section title="Schedule" hint={`Times are Oberlin time (${TZ}).`}>
+        <Section title="Schedule" hint={`Times use the community timezone (${communityTimezone}).`}>
           <Field label="Sessions" required missing={m("sessions")}>
             <div className="grid" style={{ gap: 6 }}>
               {sessions.map((s, i) => (
@@ -480,9 +477,9 @@ export function EventReview({
                     className="input"
                     type="datetime-local"
                     style={{ maxWidth: 210 }}
-                    value={toLocalInput(s.startTime)}
+                    value={toLocalInput(s.startTime, communityTimezone)}
                     onChange={(e) =>
-                      setSessions(sessions.map((x, j) => (j === i ? { ...x, startTime: fromLocalInput(e.target.value) } : x)))
+                      setSessions(sessions.map((x, j) => (j === i ? { ...x, startTime: fromLocalInput(e.target.value, communityTimezone) } : x)))
                     }
                   />
                   <span className="muted" style={{ alignSelf: "center" }}>to</span>
@@ -490,9 +487,9 @@ export function EventReview({
                     className="input"
                     type="datetime-local"
                     style={{ maxWidth: 210 }}
-                    value={toLocalInput(s.endTime)}
+                    value={toLocalInput(s.endTime, communityTimezone)}
                     onChange={(e) =>
-                      setSessions(sessions.map((x, j) => (j === i ? { ...x, endTime: fromLocalInput(e.target.value) } : x)))
+                      setSessions(sessions.map((x, j) => (j === i ? { ...x, endTime: fromLocalInput(e.target.value, communityTimezone) } : x)))
                     }
                   />
                   <button type="button" className="btn" onClick={() => setSessions(sessions.filter((_, j) => j !== i))}>

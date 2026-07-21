@@ -14,14 +14,6 @@ const [sources] = await c.query(`
          JSON_EXTRACT(s.extraction_recipe,'$.endpoint_or_feed_url') AS endpoint
   FROM sources s ORDER BY s.id`);
 
-const [runsAgg] = await c.query(`
-  SELECT source_id, run_kind,
-         COUNT(*) n,
-         SUM(status='completed') completed,
-         SUM(status='failed') failed,
-         SUM(prompt_tokens) in_tok, SUM(completion_tokens) out_tok
-  FROM runs GROUP BY source_id, run_kind`);
-
 const [latestExtract] = await c.query(`
   SELECT r1.source_id, r1.status, r1.events_found, r1.events_extracted, r1.events_duplicate, r1.events_invalid
   FROM runs r1
@@ -52,7 +44,6 @@ for (const r of issues) {
 console.log("\n=== PER-SOURCE ===");
 for (const s of sources) {
   const ex = exBySrc.get(s.id);
-  const disc = runsAgg.filter(r=>r.source_id===s.id && r.run_kind==='discovery')[0];
   console.log(`#${s.id} ${s.name}`);
   console.log(`   active=${s.active} discovery=${s.discovery_status} method=${s.method??'-'} endpoint=${(s.endpoint??'-').toString().slice(0,60)}`);
   if (ex) console.log(`   extraction: ${ex.status} found=${ex.events_found} review=${ex.events_extracted} dup=${ex.events_duplicate} issues=${ex.events_invalid}`);

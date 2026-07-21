@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, max, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { events, runs, sources } from "@/db/schema";
 import { cronToValue } from "./schedule";
@@ -29,7 +29,13 @@ export async function reapStaleRuns(nowMs = Date.now()) {
   const stale = await db
     .select({ id: runs.id, sourceId: runs.sourceId, kind: runs.runKind })
     .from(runs)
-    .where(and(eq(runs.status, "running"), lt(runs.deadlineAt, new Date(nowMs))));
+    .where(
+      and(
+        eq(runs.status, "running"),
+        ne(runs.phase, "queued"),
+        lt(runs.deadlineAt, new Date(nowMs)),
+      ),
+    );
 
   const silent = await db
     .select({ id: runs.id, sourceId: runs.sourceId, kind: runs.runKind })
@@ -37,6 +43,7 @@ export async function reapStaleRuns(nowMs = Date.now()) {
     .where(
       and(
         eq(runs.status, "running"),
+        ne(runs.phase, "queued"),
         sql`not exists (select 1 from run_events re where re.run_id = ${runs.id} and re.ts > ${new Date(nowMs - 15 * 60_000)})`,
       ),
     );

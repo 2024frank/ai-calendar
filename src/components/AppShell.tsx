@@ -7,10 +7,10 @@ import { IconButton } from "@/components/ui";
 
 export function AppShell({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  const open = openPath === pathname;
   const [mobile, setMobile] = useState(false);
 
-  useEffect(() => setOpen(false), [pathname]);
   useEffect(() => {
     const query = window.matchMedia("(max-width: 900px)");
     const update = () => setMobile(query.matches);
@@ -23,7 +23,7 @@ export function AppShell({ sidebar, children }: { sidebar: ReactNode; children: 
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        setOpenPath(null);
         window.setTimeout(() => (document.querySelector('[aria-controls="app-sidebar"]') as HTMLElement | null)?.focus(), 0);
       }
     };
@@ -58,12 +58,12 @@ export function AppShell({ sidebar, children }: { sidebar: ReactNode; children: 
           label={open ? "Close navigation" : "Open navigation"}
           icon={open ? "close" : "menu"}
           variant="ghost"
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => setOpenPath(open ? null : pathname)}
           aria-expanded={open}
           aria-controls="app-sidebar"
         />
       </header>
-      <button className="nav-scrim" type="button" aria-label="Close navigation" onClick={() => setOpen(false)} />
+      <button className="nav-scrim" type="button" aria-label="Close navigation" onClick={() => setOpenPath(null)} />
       {accessibleSidebar}
       <main className="main" id="main-content" tabIndex={-1}>{children}</main>
     </div>

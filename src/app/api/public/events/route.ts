@@ -165,7 +165,9 @@ export async function GET(req: Request) {
     },
     {
       headers: {
-        "cache-control": "public, max-age=60",
+        // Shared caches absorb public-feed traffic. A stale response is safe
+        // while one edge request refreshes it in the background.
+        "cache-control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
         "access-control-allow-origin": "*",
       },
     },

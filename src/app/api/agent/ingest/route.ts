@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, runs, sources } from "@/db/schema";
+import { communities, runs, sources } from "@/db/schema";
 import { verifyRunToken } from "@/lib/agentToken";
 import { ingestEvents } from "@/lib/ingest";
 import { emit } from "@/lib/runEvents";
