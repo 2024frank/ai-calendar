@@ -308,7 +308,10 @@ export async function ingestEvents(
     // us its URL; keep it so the reviewer can open what it duplicates.
     const agentDup = (raw as Record<string, unknown>)._agentDuplicateOf;
     if (typeof agentDup === "string" && /^https?:\/\//i.test(agentDup)) {
-      duplicateOfUrl = agentDup;
+      // Post pages are /calendar/post/<numeric id>; a hash there is a dead
+      // link (the agent grabbed the token), so drop it rather than store it.
+      const tail = agentDup.split("/calendar/post/")[1]?.replace(/\/+$/, "");
+      duplicateOfUrl = tail !== undefined && !/^\d+$/.test(tail) ? null : agentDup;
       remoteDup = true;
       dupReason = "the agent matched it to this CommunityHub post";
     }

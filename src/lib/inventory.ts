@@ -28,6 +28,7 @@ export async function fetchDestinationInventory(communityId: number): Promise<In
 
   const cfg = (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) as {
     inventory_url?: string;
+    api_base?: string;
   };
   if (!cfg?.inventory_url) return [];
 
@@ -39,9 +40,16 @@ export async function fetchDestinationInventory(communityId: number): Promise<In
     return posts.map((p) => {
       const sessions = Array.isArray(p.sessions) ? (p.sessions as Record<string, unknown>[]) : [];
       const loc = p.location as Record<string, unknown> | null | undefined;
-      const url = [p.url, p.permalink, p.link, p.post_url]
-        .map((v) => (typeof v === "string" ? v.trim() : ""))
-        .find((v) => /^https?:\/\//i.test(v));
+      // The public post page is /calendar/post/<numeric id> on the hub site.
+      // The posts carry no url field, so build it from the id (never the token).
+      const builtUrl =
+        cfg.api_base && p.id != null && /^\d+$/.test(String(p.id))
+          ? `${cfg.api_base}/calendar/post/${p.id}`
+          : undefined;
+      const url =
+        [p.url, p.permalink, p.link, p.post_url]
+          .map((v) => (typeof v === "string" ? v.trim() : ""))
+          .find((v) => /^https?:\/\//i.test(v)) ?? builtUrl;
       return {
         // CommunityHub calls the title "name".
         title: String(p.name ?? p.title ?? ""),

@@ -480,6 +480,7 @@ export async function runExtraction(runId: number) {
       .limit(1);
     const destCfg = (dest ? (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) : {}) as {
       inventory_url?: string;
+      api_base?: string;
     };
 
     // System prompt: the agentic template, every value filled from this source.
@@ -488,6 +489,7 @@ export async function runExtraction(runId: number) {
       urls: [target, ...secondary],
       calendarSourceName: source.calendarSourceName ?? source.orgName ?? source.name,
       communityHubInventoryUrl: destCfg.inventory_url ?? null,
+      communityHubPostUrlBase: destCfg.api_base ? `${destCfg.api_base}/calendar/post/` : null,
       aiCalendarApprovedUrl: `${appUrl}/api/public/events?status=approved,submitted&community=${community.slug}`,
       ingestUrl: `${appUrl}/api/agent/ingest`,
       runId,

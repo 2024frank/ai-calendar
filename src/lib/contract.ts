@@ -110,6 +110,8 @@ export type AgentPromptContext = {
   calendarSourceName: string;
   /** CommunityHub inventory (pending + approved) to dedupe against. */
   communityHubInventoryUrl?: string | null;
+  /** Public post URL prefix; append the inventory post's numeric id. */
+  communityHubPostUrlBase?: string | null;
   /** This app's own approved events, read-only, to dedupe against. */
   aiCalendarApprovedUrl?: string | null;
   /** Where the agent POSTs its results back to us. */
@@ -160,6 +162,7 @@ ${links}
 c. Keep an item only if it is public, is future or currently ongoing, and is NOT already in either inventory by your judgment in (a).
 d. Build one payload per event (all its dates in sessions, per the contract).
 e. Hand your work back by POSTing it to the ingest endpoint below. Put the events you are KEEPING in "events". Put everything you judged already present in "duplicates", each as {"title": ..., "duplicateOfUrl": <the CommunityHub post url>} for a CommunityHub match, or {"title": ..., "duplicateOfEventId": <the id from the AI-calendar inventory>} for a match in this calendar. Never silently drop a duplicate; report it so a reviewer can confirm your call. Then reply with a one-line summary of the counts.
+${ctx.communityHubPostUrlBase ? `   duplicateOfUrl is EXACTLY ${ctx.communityHubPostUrlBase}<id>, where <id> is the post's numeric "id" field from the CommunityHub inventory. Never use "token" or any hash; a wrong id makes a dead link.` : ""}
    In the sandbox, write your payloads to a file and post it, for example:
      python3 - <<'PY'
      import json, urllib.request
