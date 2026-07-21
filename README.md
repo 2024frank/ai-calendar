@@ -21,10 +21,12 @@ That's the whole loop. Add a source once, and it keeps itself up to date.
 - Images that live behind a bot wall get downloaded by the agent and sent along as data, since the server can't reach them.
 - Duplicates are judged by what the event actually is, not by matching strings, and each one links to the version it matched so a reviewer can check.
 - Events delete themselves once they're over, so the calendar only holds what's coming up.
-- Every event links back to the exact page it came from, so a reviewer can check it against the source.
+- Every event links back to the exact page it came from, and an event whose source link is dead gets dropped, since a fabricated link usually means a fabricated event.
 - Every run is written down step by step (each fetch, each model call, each decision) and shown on a live timeline, so a run never just hangs with no explanation.
 
-It is multi-tenant: one install serves several communities, each with its own sources, calendar, and destination. A person can belong to more than one and switch between them. There is also a metrics view that reports how many events were gathered, how many reposts were caught, and how much a reviewer still had to correct, which is the kind of thing a pilot needs to show whether the approach works.
+It is multi-tenant: one install serves several communities, each with its own sources, calendar, and destination. A person can belong to more than one and switch between them.
+
+An admin can pick which AI model runs extraction for every source (Claude, Gemini, or GPT) and change it in one place. Each run records its real dollar cost, straight from what the API bills, so a metrics view can show total spend, cost per event, and a side-by-side comparison of how each model performs and what it costs. Along with how many events were gathered, how many reposts were caught, and how much a reviewer still had to correct, that is the kind of thing a pilot needs to show whether the approach works and what it costs to run.
 
 ## Words the code uses
 
