@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { events } from "@/db/schema";
@@ -6,6 +6,7 @@ import { getSession } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
 import { refreshPendingFlag } from "@/lib/flags";
 import { recordFieldEdits, type FieldChange } from "@/lib/learning";
+import { learnFromCorrection } from "@/lib/learningAgent";
 import { logActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
@@ -134,6 +135,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   await db.update(events).set(patch).where(eq(events.id, ev.id));
   await recordFieldEdits(ev.id, ev.sourceId, changes, s.uid);
+  // Learn from it in the background: the reviewer should not wait on an agent,
+  // and a lesson failing to be written must never fail their save.
+  after(async () => {
+    for (const ch of changes.filter((c) => (c.oldValue ?? "") !== (c.newValue ?? ""))) {
+      await learnFromCorrection({
+        eventId: ev.id,
+        sourceId: ev.sourceId,
+        communityId: ev.communityId,
+        reviewerId: s.uid,
+        triggerKind: "edit",
+        fieldName: ch.field,
+        beforeValue: ch.oldValue,
+        afterValue: ch.newValue,
+        title: ev.title,
+      }).catch(() => undefined);
+    }
+  });
   // The flag reflects what is saved NOW, so completing an event clears its tag.
   await refreshPendingFlag(ev.id);
   if (changes.length) {

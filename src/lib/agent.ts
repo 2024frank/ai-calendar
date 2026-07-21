@@ -7,6 +7,7 @@ import { runToken } from "./agentToken";
 import { fetchPage } from "./fetchPage";
 import { ingestEvents } from "./ingest";
 import { buildFeedbackBlock } from "./learning";
+import { lessonsFor } from "./learningAgent";
 import { llmComplete } from "./llm";
 import { modelChain } from "./models";
 import { buildSourceInstructions, fillTemplate, type PromptVars } from "./promptTemplate";
@@ -464,10 +465,18 @@ export async function runExtraction(runId: number) {
       );
     }
 
-    const feedback = await buildFeedbackBlock(source.id);
+    // Two kinds of memory. The raw examples of what reviewers changed, and the
+    // written lessons drawn from them, which include lessons learned on OTHER
+    // sources when they were judged to hold everywhere.
+    const [rawFeedback, lessons] = await Promise.all([
+      buildFeedbackBlock(source.id),
+      lessonsFor(source.id),
+    ]);
+    const feedback = [lessons, rawFeedback].filter(Boolean).join("\n\n");
     if (feedback) {
-      await emit(runId, "model_turn", "Applying reviewer feedback from earlier runs", {
+      await emit(runId, "model_turn", "Applying what reviewers have taught us", {
         phase: "feedback",
+        lessons: lessons ? lessons.split("\n").filter((l) => l.startsWith("- ")).length : 0,
       });
     }
 

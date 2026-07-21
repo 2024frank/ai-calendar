@@ -32,7 +32,7 @@ const SOURCE_TYPE = ["web", "email"] as const;
 const SOURCE_KIND = ["original_org", "aggregator"] as const;
 const DISCOVERY_STATUS = ["pending", "discovering", "ready", "failed", "stale"] as const;
 const DESTINATION_TYPE = ["ai_calendar", "communityhub", "webhook", "ical"] as const;
-const RUN_KIND = ["extraction", "discovery", "correction"] as const;
+const RUN_KIND = ["extraction", "discovery", "correction", "learning"] as const;
 const RUN_STATUS = ["running", "completed", "failed", "stopped"] as const;
 const RUN_CONTROL = ["run", "pause", "stop"] as const;
 const EVENT_STATUS = [
@@ -512,4 +512,49 @@ export const activityLog = mysqlTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("idx_activity_created").on(t.createdAt)],
+);
+
+/* ------------------------------------------------------------------ *
+ * What the reviewers taught us
+ * ------------------------------------------------------------------ */
+const LEARNING_TRIGGER = ["rejection", "edit"] as const;
+const LEARNING_SCOPE = ["source", "community", "global"] as const;
+
+/**
+ * One lesson, written by an agent from something a person actually did.
+ *
+ * A reviewer correcting a field or rejecting an event is the only signal in
+ * this system that comes from a human judgement about a real event. Each one
+ * is turned into a single instruction the extraction agents are given on their
+ * next run, and kept here in full so the whole set can be exported later as
+ * training data for a local model.
+ */
+export const learnings = mysqlTable(
+  "learnings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    communityId: int("community_id"),
+    sourceId: int("source_id"),
+    eventId: int("event_id"),
+    triggerKind: mysqlEnum("trigger_kind", LEARNING_TRIGGER).notNull(),
+    fieldName: varchar("field_name", { length: 60 }),
+    beforeValue: text("before_value"),
+    afterValue: text("after_value"),
+    reason: text("reason"),
+    /** The instruction other agents are given, in one sentence. */
+    lesson: text("lesson").notNull(),
+    /** How widely it applies: this source, this community, or everywhere. */
+    scope: mysqlEnum("scope", LEARNING_SCOPE).notNull().default("source"),
+    status: mysqlEnum("status", RULE_STATUS).notNull().default("active"),
+    /** How many runs have been given this lesson, so its worth can be judged. */
+    timesServed: int("times_served").notNull().default(0),
+    reviewerId: int("reviewer_id"),
+    model: varchar("model", { length: 80 }),
+    createdAt: timestamp("created_at", { fsp: 3 }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_learn_source").on(t.sourceId),
+    index("idx_learn_community").on(t.communityId),
+    index("idx_learn_status").on(t.status),
+  ],
 );

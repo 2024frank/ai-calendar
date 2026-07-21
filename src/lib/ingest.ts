@@ -85,6 +85,59 @@ async function deadSourceLinks(urls: string[]): Promise<Set<string>> {
   return dead;
 }
 
+
+/**
+ * The nearest page above a dead link that actually exists.
+ *
+ * A link that 404s used to cost the event its place in the queue. But the event
+ * is often real and only its URL was guessed, so throwing it away loses
+ * something true because of something trivial. Walking up the path lands on the
+ * listing the event sits on, which a reviewer can read and find it in. Better a
+ * page that works and needs a moment's looking than a link straight into
+ * nothing.
+ *
+ * Returns null when nothing up the path answers, which is the case where the
+ * whole thing really was invented.
+ */
+async function nearestLiveAncestor(url: string, fallback: string | null): Promise<string | null> {
+  const headers = {
+    "user-agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+  };
+  const alive = async (candidate: string) => {
+    try {
+      const r = await fetch(candidate, {
+        redirect: "follow",
+        signal: AbortSignal.timeout(9000),
+        headers,
+      });
+      // Anything that is not a definite "gone" counts: a bot wall still means
+      // the page is there for a person with a browser.
+      return r.status !== 404 && r.status !== 410;
+    } catch {
+      return false;
+    }
+  };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return fallback;
+  }
+
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  // Climb one segment at a time, nearest first, so the reviewer lands as close
+  // to the event as still exists.
+  for (let depth = segments.length - 1; depth > 0; depth--) {
+    const candidate = `${parsed.origin}/${segments.slice(0, depth).join("/")}/`;
+    if (await alive(candidate)) return candidate;
+  }
+  if (await alive(parsed.origin)) return `${parsed.origin}/`;
+  return fallback;
+}
+
 export type IngestCounts = {
   found: number;
   inserted: number;
@@ -168,7 +221,7 @@ export async function ingestEvents(
     rawEvents.flatMap((r) => [r.calendarSourceUrl, r.website].filter((u): u is string => typeof u === "string")),
   );
   if (deadLinks.size) {
-    await emit(runId, "fetch_result", `Source links checked; ${deadLinks.size} did not exist (dropped)`, {
+    await emit(runId, "fetch_result", `Source links checked; ${deadLinks.size} did not exist (repointed upward)`, {
       dead: deadLinks.size,
     });
   }
@@ -322,10 +375,28 @@ export async function ingestEvents(
     e.description = stripDateSentences(e.description) ?? e.description;
     e.extendedDescription = stripDateSentences(e.extendedDescription);
 
-    const issues = validateEvent(e);
-    if ((e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) || (e.website && deadLinks.has(e.website))) {
-      issues.push("source_link_dead");
+    // A dead link is repointed at the nearest page above it that still exists,
+    // so the reviewer gets somewhere they can find the event rather than a 404.
+    // Only an event with nowhere at all to point is treated as fabricated.
+    if (e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) {
+      const rescued = await nearestLiveAncestor(e.calendarSourceUrl, source.url ?? null);
+      if (rescued) {
+        await emit(runId, "fetch_result", `Dead link repointed at ${rescued}: ${e.title}`, {
+          was: e.calendarSourceUrl,
+          now: rescued,
+        });
+        e.calendarSourceUrl = rescued;
+      }
     }
+    if (e.website && deadLinks.has(e.website)) {
+      e.website = (await nearestLiveAncestor(e.website, source.orgWebsite ?? source.url ?? null)) ?? e.website;
+    }
+
+    const issues = validateEvent(e);
+    const stillDead =
+      (e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) ||
+      (e.website && deadLinks.has(e.website));
+    if (stillDead) issues.push("source_link_dead");
     const dedupKey = computeDedupKey(e);
     const startTimes = e.sessions.map((s) => s.startTime);
 
