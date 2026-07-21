@@ -62,7 +62,7 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
             {source.active ? <Badge kind="good">active</Badge> : <Badge kind="neutral">off</Badge>}
           </div>
         </div>
-        <RunActions sourceId={source.id} />
+        <RunActions sourceId={source.id} discoveryStatus={source.discoveryStatus} />
       </div>
 
       <div className="card grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>

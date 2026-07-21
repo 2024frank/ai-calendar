@@ -16,6 +16,19 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const source = await getSource(s, Number(id));
   if (!source) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+  // No extraction until Discovery has produced a recipe for this source.
+  if (source.discoveryStatus !== "ready" && source.discoveryStatus !== "stale") {
+    return NextResponse.json(
+      {
+        error:
+          source.discoveryStatus === "discovering"
+            ? "Discovery is still running. Wait for it to finish before running."
+            : "Run discovery first so the agent learns this source.",
+      },
+      { status: 409 },
+    );
+  }
+
   const runId = await startRun(source.id, source.communityId, "extraction");
   after(async () => {
     await runExtraction(runId);
