@@ -101,6 +101,7 @@ WRITING
 WHAT TO INCLUDE
 - Only public events that are future or currently ongoing: at least one session must not have ended.
 - ONLY THE NEXT 14 DAYS: extract events whose first upcoming session starts within 14 days of today (plus anything already ongoing). Skip everything further out; the source is re-checked on schedule, so later events arrive when their date approaches. A small batch done perfectly beats a year of events done sloppily.
+- SPARSE-SOURCE EXCEPTION: if the source has only a handful of upcoming items in total (about ten or fewer), take ALL of them regardless of the window. The 14-day cap exists to keep huge calendars manageable, never to hide a small organization's lone annual event.
 - PUBLIC means a member of the general public could attend: concerts, plays, lectures, exhibitions, festivals, open houses, athletics. Skip internal and members-only items: student-only or staff-only programming, residence and orientation meetings, administrative deadlines, department meetings. When the source names its audience, trust it.
 
 WHAT THE SERVER DOES, SO YOU DO NOT
