@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { events } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
+import { refreshPendingFlag } from "@/lib/flags";
 import { recordFieldEdits, type FieldChange } from "@/lib/learning";
 
 export const runtime = "nodejs";
@@ -124,10 +125,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
-  if (!Object.keys(patch).length) return NextResponse.json({ ok: true, changed: 0 });
+  if (!Object.keys(patch).length) {
+    // Even a no-op save refreshes the stale "needs fields" flag.
+    await refreshPendingFlag(ev.id);
+    return NextResponse.json({ ok: true, changed: 0 });
+  }
 
   await db.update(events).set(patch).where(eq(events.id, ev.id));
   await recordFieldEdits(ev.id, ev.sourceId, changes, s.uid);
+  // The flag reflects what is saved NOW, so completing an event clears its tag.
+  await refreshPendingFlag(ev.id);
 
   return NextResponse.json({ ok: true, changed: changes.length });
 }

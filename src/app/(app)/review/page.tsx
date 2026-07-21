@@ -15,6 +15,41 @@ const TABS = [
   { key: "submitted", label: "Submitted" },
 ] as const;
 
+// Short names for the queue badge, so a reviewer sees WHAT is needed at a glance.
+const SHORT_ISSUE: Record<string, string> = {
+  title_missing: "title",
+  title_too_long: "shorter title",
+  description_too_short: "description",
+  description_too_long: "shorter description",
+  sponsors_missing: "sponsor",
+  image_missing: "image",
+  website_missing: "website",
+  contact_email_missing: "contact email",
+  phone_missing: "phone",
+  post_type_missing: "category",
+  post_type_invalid: "category",
+  sessions_missing: "dates",
+  session_start_invalid: "date",
+  session_end_before_start: "end time",
+  location_required: "location",
+  url_link_required: "online link",
+  missing_registration_required_text: '"Registration required." in description',
+  long_description_contains_url: "URL out of long description",
+  long_description_ambiguous_location: "venue name in long description",
+};
+
+function needsList(reason: string | null): string | null {
+  if (!reason || !reason.startsWith("Missing before publish:")) return null;
+  const names = reason
+    .slice("Missing before publish:".length)
+    .split(",")
+    .map((c) => SHORT_ISSUE[c.trim()] ?? c.trim())
+    .filter(Boolean);
+  if (!names.length) return null;
+  const shown = names.slice(0, 3).join(", ");
+  return names.length > 3 ? `${shown} +${names.length - 3}` : shown;
+}
+
 function firstSessionDate(sessions: unknown): string {
   if (!Array.isArray(sessions) || sessions.length === 0) return "—";
   const start = (sessions[0] as { startTime?: number })?.startTime;
@@ -125,9 +160,9 @@ export default async function ReviewPage({
                   <Link href={`/review/${e.id}`} style={{ color: "var(--accent)", fontWeight: 600 }}>
                     {e.title ?? "(untitled)"}
                   </Link>
-                  {tab === "pending" && e.rejectionReason && (
+                  {tab === "pending" && needsList(e.rejectionReason) && (
                     <div className="badge warn" style={{ marginTop: 4 }}>
-                      needs fields
+                      needs: {needsList(e.rejectionReason)}
                     </div>
                   )}
                 </td>
