@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, runs, sources } from "@/db/schema";
 import { HARD_ISSUES } from "./ingest";
@@ -57,23 +57,20 @@ async function correctOne(
   const missing = String(ev.rejectionReason ?? "").replace(/^[^:]*:\s*/, "");
   const pageUrl = ev.calendarSourceUrl || ev.website || source.url || "";
 
-  const prompt = `An event we extracted was set aside because it is INCOMPLETE. Find the missing information on the source and return it. Do not invent anything.
+  // Keep the context TINY. This is a one-page lookup for a couple of fields, so
+  // sending the source's whole extraction playbook (which can be many KB) with
+  // every event is pure token waste. Only a short excerpt goes along, and only
+  // when the site needs a special trick to read at all.
+  const needsTrick = /curl|http1\.1|user agent|blocked|cloudflare|403/i.test(instructions);
+  const hint = needsTrick ? `\nHOW TO READ THIS SITE (excerpt):\n${instructions.slice(0, 700)}\n` : "";
+
+  const prompt = `One event is missing a field. Open its page, find the field, return it. Invent nothing.
 
 EVENT: ${ev.title}
-WHAT IS MISSING: ${missing}
-ITS OWN PAGE: ${pageUrl}
-WHAT WE ALREADY HAVE: ${JSON.stringify({
-    description: ev.description,
-    location: ev.location,
-    contactEmail: ev.contactEmail,
-    phone: ev.phone,
-    website: ev.website,
-  })}
-
-HOW TO READ THIS SOURCE (the same instructions the extractor uses):
-${instructions || "(no special instructions; use the page directly)"}
-
-Fetch that one page and return ONLY the missing fields, filled from the real page. For a missing image, give the event's own photo URL in imageCdnUrl, or its base64 in imageB64 if the host blocks direct download. If a field genuinely is not on the page, leave it null and set found=false. Never use a logo or a shared site image as an event photo. Be quick: this is a single-page lookup, not a crawl.`;
+MISSING: ${missing}
+PAGE: ${pageUrl}
+${hint}
+Return only the missing fields from that page. For a missing image use the event's own photo in imageCdnUrl, or imageB64 if the host blocks downloads; never a logo or a shared site image. If a field truly is not on the page, leave it null and set found=false. One page, no crawling.`;
 
   let patch: Record<string, unknown> = {};
   try {
@@ -166,6 +163,88 @@ Fetch that one page and return ONLY the missing fields, filled from the real pag
     .where(eq(events.id, ev.id));
   await emit(runId, "queue_outcome", `Corrected and re-queued: ${ev.title}`, { eventId: ev.id });
   return true;
+}
+
+export type NextResult = {
+  /** Nothing left to do. */
+  done: boolean;
+  /** True when the event just handled was completed and re-queued. */
+  fixed: boolean;
+  title: string | null;
+  /** Auto-rejected events still waiting after this one. */
+  remaining: number;
+};
+
+/**
+ * Fix exactly ONE auto-rejected event, then return. The caller keeps calling
+ * until `done`.
+ *
+ * Doing it one at a time is deliberate: each call carries only that single
+ * event's context, so the prompt stays small and cheap, and no invocation can
+ * run long enough to be killed by the platform's request limit. Every fixed
+ * event lands in the review queue immediately, so progress is visible as it
+ * happens instead of at the end.
+ */
+export async function correctNextEvent(runId: number, sourceId: number | null = null): Promise<NextResult> {
+  // Skip ones already attempted, so a page that genuinely lacks the field can
+  // never trap the loop on the same event forever.
+  const untried = sql`(${events.rejectionReason} is null or ${events.rejectionReason} not like '%[tried]%')`;
+  const where = sourceId
+    ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
+    : and(eq(events.status, "auto_rejected"), isNotNull(events.sourceId), untried);
+
+  const [ev] = await db.select().from(events).where(where).limit(1);
+  if (!ev) return { done: true, fixed: false, title: null, remaining: 0 };
+
+  const [src] = await db.select().from(sources).where(eq(sources.id, ev.sourceId!)).limit(1);
+  if (!src) return { done: true, fixed: false, title: null, remaining: 0 };
+  const [community] = await db
+    .select()
+    .from(communities)
+    .where(eq(communities.id, src.communityId))
+    .limit(1);
+
+  const vars: PromptVars = {
+    source_name: src.name,
+    urls: [src.url ?? ""],
+    today: new Date().toLocaleDateString("en-CA", { timeZone: community?.timezone ?? "America/New_York" }),
+    timezone: community?.timezone ?? "America/New_York",
+    org_name: src.orgName,
+    org_website: src.orgWebsite,
+    contact_email: src.orgContactEmail,
+    phone: src.orgPhone,
+    lookahead_days: String(src.lookaheadDays ?? 14),
+  };
+  const instructions = fillTemplate(src.specialInstructions ?? "", vars);
+  const models = await modelChain();
+
+  let fixed = false;
+  try {
+    fixed = await correctOne(runId, ev, src, instructions, models);
+  } catch {
+    fixed = false;
+  }
+
+  // If it could not be completed, park it so the loop moves on instead of
+  // retrying the same event forever.
+  if (!fixed) {
+    await db
+      .update(events)
+      .set({ rejectionReason: `${ev.rejectionReason ?? "Auto-rejected (incomplete)"} [tried]` })
+      .where(eq(events.id, ev.id));
+  }
+
+  // What is still worth attempting, so the caller knows when to stop.
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(events)
+    .where(
+      sourceId
+        ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
+        : and(eq(events.status, "auto_rejected"), untried),
+    );
+  const remaining = Number(row?.n ?? 0);
+  return { done: remaining === 0, fixed, title: ev.title, remaining };
 }
 
 /**
