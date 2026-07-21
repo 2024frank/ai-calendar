@@ -438,8 +438,6 @@ export function validateEvent(e: ExtractedEvent): string[] {
     issues.push("location_required");
   if ((e.locationType === "on" || e.locationType === "bo") && !e.urlLink)
     issues.push("url_link_required");
-  if (e.registrationUrl && !/Registration required\./.test(e.description))
-    issues.push("missing_registration_required_text");
   if (e.description && /https?:\/\//i.test(e.description)) issues.push("description_contains_url");
   {
     // A description that is just the title restated (with or without junk
