@@ -78,6 +78,13 @@ function explainPublishFailure(status: number, body: string): string {
     return "CommunityHub refused the request. The endpoint credentials for this community need checking.";
   }
   if (status === 413) return "CommunityHub refused this as too large, most likely the image.";
+  if (/failed to download image/i.test(body)) {
+    return (
+      "CommunityHub could not download this event's picture from the site it lives on. " +
+      "We tried again with the picture served from here and that did not work either, " +
+      "so the image needs replacing before this can publish."
+    );
+  }
   if (status >= 500) {
     return `CommunityHub had a server error (${status}) and did not accept this. It is worth trying again shortly. ${body.replace(/<[^>]*>/g, " ").slice(0, 160)}`;
   }
@@ -95,9 +102,49 @@ const permanentFailure = (status: number) => status === 400 || status === 401 ||
  * post even though the response never reached us. Retrying blindly is how you
  * get a duplicate public post.
  */
+/**
+ * Pull an image onto our own domain.
+ *
+ * CommunityHub downloads the picture from whatever URL we hand it, and some
+ * hosts refuse its server even when they serve everyone else. Oberlin's file
+ * host is one: the image fetches fine from here and 500s for them. Rather than
+ * lose the event over it, the bytes are stored on the event and the URL is
+ * swapped for one on this app, which CommunityHub can always reach.
+ */
+async function rehostImage(eventId: number, url: string, appUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+    });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    // Sanity-check it really is an image before we serve it as one.
+    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50;
+    const isGif = buf[0] === 0x47 && buf[1] === 0x49;
+    const isWebp = buf.subarray(8, 12).toString() === "WEBP";
+    if (!buf.length || !(isJpeg || isPng || isGif || isWebp)) return null;
+    await db
+      .update(events)
+      .set({ imageData: buf.toString("base64") })
+      .where(eq(events.id, eventId));
+    return `${appUrl}/api/events/${eventId}/image.jpg`;
+  } catch {
+    return null;
+  }
+}
+
 export async function publishEvent(
   eventId: number,
   finalStatus: "approved" | "submitted" | "published" = "submitted",
+  /** Set once we have already swapped the image, so this cannot loop. */
+  imageRehosted = false,
 ): Promise<PublishResult> {
   const [ev] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!ev) return { ok: false, state: "failed", message: "Event not found." };
@@ -206,6 +253,17 @@ export async function publishEvent(
       .where(
         and(eq(publishSubmissions.eventId, ev.id), eq(publishSubmissions.payloadHash, payloadHash)),
       );
+    // CommunityHub could not fetch the picture from its original host. Put the
+    // image on our own domain and send it again; this is the whole failure for
+    // an event that is otherwise ready.
+    if (!imageRehosted && /failed to download image/i.test(body) && ev.imageCdnUrl) {
+      const hosted = await rehostImage(ev.id, ev.imageCdnUrl, appUrl);
+      if (hosted) {
+        await db.update(events).set({ imageCdnUrl: hosted }).where(eq(events.id, ev.id));
+        return publishEvent(eventId, finalStatus, true);
+      }
+    }
+
     return {
       ok: false,
       state: permanent ? "failed" : "unknown",
