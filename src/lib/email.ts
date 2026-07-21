@@ -10,18 +10,49 @@ function esc(s: string) {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * As plain as an email gets: no logo, no heading, no button, no colours. Just a
- * couple of sentences and a text link, like a person typed it.
- */
 function shell(opts: { title?: string; intro?: string; bodyHtml?: string; ctaLabel?: string; ctaUrl?: string }) {
   const { intro, bodyHtml, ctaLabel, ctaUrl } = opts;
-  const link = ctaLabel && ctaUrl ? `<p style="margin:12px 0 0"><a href="${ctaUrl}">${esc(ctaLabel)}</a></p>` : "";
-  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111">
-${intro ? `<p style="margin:0">${intro}</p>` : ""}
-${bodyHtml ?? ""}
-${link}
-</div>`;
+  const title = opts.title ?? "AI Calendar";
+  const button =
+    ctaLabel && ctaUrl
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0">
+          <tr><td style="background:#34724a;border-radius:8px">
+            <a href="${esc(ctaUrl)}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-size:14px;font-weight:700;line-height:1;text-decoration:none">${esc(ctaLabel)}</a>
+          </td></tr>
+        </table>`
+      : "";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${esc(title)}</title>
+</head>
+<body style="margin:0;background:#f5f7f4;color:#17231b">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7f4">
+    <tr><td align="center" style="padding:32px 16px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
+        <tr><td style="padding:0 2px 14px">
+          <span style="color:#34724a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:17px;font-weight:800;letter-spacing:-0.02em">CommunityHub</span>
+          <span style="color:#667268;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">&nbsp;&nbsp;AI Calendar</span>
+        </td></tr>
+        <tr><td style="background:#ffffff;border:1px solid #dfe6e1;border-top:3px solid #34724a;border-radius:12px;padding:30px">
+          <h1 style="margin:0 0 12px;color:#17231b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:22px;font-weight:750;letter-spacing:-0.02em;line-height:1.25">${esc(title)}</h1>
+          <div style="color:#34443a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6">
+            ${intro ? `<p style="margin:0 0 18px">${intro}</p>` : ""}
+            ${bodyHtml ?? ""}
+            ${button}
+          </div>
+        </td></tr>
+        <tr><td style="padding:14px 2px 0;color:#7a867d;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:1.5">
+          Sent by AI Calendar from CommunityHub.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
 }
 
 // Friendly display name shown as the sender, whichever transport delivers.
@@ -77,6 +108,7 @@ async function send(to: string, subject: string, html: string): Promise<{ delive
 
 export async function sendMagicLink(email: string, link: string) {
   const html = shell({
+    title: "Sign in to AI Calendar",
     intro: "Your sign-in link for AI Calendar. It expires in 15 minutes.",
     ctaLabel: "Sign in",
     ctaUrl: link,
@@ -88,6 +120,7 @@ export async function sendMagicLink(email: string, link: string) {
 export async function sendPasswordSetup(email: string, link: string, isReset: boolean) {
   const title = isReset ? "Reset your password" : "Set your password";
   const html = shell({
+    title,
     intro: `Use this link to ${isReset ? "choose a new password" : "set your password"} for AI Calendar. It expires in 24 hours.`,
     ctaLabel: title,
     ctaUrl: link,
@@ -99,6 +132,7 @@ export async function sendPasswordSetup(email: string, link: string, isReset: bo
 export async function sendInvite(email: string, link: string, communityName: string) {
   const safeName = esc(communityName);
   const html = shell({
+    title: "Welcome to AI Calendar",
     intro: `You've been added to ${safeName} on AI Calendar. Sign in below to get started.`,
     ctaLabel: "Sign in",
     ctaUrl: link,
@@ -126,17 +160,17 @@ export async function sendNewEventsDigest(
     .slice(0, 20)
     .map(
       (e) => `<tr>
-        <td style="padding:6px 0;font-size:14px;color:#222">${esc(e.title)}</td>
-        <td style="padding:6px 0;font-size:13px;color:#888;text-align:right;white-space:nowrap">${esc(e.when)}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #edf1ee;font-size:14px;color:#17231b">${esc(e.title)}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #edf1ee;font-size:13px;color:#667268;text-align:right;white-space:nowrap">${esc(e.when)}</td>
       </tr>`,
     )
     .join("");
-  const more = n > 20 ? `<p style="margin:8px 0 0;color:#888;font-size:13px">and ${n - 20} more.</p>` : "";
+  const more = n > 20 ? `<p style="margin:10px 0 0;color:#667268;font-size:13px">and ${n - 20} more.</p>` : "";
 
   const html = shell({
     title: `${n} new event${n === 1 ? "" : "s"} to review`,
     intro: `${esc(sourceName)} brought in ${n} new event${n === 1 ? "" : "s"} for ${esc(communityName)}, waiting in your review queue.`,
-    bodyHtml: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px">${rows}</table>${more}`,
+    bodyHtml: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 0">${rows}</table>${more}`,
     ctaLabel: "Review events",
     ctaUrl: reviewUrl
   });

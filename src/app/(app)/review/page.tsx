@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { duplicatesQueue, eventsForTab, listSources, reviewQueue } from "@/lib/data";
 import { EventStatus, fmtDate } from "@/components/bits";
 import { ButtonLink, Card, EmptyState, PageHeader, StatusBadge, TableShell } from "@/components/ui";
 import { EVENT_TYPES } from "@/lib/taxonomy";
 import { ReviewFilters } from "./ReviewFilters";
+import { FixAllButton } from "./FixAllButton";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +83,10 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
       </nav>
 
       <ReviewFilters sources={sources.map((source) => ({ id: source.id, name: source.name }))} />
+
+      {tab === "rejected" && isAdmin(session) && (
+        <FixAllButton initialCount={rows.filter((r) => r.status === "auto_rejected").length} />
+      )}
 
       <Card className="surface--flush">
         <div className="section-header" style={{ padding: "18px 20px 4px" }}>
