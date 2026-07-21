@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, runs, sources } from "@/db/schema";
 import { HARD_ISSUES } from "./ingest";
@@ -36,6 +36,24 @@ const CORRECTION_SCHEMA = {
 
 type SourceRow = typeof sources.$inferSelect;
 type EventRow = typeof events.$inferSelect;
+
+/**
+ * True when some other event already carries this picture.
+ *
+ * A listing page's og:image is usually the venue, not the event: Warner Concert
+ * Hall's interior, Finney Chapel from the lawn. Taking it satisfied the
+ * "needs an image" check while putting the same photograph on thirteen
+ * different concerts. One event's photo belongs to one event, so a picture that
+ * is already spoken for is not this event's picture.
+ */
+async function imageAlreadyUsed(url: string, exceptEventId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: events.id })
+    .from(events)
+    .where(and(eq(events.imageCdnUrl, url), ne(events.id, exceptEventId)))
+    .limit(1);
+  return Boolean(row);
+}
 
 /** Try to complete one auto-rejected event. Returns true when it was re-queued. */
 async function correctOne(
@@ -89,7 +107,13 @@ Return only the missing fields from that page. For a missing image use the event
   if (!imageCdnUrl && !imageData && agentB64 && agentB64.length > 100) {
     imageData = agentB64.replace(/\s+/g, "");
     imageCdnUrl = null;
-  } else if (!imageCdnUrl && !imageData && agentImg && !isGenericImage(agentImg)) {
+  } else if (
+    !imageCdnUrl &&
+    !imageData &&
+    agentImg &&
+    !isGenericImage(agentImg) &&
+    !(await imageAlreadyUsed(agentImg, ev.id))
+  ) {
     if (hasImageExtension(agentImg)) imageCdnUrl = agentImg;
     else {
       const buf = await mergePosterImages([agentImg]).catch(() => null);
@@ -100,7 +124,11 @@ Return only the missing fields from that page. For a missing image use the event
   if (!imageCdnUrl && !imageData && pageUrl) {
     try {
       const page = await fetchPage(pageUrl, 10_000);
-      if (page.image && !isGenericImage(page.image)) imageCdnUrl = page.image;
+      // This is the venue-photo trap: a listing page's og:image is shared by
+      // every event on it, so it only counts if nothing else is using it.
+      if (page.image && !isGenericImage(page.image) && !(await imageAlreadyUsed(page.image, ev.id))) {
+        imageCdnUrl = page.image;
+      }
     } catch {
       /* leave missing */
     }
