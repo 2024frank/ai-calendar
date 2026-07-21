@@ -1,8 +1,7 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { sources } from "@/db/schema";
-import { runDiscovery, startRun } from "@/lib/agent";
 import { getSession } from "@/lib/auth";
 import { listSources } from "@/lib/data";
 import { valueToCron } from "@/lib/schedule";
@@ -70,23 +69,14 @@ export async function POST(req: Request) {
     sourceType,
     url: url || null,
     specialInstructions,
-    discoveryStatus: "pending",
+    // The setup wizard's research step replaces the Discovery Agent: pasted
+    // instructions make the source immediately runnable.
+    discoveryStatus: specialInstructions ? "ready" : "pending",
     startUrls: urls.length ? urls : null,
     scheduleCron,
   });
 
   const id = (res as { insertId: number }).insertId;
 
-  // A new source immediately gets probed by the Discovery Agent.
-  let runId: number | null = null;
-  if (sourceType === "web" && url) {
-    await db.update(sources).set({ discoveryStatus: "discovering" }).where(eq(sources.id, id));
-    runId = await startRun(id, communityId, "discovery");
-    const rid = runId;
-    after(async () => {
-      await runDiscovery(rid);
-    });
-  }
-
-  return NextResponse.json({ ok: true, id, slug, runId });
+  return NextResponse.json({ ok: true, id, slug });
 }

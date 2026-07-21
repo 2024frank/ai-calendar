@@ -29,8 +29,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if ("schedule" in body) patch.scheduleCron = valueToCron(String(body.schedule));
   if ("specialInstructions" in body) {
     patch.specialInstructions = body.specialInstructions
-      ? String(body.specialInstructions).slice(0, 4000)
+      ? String(body.specialInstructions).slice(0, 32000)
       : null;
+    // Saved instructions are the extraction recipe now (the wizard's research
+    // step replaced the Discovery Agent), so the source becomes runnable.
+    if (patch.specialInstructions) patch.discoveryStatus = "ready";
   }
   if ("name" in body && String(body.name).trim()) {
     patch.name = String(body.name).trim().slice(0, 200);

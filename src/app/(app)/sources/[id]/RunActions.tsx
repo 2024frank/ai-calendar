@@ -14,8 +14,8 @@ export function RunActions({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // A source cannot extract until Discovery has produced a recipe. While it is
-  // still discovering (or never has), running makes no sense.
+  // A source cannot extract until it has instructions (saved by the setup
+  // wizard's research step, or edited on this page).
   const canRun = discoveryStatus === "ready" || discoveryStatus === "stale";
   const discovering = discoveryStatus === "discovering";
 
@@ -48,17 +48,12 @@ export function RunActions({
         >
           {busy === "run" ? "Starting…" : "Run now"}
         </button>
-        <button className="btn" disabled={!!busy || discovering} onClick={() => go("discover")}>
-          {busy === "discover" ? "Starting…" : "Re-discover"}
-        </button>
       </div>
       {!canRun && !error && (
         <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
           {discovering
-            ? "Discovery is still running. Run now unlocks when it finishes."
-            : discoveryStatus === "failed"
-              ? "Discovery failed. Re-discover before running."
-              : "Run discovery first so the agent learns this source."}
+            ? "A discovery run is still open. It will unlock shortly."
+            : "Save extraction instructions below (Edit source) to unlock Run now."}
         </div>
       )}
       {error && (
