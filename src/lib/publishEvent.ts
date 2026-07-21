@@ -42,11 +42,12 @@ export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string)
   if (ev.locationType === "ph2" || ev.locationType === "bo") {
     payload.location = ev.location ?? "";
     // CommunityHub's Location entity requires a string place id, and its
-    // PostManager passes whatever we send straight into the setter. Sending no
-    // field at all meant it received null and its server threw a 500 on every
-    // event that had an address. Their own published posts carry "" here, so
-    // that is what a post with no Google place lookup is supposed to look like.
-    payload.googlePlaceId = "";
+    // PostManager passes what we send straight into the setter. Sending no such
+    // field meant it received null and threw a 500 on every event that had an
+    // address. The API's name for it is placeId (the old app sent placeId: ""
+    // on every one of its successful posts, and their docs list it), and an
+    // empty string is what a post with no Google lookup carries.
+    payload.placeId = "";
   }
   if (ev.locationType === "on" || ev.locationType === "bo") payload.urlLink = ev.urlLink ?? "";
   if (ev.placeName) payload.placeName = ev.placeName;
