@@ -223,6 +223,14 @@ function UserCard({
   // the switcher, so this is where you enable "switch between communities".
   const canAssignCommunities = isPlatformAdmin && role !== "platform_admin";
 
+  // What this person can actually reach. The row used to print the home
+  // community alone, so somebody with access to both still read as "Oberlin".
+  // Platform admins reach every community regardless of what is recorded.
+  const access =
+    user.role === "platform_admin"
+      ? "every community"
+      : user.communityIds.map((id) => communityName.get(id) ?? id).join(", ");
+
   async function save() {
     if (canAssignCommunities && communityIds.length === 0) {
       return setMsg("Pick at least one community.");
@@ -266,7 +274,7 @@ function UserCard({
           <div style={{ fontWeight: 600 }}>{user.email}</div>
           <div className="muted" style={{ fontSize: 13 }}>
             {(user.name ? user.name + " · " : "") + user.role.replace(/_/g, " ")}
-            {user.communityId ? ` · ${communityName.get(user.communityId) ?? user.communityId}` : ""}
+            {access ? ` · ${access}` : ""}
             {user.status !== "active" ? ` · ${user.status}` : ""}
           </div>
         </div>
