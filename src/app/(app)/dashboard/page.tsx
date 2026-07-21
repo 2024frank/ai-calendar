@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { dashboardStats, listCommunities } from "@/lib/data";
 import { fmtDate, RunStatus } from "@/components/bits";
 
@@ -17,6 +17,7 @@ function Kpi({ label, value, href }: { label: string; value: number; href?: stri
 
 export default async function DashboardPage() {
   const s = await requireUser();
+  const admin = isAdmin(s);
   const stats = await dashboardStats(s);
   const comms = s.role === "platform_admin" ? await listCommunities() : [];
 
@@ -25,15 +26,19 @@ export default async function DashboardPage() {
       <div className="spread">
         <div>
           <div className="page-title">Dashboard</div>
-          <div className="muted">Ingestion, review, and publishing at a glance.</div>
+          <div className="muted">
+            {admin
+              ? "Ingestion, review, and publishing at a glance."
+              : "Your review queue at a glance."}
+          </div>
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <Kpi label="Active sources" value={stats.activeSources} href="/sources" />
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${admin ? 4 : 3}, 1fr)` }}>
+        {admin && <Kpi label="Active sources" value={stats.activeSources} href="/sources" />}
         <Kpi label="Pending review" value={stats.pending} href="/review" />
-        <Kpi label="Approved" value={stats.approved} />
-        <Kpi label="Published" value={stats.submitted} />
+        <Kpi label="Approved" value={stats.approved} href="/review?tab=approved" />
+        <Kpi label="Published" value={stats.submitted} href="/review?tab=submitted" />
       </div>
 
       {comms.length > 0 && (
@@ -67,6 +72,7 @@ export default async function DashboardPage() {
         </div>
       )}
 
+      {admin && (
       <div className="card">
         <h3 style={{ marginBottom: 12 }}>Recent runs</h3>
         {stats.recentRuns.length === 0 ? (
@@ -104,6 +110,7 @@ export default async function DashboardPage() {
           </table>
         )}
       </div>
+      )}
     </div>
   );
 }
