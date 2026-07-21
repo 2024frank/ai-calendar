@@ -1,8 +1,14 @@
 # AI Calendar
 
-Small community orgs post their events on their own websites and nowhere else. This app reads those sites and puts the events on one shared community calendar, with a person checking each one before it goes live.
+In a town like Oberlin, there is always something happening: a concert at the Conservatory, a show at the Apollo, storytime at the library, a workshop at FAVA. The problem is that no one place lists all of it. Every organization keeps its own calendar, on its own website, in its own format, and almost none of them cross-post. To actually know what is going on that week, you would have to check a dozen sites, and most people never do. Events get missed, and the town feels less connected than it is.
 
-It runs for Oberlin and Cleveland today, feeding [CommunityHub](https://www.communityhub.cloud/).
+## Why this exists
+
+More than a decade ago, at the request of the Oberlin Business Partnership, the Environmental Dashboard team built a shared Community Calendar so any organization or resident could submit an event through one simple form. Approved events show up on websites, on 23 Community Dashboard signs around town, and in a weekly newsletter ([environmentaldashboard.org/calendar](https://www.environmentaldashboard.org/calendar)). It works, but it still depends on people remembering to post, and the many separate calendars around town stay separate.
+
+The Environmental Dashboard is the work of **Professor John Petersen**, Paul Sears Professor of Environmental Studies and Biology at Oberlin College and the project's founder. His question was a civic one: a community stays connected only when people can actually find out what is going on in it, and shared information is part of the infrastructure that holds a place together.
+
+This project is a pilot, funded by an AI micro-grant and built by Frank Kusi Appiah with Professor Petersen, that asks whether today's AI can do the part people were never going to keep up with by hand: read all those scattered calendars, pull the events into one place, and hand them to a person to approve. If it works here, the same approach extends to the Dashboard's work in MidTown Cleveland and other neighborhoods, where one sign is meant to blend hyper-local news with content at the ward, city, county, and regional level. So this is not really a calendar project. It is an experiment in whether AI can strengthen the shared information a community runs on.
 
 ## How it works
 
