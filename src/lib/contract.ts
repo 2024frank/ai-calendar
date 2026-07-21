@@ -88,7 +88,8 @@ ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 WRITING
 - Announcement titles start with the action ("Register for...", "Apply for..."). Never a bare noun for an opportunity.
 - If registration is required, the short description ends with "Registration required." If there is a cost, it includes "Paid event."
-- The long description carries no URLs, no street address, no dates or times (the fields hold those), and names the venue instead of "here"/"there".
+- NO description, short or long, ever carries a URL, a street address, or dates and times; the fields hold those, and descriptions name the venue instead of "here"/"there".
+- A streamed or online event: set locationType "on" ("bo" if also attendable in person) and put the stream or meeting link in urlLink. A "Streaming Video:" or "Watch live:" link in a description is wrong; move it to urlLink.
 - Never use em dashes or en dashes. Write a plain hyphen or restructure.
 - Never invent, estimate, or carry forward stale facts. Absent value -> leave it out; a reviewer will see it. No qualifying events -> return an empty list.
 
@@ -412,6 +413,7 @@ export function validateEvent(e: ExtractedEvent): string[] {
     issues.push("url_link_required");
   if (e.registrationUrl && !/Registration required\.$/.test(e.description))
     issues.push("missing_registration_required_text");
+  if (e.description && /https?:\/\//i.test(e.description)) issues.push("description_contains_url");
   if (e.extendedDescription && /https?:\/\//i.test(e.extendedDescription))
     issues.push("long_description_contains_url");
   if (e.extendedDescription && /\b(here|there)\b/i.test(e.extendedDescription))

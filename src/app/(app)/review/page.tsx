@@ -34,6 +34,7 @@ const SHORT_ISSUE: Record<string, string> = {
   location_required: "location",
   url_link_required: "online link",
   missing_registration_required_text: '"Registration required." in description',
+  description_contains_url: "URL out of description",
   long_description_contains_url: "URL out of long description",
   long_description_ambiguous_location: "venue name in long description",
 };

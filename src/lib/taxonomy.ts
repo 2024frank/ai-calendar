@@ -68,6 +68,8 @@ export const ISSUE_LABELS: Record<string, string> = {
   url_link_required: "An online event needs a link to join",
   missing_registration_required_text:
     'This event takes registrations, so the short description should end with "Registration required."',
+  description_contains_url:
+    "The short description contains a link. A stream or meeting link belongs in the online event URL field",
   long_description_contains_url:
     "The long description contains a link. Links belong in the website or registration field",
   long_description_ambiguous_location:
