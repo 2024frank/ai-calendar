@@ -7,7 +7,11 @@ import { getSession, isAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+// One correction takes a median of 96 seconds and regularly runs past two
+// minutes, so a 120s cap killed the slow ones mid-flight and the whole pass
+// reported an error. 300 is the platform ceiling and matches the other
+// correction routes.
+export const maxDuration = 300;
 
 /**
  * Current state of correction work, so the page can show real progress on load

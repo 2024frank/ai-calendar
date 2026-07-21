@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, runs, sources } from "@/db/schema";
 import { HARD_ISSUES } from "./ingest";
@@ -29,19 +29,10 @@ const CORRECTION_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-// Events are corrected in parallel. One at a time meant 40 events x ~30s each,
-// which blows past the platform's request limit and the run dies with nothing
-// done. The deadline stops us starting new work in time to finish cleanly;
-// whatever is left is picked up by the next pass.
-const CONCURRENCY = 6;
-const TIME_BUDGET_MS = 225_000;
-
-export type CorrectionResult = {
-  checked: number;
-  corrected: number;
-  stillMissing: number;
-  remaining: number;
-};
+// Deliberately no batch runner here. Correcting several events inside one
+// request is what pushed an invocation toward the platform's time limit and got
+// it killed with work half done. One event per request means the invocation
+// ends and a fresh one starts for the next event, so the limit is never in play.
 
 type SourceRow = typeof sources.$inferSelect;
 type EventRow = typeof events.$inferSelect;
@@ -218,20 +209,21 @@ export async function correctNextEvent(runId: number, sourceId: number | null = 
   const instructions = fillTemplate(src.specialInstructions ?? "", vars);
   const models = await modelChain();
 
+  // Claim the event BEFORE working on it. If this request is killed partway,
+  // for a slow page or a platform timeout, the marker is already committed, so
+  // the next call moves to a different event instead of hitting the same slow
+  // one forever. A success overwrites rejectionReason below, so the marker
+  // only survives on events that genuinely could not be completed.
+  await db
+    .update(events)
+    .set({ rejectionReason: `${ev.rejectionReason ?? "Auto-rejected (incomplete)"} [tried]` })
+    .where(eq(events.id, ev.id));
+
   let fixed = false;
   try {
     fixed = await correctOne(runId, ev, src, instructions, models);
   } catch {
     fixed = false;
-  }
-
-  // If it could not be completed, park it so the loop moves on instead of
-  // retrying the same event forever.
-  if (!fixed) {
-    await db
-      .update(events)
-      .set({ rejectionReason: `${ev.rejectionReason ?? "Auto-rejected (incomplete)"} [tried]` })
-      .where(eq(events.id, ev.id));
   }
 
   // Persist progress on the run as we go, so closing the tab loses nothing and
@@ -255,108 +247,4 @@ export async function correctNextEvent(runId: number, sourceId: number | null = 
     );
   const remaining = Number(row?.n ?? 0);
   return { done: remaining === 0, fixed, title: ev.title, remaining };
-}
-
-/**
- * Correction agent. Re-reads each auto-rejected event's own page using its
- * source's instructions, fills the missing field, and re-queues it for review
- * tagged as corrected. Pass sourceId to limit it to one source, or null to work
- * across every source at once.
- */
-export async function runCorrection(
-  runId: number,
-  sourceId: number | null,
-  limit = 60,
-): Promise<CorrectionResult> {
-  const startedAt = Date.now();
-
-  const rejects = await db
-    .select()
-    .from(events)
-    .where(
-      sourceId
-        ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"))
-        : and(eq(events.status, "auto_rejected"), isNotNull(events.sourceId)),
-    )
-    .limit(limit);
-
-  if (!rejects.length) {
-    await emit(runId, "run_finished", "Nothing auto-rejected to correct", { checked: 0 });
-    await db
-      .update(runs)
-      .set({ status: "completed", phase: "done", finishedAt: new Date() })
-      .where(eq(runs.id, runId));
-    return { checked: 0, corrected: 0, stillMissing: 0, remaining: 0 };
-  }
-
-  // Load each involved source once, with its instructions filled in.
-  const sourceIds = [...new Set(rejects.map((e) => e.sourceId!).filter(Boolean))];
-  const srcRows = await db.select().from(sources).where(inArray(sources.id, sourceIds));
-  const commRows = await db.select().from(communities);
-  const ctx = new Map<number, { source: SourceRow; instructions: string }>();
-  for (const src of srcRows) {
-    const community = commRows.find((c) => c.id === src.communityId);
-    const vars: PromptVars = {
-      source_name: src.name,
-      urls: [src.url ?? ""],
-      today: new Date().toLocaleDateString("en-CA", {
-        timeZone: community?.timezone ?? "America/New_York",
-      }),
-      timezone: community?.timezone ?? "America/New_York",
-      org_name: src.orgName,
-      org_website: src.orgWebsite,
-      contact_email: src.orgContactEmail,
-      phone: src.orgPhone,
-      lookahead_days: String(src.lookaheadDays ?? 14),
-    };
-    ctx.set(src.id, { source: src, instructions: fillTemplate(src.specialInstructions ?? "", vars) });
-  }
-
-  await emit(runId, "run_started", `Correcting ${rejects.length} auto-rejected event(s)`, {
-    count: rejects.length,
-    sources: sourceIds.length,
-  });
-
-  const models = await modelChain();
-  let corrected = 0;
-  let stillMissing = 0;
-  let processed = 0;
-
-  for (let i = 0; i < rejects.length; i += CONCURRENCY) {
-    if (Date.now() - startedAt > TIME_BUDGET_MS) break; // finish cleanly; rest next pass
-    const batch = rejects.slice(i, i + CONCURRENCY);
-    const outcomes = await Promise.all(
-      batch.map(async (ev) => {
-        const c = ctx.get(ev.sourceId!);
-        if (!c) return false;
-        try {
-          return await correctOne(runId, ev, c.source, c.instructions, models);
-        } catch {
-          return false;
-        }
-      }),
-    );
-    processed += batch.length;
-    for (const ok of outcomes) ok ? corrected++ : stillMissing++;
-  }
-
-  const remaining = rejects.length - processed;
-  await emit(
-    runId,
-    "run_finished",
-    `Corrected ${corrected}, still incomplete ${stillMissing}${remaining ? `, ${remaining} left for the next pass` : ""}`,
-    { checked: processed, corrected, stillMissing, remaining },
-  );
-  await db
-    .update(runs)
-    .set({
-      status: "completed",
-      phase: "done",
-      finishedAt: new Date(),
-      eventsFound: processed,
-      eventsExtracted: corrected,
-    })
-    .where(eq(runs.id, runId));
-
-  return { checked: processed, corrected, stillMissing, remaining };
 }

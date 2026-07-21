@@ -39,6 +39,26 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
   const [msg, setMsg] = useState<string | null>(null);
   const stop = useRef(false);
 
+  /** Read the true totals from the database. Used on load and after a failure. */
+  const refreshProgress = useCallback(async () => {
+    try {
+      const qs = sourceId ? `?sourceId=${sourceId}` : "";
+      const res = await fetch(`/api/corrections/next${qs}`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const data = (await res.json()) as Progress & { openRunId: number | null };
+      setP({
+        checked: data.checked,
+        corrected: data.corrected,
+        remaining: data.remaining,
+        costUsd: data.costUsd,
+        tokens: data.tokens,
+      });
+      return data;
+    } catch {
+      return null;
+    }
+  }, [sourceId]);
+
   const go = useCallback(
     async function go(resumeRunId?: number) {
       setRunning(true);
@@ -46,6 +66,12 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
       stop.current = false;
       let runId: number | undefined = resumeRunId;
       let done = false;
+      // One event failing is normal: a slow page can outlast the request limit
+      // and the platform kills that single call. Ending the whole pass there
+      // reported an error over work that was in fact succeeding, so a failure
+      // now skips to the next event and only a run of them stops us.
+      let consecutiveFailures = 0;
+      const MAX_FAILURES = 3;
 
       while (!done && !stop.current) {
         try {
@@ -55,10 +81,20 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
             body: JSON.stringify({ runId, sourceId }),
           });
           if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            setMsg(err.error || "Stopped.");
-            break;
+            // 401 and 403 will never fix themselves; stop on those immediately.
+            if (res.status === 401 || res.status === 403) {
+              setMsg("You are signed out.");
+              break;
+            }
+            if (++consecutiveFailures >= MAX_FAILURES) {
+              setMsg("Stopped after three failures in a row.");
+              break;
+            }
+            setMsg(`One event timed out, moving on (${consecutiveFailures} of ${MAX_FAILURES}).`);
+            await refreshProgress();
+            continue;
           }
+          consecutiveFailures = 0;
           const data = (await res.json()) as Progress & {
             done: boolean;
             fixed: boolean;
@@ -77,8 +113,12 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
           });
           if (data.fixed) router.refresh(); // the event is already in Pending
         } catch {
-          setMsg("Network error, stopped.");
-          break;
+          if (++consecutiveFailures >= MAX_FAILURES) {
+            setMsg("Stopped after three failures in a row.");
+            break;
+          }
+          setMsg(`Lost one request, retrying (${consecutiveFailures} of ${MAX_FAILURES}).`);
+          await refreshProgress();
         }
       }
 
@@ -87,7 +127,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
       if (done) setMsg("Finished.");
       router.refresh();
     },
-    [router, sourceId],
+    [router, sourceId, refreshProgress],
   );
 
   // Progress lives in the database, not in this tab. On load, read the true
@@ -95,31 +135,17 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const qs = sourceId ? `?sourceId=${sourceId}` : "";
-        const res = await fetch(`/api/corrections/next${qs}`, { cache: "no-store" });
-        if (!res.ok) return;
-        const data = (await res.json()) as Progress & { openRunId: number | null };
-        if (!alive) return;
-        setP({
-          checked: data.checked,
-          corrected: data.corrected,
-          remaining: data.remaining,
-          costUsd: data.costUsd,
-          tokens: data.tokens,
-        });
-        if (data.openRunId && data.remaining > 0) {
-          setMsg("Resuming where it left off.");
-          void go(data.openRunId);
-        }
-      } catch {
-        /* keep the server-rendered count */
+      const data = await refreshProgress();
+      if (!alive || !data) return;
+      if (data.openRunId && data.remaining > 0) {
+        setMsg("Resuming where it left off.");
+        void go(data.openRunId);
       }
     })();
     return () => {
       alive = false;
     };
-  }, [go, sourceId]);
+  }, [go, refreshProgress]);
 
   if (initialCount === 0 && p.remaining === 0 && p.checked === 0) return null;
 
