@@ -38,6 +38,9 @@ const HARD_ISSUES = new Set([
   "post_type_missing",
   "image_missing",
   "location_required",
+  // No reachable contact, no event: the public must have someone to ask.
+  "contact_email_missing",
+  "phone_missing",
 ]);
 
 export type IngestCounts = {

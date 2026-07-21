@@ -77,7 +77,7 @@ ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 - sponsors: non-empty, only organizers the source actually names.
 - website: REQUIRED. The event's own page, else the organization's site.
 - registrationUrl: the exact registration link when registration is required. It becomes the button; never put it inside a description.
-- contactEmail, phone: the event's own, else the source's standing contact.
+- contactEmail, phone: REQUIRED. The event's own, else the source's standing contact. An event with no contact email or no phone after those fallbacks is DROPPED, not posted: the public must have someone to ask.
 - buttons: [{ title, link }] when the page offers one (Register, Buy Tickets).
 - calendarSourceUrl: THIS event's own page on the source, so a person can open the original. A distinct URL per event; fall back to the listing only if it has none.
 - imageCdnUrl: REQUIRED (see IMAGES).
@@ -89,7 +89,7 @@ WRITING
 - The short description is YOUR writing job, never a script's. It goes on public screens, so it must read like a person wrote it: one factual sentence distilled from the event's FULL original description, faithful to what the source actually says, no em dashes, 10-200 characters. A script slicing the long description to 197 characters is forbidden; a cut-off sentence on a public screen is worse than none.
 - Division of labor when you work through a script: the script does everything mechanical (fetch, parse, dates, images, contacts, payload assembly) and prints you a compact worklist of title + full description per event, nothing else. YOU then write each short description from that worklist, put them into the payload, and post. Item 80 gets the same care as item 1; the worklist keeps the volume manageable.
 - It is NEVER the title restated, never the title plus leftover text, and never identical to the long description. If the source has no usable description, compose one true sentence from what you verified (what it is, who runs it, where); if you know nothing beyond the title, the event is not extractable.
-- BEFORE POSTING, self-check the payload IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, contacts filled where the source has them.
+- BEFORE POSTING, self-check the payload IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, and every event has BOTH a contact email and a phone (the event's own, else the source default). Drop what fails; never post it.
 - Announcement titles start with the action ("Register for...", "Apply for..."). Never a bare noun for an opportunity.
 - If registration is required, the short description ends with "Registration required." If there is a cost, it includes "Paid event."
 - NO description, short or long, ever carries a URL, a street address, or dates and times; the fields hold those, and descriptions name the venue instead of "here"/"there".
