@@ -34,7 +34,7 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
   const source = await getSource(s, Number(id));
   if (!source) notFound();
 
-  const [recentRuns, [community], [arRow]] = await Promise.all([
+  const [recentRuns, [community], [arRow], [pendingRow]] = await Promise.all([
     db
       .select()
       .from(runs)
@@ -46,8 +46,13 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
       .select({ n: sql<number>`count(*)` })
       .from(events)
       .where(and(eq(events.sourceId, source.id), eq(events.status, "auto_rejected"))),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(events)
+      .where(and(eq(events.sourceId, source.id), eq(events.status, "pending"))),
   ]);
   const autoRejected = Number(arRow?.n ?? 0);
+  const pendingHere = Number(pendingRow?.n ?? 0);
 
   const recipe = (source.extractionRecipe ?? null) as {
     extraction_method?: string;
@@ -108,6 +113,7 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
         active={source.active}
         communityDefaultMode={community?.defaultMode ?? "restricted"}
         lookaheadDays={source.lookaheadDays}
+        pendingCount={pendingHere}
       />
 
       <EditSource

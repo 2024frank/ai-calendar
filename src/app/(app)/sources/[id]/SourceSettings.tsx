@@ -11,6 +11,7 @@ export function SourceSettings({
   active,
   communityDefaultMode,
   lookaheadDays,
+  pendingCount,
 }: {
   sourceId: number;
   mode: "restricted" | "unrestricted" | null;
@@ -18,6 +19,8 @@ export function SourceSettings({
   active: boolean;
   communityDefaultMode: string;
   lookaheadDays: number | null;
+  /** Events waiting in review for this source right now. */
+  pendingCount: number;
 }) {
   const router = useRouter();
   const [m, setM] = useState<string>(mode ?? "inherit");
@@ -26,18 +29,32 @@ export function SourceSettings({
   const [on, setOn] = useState(active);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   async function save(patch: Record<string, unknown>) {
     setBusy(true);
     setSaved(false);
+    setNote(null);
     const res = await fetch(`/api/sources/${sourceId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     });
+    const data = (await res.json().catch(() => ({}))) as {
+      flushed?: { published: number; failed: number; remaining: number } | null;
+    };
     setBusy(false);
     if (res.ok) {
       setSaved(true);
+      // Say what the switch actually did to the queue, so publishing a backlog
+      // is never a silent surprise.
+      const f = data.flushed;
+      if (f && (f.published || f.failed || f.remaining)) {
+        const parts = [`Published ${f.published} waiting event${f.published === 1 ? "" : "s"}`];
+        if (f.failed) parts.push(`${f.failed} could not be sent and stayed in review`);
+        if (f.remaining) parts.push(`${f.remaining} still to go, they publish on the next run`);
+        setNote(parts.join(". ") + ".");
+      }
       router.refresh();
       setTimeout(() => setSaved(false), 2000);
     }
@@ -58,8 +75,20 @@ export function SourceSettings({
             value={m}
             disabled={busy}
             onChange={(e) => {
-              setM(e.target.value);
-              save({ mode: e.target.value === "inherit" ? null : e.target.value });
+              const next = e.target.value;
+              const becomesUnrestricted =
+                next === "unrestricted" ||
+                (next === "inherit" && communityDefaultMode === "unrestricted");
+              // Publishing a backlog to CommunityHub cannot be taken back, so
+              // the number goes in front of the person before it happens.
+              if (becomesUnrestricted && pendingCount > 0) {
+                const ok = window.confirm(
+                  `This publishes the ${pendingCount} event${pendingCount === 1 ? "" : "s"} waiting in review to CommunityHub right away, and every new one after that goes straight through without review.\n\nPublish them now?`,
+                );
+                if (!ok) return;
+              }
+              setM(next);
+              save({ mode: next === "inherit" ? null : next });
             }}
           >
             <option value="inherit">Use community default ({communityDefaultMode})</option>
@@ -124,6 +153,12 @@ export function SourceSettings({
           </select>
         </div>
       </div>
+
+      {note && (
+        <p className="muted" style={{ fontSize: 12, margin: "12px 0 0" }}>
+          {note}
+        </p>
+      )}
     </div>
   );
 }

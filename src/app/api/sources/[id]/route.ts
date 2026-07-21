@@ -5,9 +5,12 @@ import { sources } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
 import { getSource } from "@/lib/data";
 import { valueToCron } from "@/lib/schedule";
+import { flushSourceIfUnrestricted, type FlushResult } from "@/lib/autoPublish";
+import { logActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -70,5 +73,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (linksChanged) patch.discoveryStatus = "pending";
 
   await db.update(sources).set(patch).where(eq(sources.id, source.id));
-  return NextResponse.json({ ok: true, rediscover: linksChanged });
+
+  // Turning review off is a decision about this source, not just about its next
+  // run, so the events already queued behind it go out too. Reported back so
+  // the settings panel can say how many were sent.
+  let flushed: FlushResult | null = null;
+  if ("mode" in body) {
+    flushed = await flushSourceIfUnrestricted(source.id);
+    if (flushed.published) {
+      await logActivity({
+        action: "approve",
+        actorUserId: s.uid,
+        actorEmail: s.email,
+        targetType: "source",
+        targetId: source.id,
+        summary: `Switched ${source.name} to unrestricted and published ${flushed.published} waiting event${flushed.published === 1 ? "" : "s"}`,
+      });
+    }
+  }
+
+  return NextResponse.json({ ok: true, rediscover: linksChanged, flushed });
 }

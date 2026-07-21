@@ -3,9 +3,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { flushCommunityInheritors, type FlushResult } from "@/lib/autoPublish";
+import { logActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,5 +35,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (!Object.keys(patch).length) return NextResponse.json({ ok: true });
   await db.update(communities).set(patch).where(eq(communities.id, communityId));
-  return NextResponse.json({ ok: true });
+
+  // Same rule as a single source: if the community default just became
+  // unrestricted, the events waiting under every source that inherits it go out
+  // now. Sources with their own explicit mode are untouched.
+  let flushed: FlushResult | null = null;
+  if (patch.defaultMode === "unrestricted") {
+    flushed = await flushCommunityInheritors(communityId);
+    if (flushed.published) {
+      await logActivity({
+        action: "approve",
+        actorUserId: s.uid,
+        actorEmail: s.email,
+        targetType: "community",
+        targetId: communityId,
+        summary: `Switched the community default to unrestricted and published ${flushed.published} waiting event${flushed.published === 1 ? "" : "s"}`,
+      });
+    }
+  }
+
+  return NextResponse.json({ ok: true, flushed });
 }
