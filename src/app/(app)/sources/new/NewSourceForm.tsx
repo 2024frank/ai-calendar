@@ -12,13 +12,19 @@ function researchPrompt(name: string, urls: string[]) {
   return `Go to this site for ${name}:
 ${links}
 
-Explore it and find every way its events can be fetched: calendar pages, JSON APIs, iCal or RSS feeds, embedded calendar widgets, and individual event pages. Then describe, in detail, the BEST way to extract ALL upcoming events, as numbered step-by-step instructions another AI agent can follow exactly:
+Find the single BEST way to fetch its upcoming events (a JSON API beats a feed, a feed beats scraping pages), verify it against a few real events, then answer with a SHORT, SPECIFIC recipe another AI agent can follow exactly.
 
-1. The exact URLs to fetch, in order, and how to find every event from them (including pagination or "load more").
-2. Where each field lives: title, full description, exact start and end date and time with timezone, venue name and street address, the event image or flyer URL, registration or ticket link, and price.
-3. Anything easy to get wrong on this site: recurring events, multi-day events, cancelled or sold-out items, date formats.
-4. If the site blocks normal fetching (403 or a bot challenge), say exactly how to get past it, for example fetching over HTTP/1.1 with a browser user agent.
-5. If individual events do not list their own contact email and phone, find the organization's general contact email address and phone number and state them so they can be used as the default contact for every event.
+Format rules, follow them strictly:
+- Numbered steps only. No introduction, no background, no summary, no alternatives you rejected.
+- Every step is concrete: an exact URL or URL pattern, an exact field name, an exact text marker. "Fetch https://.../api/events?page=N until empty" is right; "look for an API" is wrong.
+- Keep the whole answer under 30 lines.
+
+Cover, in this order:
+1. The exact URL(s) to fetch and how to enumerate every event (pagination, "load more", date parameters).
+2. Where each field lives, ONE line per field: title, full description, start and end date-time with timezone, venue name and street address, image URL, registration or ticket link, price.
+3. The one or two things easiest to get wrong on this site (recurring events, date formats, sold-out items). Only what you actually observed.
+4. Only if the site blocks normal fetching: the exact command that gets through (for example curl over HTTP/1.1 with a browser user agent).
+5. The organization's general contact email and phone, stated once, as the default contact for events that list none.
 
 Verify your instructions actually work by checking a few real events before you answer.`;
 }
