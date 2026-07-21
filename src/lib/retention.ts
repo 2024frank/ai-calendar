@@ -23,7 +23,8 @@ export async function sweepExpiredEvents(nowSecs = Math.floor(Date.now() / 1000)
  * platform's time limit never updates its own row, so it sits "running"
  * forever and a discovery leaves its source stuck on "discovering". Any run
  * still "running" past its deadline, or silent for 15 minutes, is dead: mark
- * it failed and put its source back to a re-triable state.
+ * it failed and put its source back to a re-triable state. Correction passes
+ * are the exception, since idleness there just means nobody is clicking.
  */
 export async function reapStaleRuns(nowMs = Date.now()) {
   const stale = await db
@@ -51,10 +52,26 @@ export async function reapStaleRuns(nowMs = Date.now()) {
   const dead = [...new Map([...stale, ...silent].map((r) => [r.id, r])).values()];
   if (!dead.length) return 0;
 
-  await db
-    .update(runs)
-    .set({ status: "failed", phase: "done", finishedAt: new Date(nowMs) })
-    .where(inArray(runs.id, dead.map((r) => r.id)));
+  // A correction pass is driven by a person clicking, so it sits quiet whenever
+  // they pause or close the tab. That is not a failure, and calling it one put
+  // "failed" on a pass whose events had all been corrected. Close those as
+  // completed; every event it finished is already out of the queue, and any it
+  // did not are still marked for the next pass.
+  const corrections = dead.filter((r) => r.kind === "correction").map((r) => r.id);
+  const failures = dead.filter((r) => r.kind !== "correction").map((r) => r.id);
+
+  if (corrections.length) {
+    await db
+      .update(runs)
+      .set({ status: "completed", phase: "done", finishedAt: new Date(nowMs) })
+      .where(inArray(runs.id, corrections));
+  }
+  if (failures.length) {
+    await db
+      .update(runs)
+      .set({ status: "failed", phase: "done", finishedAt: new Date(nowMs) })
+      .where(inArray(runs.id, failures));
+  }
 
   // A discovery that died leaves its source claiming "discovering"; flip it to
   // failed so the UI says so and Re-discover becomes the obvious next step.
