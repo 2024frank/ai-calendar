@@ -18,6 +18,8 @@ After that, on a schedule, an agent runs the recipe. It has a sandbox to run cur
 
 Every event then gets checked by the server for the boring stuff: it has a date, an image, a contact, a real description, and so on. Anything missing is flagged for the reviewer or dropped. What survives goes to the review queue, or straight to the calendar if the source is set to publish automatically.
 
+Events that arrive short of a contact or an image are held back rather than published half-formed, and those pile up. A second agent works that pile one event at a time: it reopens the event's own page, finds the field that was missing, fills it in, and puts the event back in the review queue. Handling one event per call keeps each prompt small and cheap. What it has checked, what it fixed, and what it has spent are written to the database as it goes, so closing the tab loses nothing and coming back picks up where it stopped.
+
 That's the whole loop. Add a source once, and it keeps itself up to date.
 
 ## Some things it handles
@@ -29,10 +31,13 @@ That's the whole loop. Add a source once, and it keeps itself up to date.
 - Events delete themselves once they're over, so the calendar only holds what's coming up.
 - Every event links back to the exact page it came from, and an event whose source link is dead gets dropped, since a fabricated link usually means a fabricated event.
 - Every run is written down step by step (each fetch, each model call, each decision) and shown on a live timeline, so a run never just hangs with no explanation.
+- Turning a source over to automatic publishing also releases whatever was already waiting behind it, so the setting applies to the backlog and not just to the next run. Because that cannot be undone, the switch says how many events it is about to send before it sends them.
 
 It is multi-tenant: one install serves several communities, each with its own sources, calendar, and destination. A person can belong to more than one and switch between them.
 
-An admin can pick which AI model runs extraction for every source (Claude, Gemini, or GPT) and change it in one place. Each run records its real dollar cost, straight from what the API bills, so a metrics view can show total spend, cost per event, and a side-by-side comparison of how each model performs and what it costs. Along with how many events were gathered, how many reposts were caught, and how much a reviewer still had to correct, that is the kind of thing a pilot needs to show whether the approach works and what it costs to run.
+An admin can pick which AI model runs extraction for every source (Claude, Gemini, or GPT) and change it in one place. Each run records its real dollar cost, straight from what the API bills, so a metrics view can show total spend, cost per event, and a side-by-side comparison of how each model performs and what it costs. Along with how many events were gathered, how many reposts were caught, and how much a reviewer still had to correct, that is the kind of thing a pilot needs to show whether the approach works and what it costs to run. Cost is counted where the model call happens rather than at each place that makes one, so an agent added later is billed to its run whether or not anyone remembers to wire it up.
+
+Sign-ins and the actions that change something are written to an activity log, so who did what is always answerable.
 
 ## Words the code uses
 
@@ -41,14 +46,14 @@ An admin can pick which AI model runs extraction for every source (Claude, Gemin
 | Community | One tenant. Has its own sources, users, calendar, and destination. |
 | Source | Where events come from. Usually a website. |
 | Destination | Where approved events get pushed, like CommunityHub. Optional. |
-| Mode | `restricted` (a person reviews first) or `unrestricted` (publish on its own). |
+| Mode | `restricted` (a person reviews first) or `unrestricted` (publish on its own, including anything already waiting). Set per source, or inherited from the community. |
 | Run | One execution of the agent against a source, with its full trail saved. |
 
 Three roles: platform admin (everything), community admin (their own community), reviewer (works the queue).
 
 ## Stack
 
-Next.js and TypeScript, Drizzle on MySQL, and the [Perplexity Agent API](https://docs.perplexity.ai/docs/agent-api) for the agent (it runs Claude and other models in a managed sandbox). Sign-in is a passwordless email link. Runs on Vercel with a daily cron for the scheduled checks and cleanup.
+Next.js and TypeScript, Drizzle on MySQL, and the [Perplexity Agent API](https://docs.perplexity.ai/docs/agent-api) for the agent (it runs Claude and other models in a managed sandbox). Sign-in is a password, with an emailed link for setting or resetting it. Runs on Vercel with a daily cron for the scheduled checks and cleanup.
 
 The production topology, data flows, API boundaries, schema ownership, cache policy, reliability model, and scaling path are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -74,9 +79,9 @@ npm run dev
 | `AGENT_INGEST_SECRET` | Signing the token an agent uses to post results back |
 | `CRON_SECRET` | Authorizes the daily cron |
 | `APP_URL` | Public base URL, used in sign-in links |
-| `RESEND_API_KEY`, `EMAIL_FROM` | Optional. Without them, sign-in links get logged instead of emailed |
-| `CH_DB_*` | Optional read-only CommunityHub database for duplicate checks |
-| `PLATFORM_ADMIN_EMAILS` | Who gets seeded as a platform admin |
+| `HOSTINGER_EMAIL`, `HOSTINGER_EMAIL_PASSWORD` | The mailbox mail is sent from. `HOSTINGER_SMTP_HOST` and `_PORT` override the defaults |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Optional fallback if the mailbox is unset or refuses. With neither, links get logged in development instead of emailed |
+| `DATABASE_CA_CERT`, `DB_POOL_SIZE` | Optional. A CA certificate for the database connection, and the pool size |
 
 ## License
 
