@@ -4,8 +4,12 @@ import { MINUTES_PER_MANUAL_EVENT, pilotMetrics } from "@/lib/metrics";
 import { modelLabel } from "@/lib/modelList";
 import { ModelPicker } from "./ModelPicker";
 
+/** Always dollars. Small amounts get more decimals so they are not just $0.00. */
 function money(v: number) {
-  return v < 1 ? `${(v * 100).toFixed(2)}¢` : `$${v.toFixed(2)}`;
+  if (v >= 1) return `$${v.toFixed(2)}`;
+  if (v >= 0.1) return `$${v.toFixed(2)}`;
+  if (v >= 0.001) return `$${v.toFixed(3)}`;
+  return `$${v.toFixed(4)}`;
 }
 
 function Bar({ value, max, good }: { value: number; max: number; good: boolean }) {
@@ -82,12 +86,12 @@ export default async function MetricsPage() {
           note={`Rough figure: ${m.eventsGathered} events times ${MINUTES_PER_MANUAL_EVENT} minutes to find and enter one by hand. An estimate, not a measurement.`}
         />
         <Stat
-          value={m.totalSpendUsd < 1 ? `${(m.totalSpendUsd * 100).toFixed(1)}¢` : `$${m.totalSpendUsd.toFixed(2)}`}
+          value={money(m.totalSpendUsd)}
           label="AI spend so far"
-          note="Real dollars billed by the API across every run, no estimate. This is the whole cost of running the system to date."
+          note="Real dollars billed by the API across every run, summed from what each run reported. Not an estimate."
         />
         <Stat
-          value={m.costPerEventUsd < 1 ? `${(m.costPerEventUsd * 100).toFixed(1)}¢` : `$${m.costPerEventUsd.toFixed(2)}`}
+          value={money(m.costPerEventUsd)}
           label="Cost per event gathered"
           note="Total AI spend divided by events gathered. The bottom-line number for the grant: what one usable event costs to produce."
         />
