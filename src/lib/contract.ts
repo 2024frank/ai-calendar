@@ -179,9 +179,10 @@ ${ctx.communityHubPostUrlBase ? `   duplicateOfUrl is EXACTLY ${ctx.communityHub
    In the sandbox, write your payloads to a file and post it, for example:
      python3 - <<'PY'
      import json, urllib.request
-     payload = {"runId": ${ctx.runId}, "token": "${ctx.runToken}", "events": [...], "duplicates": [...]}
+     payload = {"events": [...], "duplicates": [...]}
      req = urllib.request.Request("${ctx.ingestUrl}", data=json.dumps(payload).encode(),
-       headers={"content-type": "application/json"}, method="POST")
+       headers={"content-type": "application/json", "authorization": "Bearer ${ctx.runToken}",
+                "x-run-id": "${ctx.runId}"}, method="POST")
      print(urllib.request.urlopen(req).read().decode())
      PY
 

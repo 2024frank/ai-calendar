@@ -111,6 +111,7 @@ Fetch the event's own page and return ONLY the missing fields, filled from the r
         maxSteps: 12,
         maxTokens: 4000,
         models,
+        runId,
       });
       patch = JSON.parse(res.text || "{}");
     } catch {

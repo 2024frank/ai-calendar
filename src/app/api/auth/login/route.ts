@@ -47,6 +47,7 @@ export async function POST(req: Request) {
     role: user.role,
     communityId: user.communityId ?? null,
     canReviewAllSources: user.canReviewAllSources,
+    sessionVersion: user.sessionVersion,
   });
   return NextResponse.json({ ok: true });
 }

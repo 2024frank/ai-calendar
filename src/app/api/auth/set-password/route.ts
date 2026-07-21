@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { createHash } from "crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { loginTokens, users } from "@/db/schema";
 import { createSession } from "@/lib/auth";
+import { consumeLoginToken } from "@/lib/loginToken";
 import { hashPassword, passwordProblem } from "@/lib/password";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
@@ -22,27 +22,27 @@ export async function POST(req: Request) {
   const problem = passwordProblem(password);
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
-  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-  const [tok] = await db
-    .select()
-    .from(loginTokens)
-    .where(and(eq(loginTokens.tokenHash, tokenHash), isNull(loginTokens.consumedAt)))
-    .limit(1);
-
-  if (!tok || new Date(tok.expiresAt).getTime() < Date.now()) {
+  const consumed = await consumeLoginToken(rawToken, ["password_reset", "invite"]);
+  if (!consumed) {
     return NextResponse.json({ error: "This link has expired. Ask for a new one." }, { status: 400 });
   }
-
-  const [user] = await db.select().from(users).where(eq(users.id, tok.userId)).limit(1);
-  if (!user || user.status !== "active") {
-    return NextResponse.json({ error: "This account is not active." }, { status: 403 });
-  }
+  const { user } = consumed;
+  const nextSessionVersion = user.sessionVersion + 1;
 
   await db
     .update(users)
-    .set({ passwordHash: hashPassword(password), mustSetPassword: false })
+    .set({
+      passwordHash: hashPassword(password),
+      mustSetPassword: false,
+      sessionVersion: sql`${users.sessionVersion} + 1`,
+    })
     .where(eq(users.id, user.id));
-  await db.update(loginTokens).set({ consumedAt: new Date() }).where(eq(loginTokens.id, tok.id));
+  // A successful password change invalidates every other outstanding reset or
+  // invite capability as well as every previously issued session.
+  await db
+    .update(loginTokens)
+    .set({ consumedAt: new Date() })
+    .where(eq(loginTokens.userId, user.id));
 
   await createSession({
     uid: user.id,
@@ -51,6 +51,7 @@ export async function POST(req: Request) {
     role: user.role,
     communityId: user.communityId ?? null,
     canReviewAllSources: user.canReviewAllSources,
+    sessionVersion: nextSessionVersion,
   });
   return NextResponse.json({ ok: true });
 }

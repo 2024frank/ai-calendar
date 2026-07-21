@@ -113,7 +113,36 @@ export type LlmCall = {
   maxSteps?: number;
   /** Override the models chain (admin-selected model first). */
   models?: string[];
+  /**
+   * Bill this call's tokens and dollars to a run. Pass it on EVERY agent call so
+   * the run's true cost is recorded; nothing else needs to track spend.
+   */
+  runId?: number;
 };
+
+/**
+ * Add one model call's usage to its run. Increments rather than overwrites, so
+ * an agent that makes many calls (the correction agent runs one per event)
+ * accumulates the real total instead of keeping only the last call.
+ */
+async function billRun(runId: number, usage: LlmUsage, model: string | null): Promise<void> {
+  try {
+    const { db } = await import("@/db");
+    const { runs } = await import("@/db/schema");
+    const { eq, sql } = await import("drizzle-orm");
+    await db
+      .update(runs)
+      .set({
+        promptTokens: sql`${runs.promptTokens} + ${usage.input}`,
+        completionTokens: sql`${runs.completionTokens} + ${usage.output}`,
+        costMicros: sql`${runs.costMicros} + ${Math.round((usage.costUsd ?? 0) * 1_000_000)}`,
+        ...(model ? { model } : {}),
+      })
+      .where(eq(runs.id, runId));
+  } catch {
+    /* accounting must never break a run */
+  }
+}
 
 export async function llmComplete(call: LlmCall): Promise<LlmResult> {
   const body: Record<string, unknown> = {
@@ -195,5 +224,12 @@ export async function llmComplete(call: LlmCall): Promise<LlmResult> {
         : null,
   };
 
-  return { ...readResponse(parsed), usage };
+  const result = { ...readResponse(parsed), usage };
+
+  // Bill this call to its run. Doing it HERE, rather than at each call site,
+  // means every agent (extraction, correction, hosted fetch, and anything added
+  // later) counts toward the cost automatically and none can forget to.
+  if (call.runId) await billRun(call.runId, usage, result.model);
+
+  return result;
 }

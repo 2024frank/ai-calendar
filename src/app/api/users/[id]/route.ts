@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { reviewerSources, sources, userCommunities, users } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
@@ -78,7 +78,10 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 
   if (Object.keys(patch).length) {
-    await db.update(users).set(patch).where(eq(users.id, uid));
+    await db
+      .update(users)
+      .set({ ...patch, sessionVersion: sql`${users.sessionVersion} + 1` })
+      .where(eq(users.id, uid));
   }
 
   // Replace the extra memberships (everything past the home community).

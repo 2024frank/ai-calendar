@@ -142,6 +142,7 @@ or summarise, and do not leave any event out.`;
       fetchUrls: 10,
       maxSteps: 12,
       maxTokens: 16000,
+      runId,
     });
 
     if (!looksUnfetched(res.text)) {
@@ -309,6 +310,7 @@ Write "instruction_block" as concrete, durable guidance for extracting THIS sour
       webSearch: true,
       maxSteps: 20,
       maxTokens: 8000,
+      runId,
     });
 
     await emit(
@@ -346,10 +348,6 @@ Write "instruction_block" as concrete, durable guidance for extracting THIS sour
         status: "completed",
         phase: "done",
         finishedAt: new Date(),
-        promptTokens: res.usage.input,
-        completionTokens: res.usage.output,
-        costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
-        model: res.model,
       })
       .where(eq(runs.id, runId));
     await emit(runId, "run_finished", `Recipe saved for ${source.name} (${recipe.extraction_method})`, {
@@ -547,6 +545,7 @@ Only include events that have a real date. Skip anything already past. If there 
       maxSteps: 40,
       maxTokens: 32000,
       models: await modelChain(),
+      runId,
     });
 
     await emit(
@@ -562,10 +561,6 @@ Only include events that have a real date. Skip anything already past. If there 
     await db
       .update(runs)
       .set({
-        promptTokens: res.usage.input,
-        completionTokens: res.usage.output,
-        costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
-        model: res.model,
       })
       .where(eq(runs.id, runId));
 
@@ -591,10 +586,6 @@ Only include events that have a real date. Skip anything already past. If there 
         status: "completed",
         phase: "done",
         finishedAt: new Date(),
-        promptTokens: res.usage.input,
-        completionTokens: res.usage.output,
-        costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
-        model: res.model,
         eventsFound: counts.found,
         eventsExtracted: counts.inserted,
         eventsDuplicate: counts.duplicate,
