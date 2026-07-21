@@ -1,6 +1,21 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { MINUTES_PER_MANUAL_EVENT, pilotMetrics } from "@/lib/metrics";
+import { modelLabel } from "@/lib/modelList";
+import { ModelPicker } from "./ModelPicker";
+
+function money(v: number) {
+  return v < 1 ? `${(v * 100).toFixed(2)}¢` : `$${v.toFixed(2)}`;
+}
+
+function Bar({ value, max, good }: { value: number; max: number; good: boolean }) {
+  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+  return (
+    <div style={{ background: "var(--chip, rgba(0,0,0,.06))", borderRadius: 4, height: 8, overflow: "hidden" }}>
+      <div style={{ width: `${pct}%`, height: "100%", background: good ? "var(--accent)" : "var(--warn, #d08700)" }} />
+    </div>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +92,67 @@ export default async function MetricsPage() {
           note="Total AI spend divided by events gathered. The bottom-line number for the grant: what one usable event costs to produce."
         />
       </div>
+
+      <ModelPicker current={m.activeModel} />
+
+      {m.byModel.length > 0 && (
+        <div className="card">
+          <h3 style={{ marginBottom: 4 }}>Model comparison</h3>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+            How each model has actually performed on your sources. Switch models above and, after a few
+            runs, compare here: longer green bars are better (more usable events, lower cost each).
+          </div>
+          {(() => {
+            const maxCPE = Math.max(...m.byModel.map((x) => x.costPerEventUsd), 0.0001);
+            return (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Runs</th>
+                    <th>Events</th>
+                    <th style={{ minWidth: 160 }}>Usable output</th>
+                    <th>Spend</th>
+                    <th style={{ minWidth: 160 }}>Cost per event</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {m.byModel.map((x) => (
+                    <tr key={x.model}>
+                      <td style={{ fontWeight: 600 }}>
+                        {modelLabel(x.model)}
+                        {x.model === m.activeModel ? " (in use)" : ""}
+                      </td>
+                      <td>{x.runs}</td>
+                      <td>{x.eventsExtracted}</td>
+                      <td>
+                        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                          <span style={{ width: 34, fontSize: 12 }}>{x.cleanPct}%</span>
+                          <div style={{ flex: 1 }}><Bar value={x.cleanPct} max={100} good /></div>
+                        </div>
+                      </td>
+                      <td>{money(x.costUsd)}</td>
+                      <td>
+                        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                          <span style={{ width: 48, fontSize: 12 }}>{money(x.costPerEventUsd)}</span>
+                          {/* Shorter bar is cheaper, so invert: cheap = long green. */}
+                          <div style={{ flex: 1 }}>
+                            <Bar value={maxCPE - x.costPerEventUsd} max={maxCPE} good />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })()}
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Read it simply: pick the model with a long green "usable output" bar and a long green "cost per
+            event" bar. That one gives you the most good events for the least money.
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>By organization</h3>

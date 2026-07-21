@@ -28,7 +28,7 @@ export function EditSource({
     urls !== initialUrls.join("\n") ||
     special !== initialSpecial;
 
-  async function save(alsoRediscover: boolean) {
+  async function save() {
     setBusy(true);
     setMsg(null);
     const res = await fetch(`/api/sources/${sourceId}`, {
@@ -47,10 +47,6 @@ export function EditSource({
       return;
     }
 
-    // If the links changed, discovery was reset. Offer to rebuild the recipe now.
-    if (alsoRediscover && data.rediscover) {
-      await fetch(`/api/sources/${sourceId}/discover`, { method: "POST" });
-    }
     setBusy(false);
     setMsg("Saved.");
     router.refresh();
@@ -83,8 +79,7 @@ export function EditSource({
               autoCapitalize="none"
             />
             <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-              One per line. Changing the links rebuilds how events are pulled, so run
-              discovery again after saving.
+              One per line. If you change the links, update the instructions below to match.
             </div>
           </div>
 
@@ -100,22 +95,8 @@ export function EditSource({
           </div>
 
           <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <button
-              className="btn primary"
-              type="button"
-              disabled={busy || !dirty}
-              onClick={() => save(false)}
-            >
+            <button className="btn primary" type="button" disabled={busy || !dirty} onClick={save}>
               {busy ? "Saving…" : "Save"}
-            </button>
-            <button
-              className="btn"
-              type="button"
-              disabled={busy || !dirty}
-              onClick={() => save(true)}
-              title="Save, then rebuild the extraction recipe from the new links"
-            >
-              Save and re-discover
             </button>
             {msg && (
               <span className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>

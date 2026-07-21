@@ -111,12 +111,14 @@ export type LlmCall = {
   webSearch?: boolean;
   /** How many tool/reasoning steps the agent may take. */
   maxSteps?: number;
+  /** Override the models chain (admin-selected model first). */
+  models?: string[];
 };
 
 export async function llmComplete(call: LlmCall): Promise<LlmResult> {
   const body: Record<string, unknown> = {
     input: call.prompt,
-    models: MODEL_CHAIN,
+    models: call.models?.length ? call.models : MODEL_CHAIN,
     // Required for anthropic/* models, and a sane ceiling for the rest.
     max_output_tokens: call.maxTokens ?? 16000,
   };

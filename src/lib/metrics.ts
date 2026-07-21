@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { events, fieldEditLog, runs, sources } from "@/db/schema";
+import { activeModel } from "./models";
 
 /** Minutes we estimate it takes a person to find and hand-enter one event. */
 export const MINUTES_PER_MANUAL_EVENT = 6;
@@ -28,6 +29,17 @@ export type PilotMetrics = {
   totalSpendUsd: number; // real API dollars, summed from what the Agent API billed
   costPerEventUsd: number; // spend divided by events gathered
   bySource: SourceMetric[];
+  byModel: ModelMetric[];
+  activeModel: string;
+};
+
+export type ModelMetric = {
+  model: string;
+  runs: number;
+  eventsExtracted: number;
+  costUsd: number;
+  costPerEventUsd: number; // the money question: cheaper per usable event
+  cleanPct: number; // of what it found, the share that was usable (quality)
 };
 
 function n(v: unknown): number {
@@ -81,6 +93,37 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     .from(runs);
   const totalSpendUsd = n(runRow?.costMicros) / 1_000_000;
 
+  // Per-model comparison, straight from run rows: what each model found, cost,
+  // and how clean its output was. This is the "which is better and cheaper" view.
+  const modelRows = await db
+    .select({
+      model: runs.model,
+      runs: sql<number>`count(*)`,
+      found: sql<number>`sum(${runs.eventsFound})`,
+      extracted: sql<number>`sum(${runs.eventsExtracted})`,
+      invalid: sql<number>`sum(${runs.eventsInvalid})`,
+      costMicros: sql<number>`sum(${runs.costMicros})`,
+    })
+    .from(runs)
+    .where(sql`${runs.model} is not null`)
+    .groupBy(runs.model);
+  const byModel: ModelMetric[] = modelRows
+    .map((r) => {
+      const extracted = n(r.extracted);
+      const found = n(r.found);
+      const costUsd = n(r.costMicros) / 1_000_000;
+      return {
+        model: r.model ?? "unknown",
+        runs: n(r.runs),
+        eventsExtracted: extracted,
+        costUsd,
+        costPerEventUsd: extracted ? costUsd / extracted : 0,
+        cleanPct: found ? Math.round(((found - n(r.invalid)) / found) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.eventsExtracted - a.eventsExtracted);
+  const chosenModel = await activeModel();
+
   // Aggregate.
   // Events shown to a reviewer (pending/approved/submitted). Auto-rejected events
   // are the ones the system caught as incomplete BEFORE a person saw them, so they
@@ -130,6 +173,8 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     runsCompleted: n(runRow?.completed),
     totalSpendUsd,
     costPerEventUsd: eventsGathered ? totalSpendUsd / eventsGathered : 0,
+    byModel,
+    activeModel: chosenModel,
     bySource: [...perSource.values()].filter((s) => s.gathered > 0 || s.duplicatesCaught > 0).sort((a, b) => b.gathered - a.gathered),
   };
 }

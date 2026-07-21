@@ -8,6 +8,7 @@ import { fetchPage } from "./fetchPage";
 import { ingestEvents } from "./ingest";
 import { buildFeedbackBlock } from "./learning";
 import { llmComplete } from "./llm";
+import { modelChain } from "./models";
 import { buildSourceInstructions, fillTemplate, type PromptVars } from "./promptTemplate";
 import { emit } from "./runEvents";
 
@@ -348,6 +349,7 @@ Write "instruction_block" as concrete, durable guidance for extracting THIS sour
         promptTokens: res.usage.input,
         completionTokens: res.usage.output,
         costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
+        model: res.model,
       })
       .where(eq(runs.id, runId));
     await emit(runId, "run_finished", `Recipe saved for ${source.name} (${recipe.extraction_method})`, {
@@ -546,6 +548,7 @@ Only include events that have a real date. Skip anything already past. If there 
       webSearch: true,
       maxSteps: 40,
       maxTokens: 32000,
+      models: await modelChain(),
     });
 
     await emit(
@@ -564,6 +567,7 @@ Only include events that have a real date. Skip anything already past. If there 
         promptTokens: res.usage.input,
         completionTokens: res.usage.output,
         costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
+        model: res.model,
       })
       .where(eq(runs.id, runId));
 
@@ -592,6 +596,7 @@ Only include events that have a real date. Skip anything already past. If there 
         promptTokens: res.usage.input,
         completionTokens: res.usage.output,
         costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
+        model: res.model,
         eventsFound: counts.found,
         eventsExtracted: counts.inserted,
         eventsDuplicate: counts.duplicate,

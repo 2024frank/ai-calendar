@@ -281,6 +281,8 @@ export const runs = mysqlTable(
     // Dollar cost of this run, as reported by the Agent API (no markup). Stored
     // in micro-dollars (millionths) to keep it an exact integer.
     costMicros: int("cost_micros").notNull().default(0),
+    // Which model actually served this run, so models can be compared.
+    model: varchar("model", { length: 80 }),
     eventsFound: int("events_found").notNull().default(0),
     eventsExtracted: int("events_extracted").notNull().default(0),
     eventsDuplicate: int("events_duplicate").notNull().default(0),
@@ -430,3 +432,10 @@ export const publishSubmissions = mysqlTable(
 );
 
 void now3;
+
+/** Simple platform-wide key/value settings (e.g. the active model). */
+export const appSettings = mysqlTable("app_settings", {
+  key: varchar("key", { length: 80 }).primaryKey(),
+  value: text("value"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+});
