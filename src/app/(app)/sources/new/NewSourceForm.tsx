@@ -15,9 +15,9 @@ ${links}
 Find the single BEST way to fetch its upcoming events (a JSON API beats a feed, a feed beats scraping pages), verify it against a few real events, then answer with a SHORT, SPECIFIC recipe another AI agent can follow exactly.
 
 Format rules, follow them strictly:
+- Research as deeply as you need, but then BOIL IT DOWN: your entire answer is one recipe of AT MOST 25 LINES. If a finding does not change what the extraction agent does, it does not make the cut.
 - Numbered steps only. No introduction, no background, no summary, no alternatives you rejected.
 - Every step is concrete: an exact URL or URL pattern, an exact field name, an exact text marker. "Fetch https://.../api/events?page=N until empty" is right; "look for an API" is wrong.
-- Keep the whole answer under 30 lines.
 
 Cover, in this order:
 1. The exact URL(s) to fetch and how to enumerate every event (pagination, "load more", date parameters).
