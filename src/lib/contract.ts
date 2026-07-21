@@ -91,7 +91,8 @@ WRITING
 - It is NEVER the title restated, never the title plus leftover text, and never identical to the long description. If the source has no usable description, compose one true sentence from what you verified (what it is, who runs it, where); if you know nothing beyond the title, the event is not extractable.
 - BEFORE POSTING, self-check the payload IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, and every event has BOTH a contact email and a phone (the event's own, else the source default). Drop what fails; never post it.
 - Announcement titles start with the action ("Register for...", "Apply for..."). Never a bare noun for an opportunity.
-- If registration is required, the short description ends with "Registration required." If there is a cost, it includes "Paid event."
+- If registration is required, the short description includes "Registration required." If there is a cost, it includes "Paid event."
+- FIT BY REWRITING, NEVER BY CUTTING. When source text is longer than a field allows (200 for short, 1000 for long, 60 for title), REWRITE it shorter in complete sentences that end cleanly. Text chopped mid-word on a public screen is a defect.
 - NO description, short or long, ever carries a URL, a street address, or dates and times; the fields hold those, and descriptions name the venue instead of "here"/"there".
 - A streamed or online event: set locationType "on" ("bo" if also attendable in person) and put the stream or meeting link in urlLink. A "Streaming Video:" or "Watch live:" link in a description is wrong; move it to urlLink.
 - Never use em dashes or en dashes. Write a plain hyphen or restructure.
@@ -346,6 +347,16 @@ export function normalizeEvent(
     .map((s) => clean(s))
     .filter(Boolean);
 
+  // Never cut text mid-word: trim to the last sentence end (or word) that fits.
+  const fit = (s: string, max: number) => {
+    if (s.length <= max) return s;
+    const cut = s.slice(0, max);
+    const sentence = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+    if (sentence > max * 0.5) return cut.slice(0, sentence + 1);
+    const word = cut.lastIndexOf(" ");
+    return (word > 0 ? cut.slice(0, word) : cut).trim();
+  };
+
   // A long description that just repeats the short one adds nothing; drop it.
   const extRaw = clean(raw.extendedDescription);
   const ext = extRaw && extRaw.trim() === clean(raw.description).trim() ? "" : extRaw;
@@ -355,9 +366,9 @@ export function normalizeEvent(
       | "ot"
       | "an"
       | "jp",
-    title: clean(raw.title).slice(0, 60),
+    title: fit(clean(raw.title), 60),
     description: clean(raw.description),
-    extendedDescription: ext ? ext.slice(0, 1000) : null,
+    extendedDescription: ext ? fit(ext, 1000) : null,
     sessions,
     locationType: (["ph2", "on", "bo", "ne"].includes(String(raw.locationType))
       ? raw.locationType
@@ -423,7 +434,7 @@ export function validateEvent(e: ExtractedEvent): string[] {
     issues.push("location_required");
   if ((e.locationType === "on" || e.locationType === "bo") && !e.urlLink)
     issues.push("url_link_required");
-  if (e.registrationUrl && !/Registration required\.$/.test(e.description))
+  if (e.registrationUrl && !/Registration required\./.test(e.description))
     issues.push("missing_registration_required_text");
   if (e.description && /https?:\/\//i.test(e.description)) issues.push("description_contains_url");
   {
