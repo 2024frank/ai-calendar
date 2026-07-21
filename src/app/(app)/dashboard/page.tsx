@@ -38,9 +38,10 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: `repeat(${admin ? 4 : 3}, 1fr)` }}>
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${admin ? 5 : 4}, 1fr)` }}>
         {admin && <Kpi label="Active sources" value={stats.activeSources} href="/sources" />}
         <Kpi label="Pending review" value={stats.pending} href="/review" />
+        <Kpi label="Duplicates found" value={stats.duplicate} href="/review?tab=duplicates" />
         <Kpi label="Approved" value={stats.approved} href="/review?tab=approved" />
         <Kpi label="Published" value={stats.submitted} href="/review?tab=submitted" />
       </div>
