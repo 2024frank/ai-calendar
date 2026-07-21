@@ -12,6 +12,7 @@ const items = [
   { href: "/users", label: "Users", icon: "users", adminOnly: true },
   { href: "/communities", label: "Communities", icon: "communities", platformOnly: true },
   { href: "/metrics", label: "Pilot Metrics", icon: "metrics", platformOnly: true },
+  { href: "/learning", label: "Training Data", icon: "metrics", adminOnly: true },
   { href: "/activity", label: "Activity Log", icon: "inbox", platformOnly: true },
 ] as const;
 
