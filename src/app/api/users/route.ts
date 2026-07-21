@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, loginTokens, reviewerSources, sources, users } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
@@ -16,32 +16,9 @@ export async function GET() {
 
   const rows =
     s.role === "platform_admin"
-      ? await db
-          .select({
-            id: users.id,
-            email: users.email,
-            name: users.name,
-            role: users.role,
-            communityId: users.communityId,
-            canReviewAllSources: users.canReviewAllSources,
-            status: users.status,
-            createdAt: users.createdAt,
-            updatedAt: users.updatedAt,
-          })
-          .from(users)
-          .orderBy(users.id)
+      ? await db.select().from(users).orderBy(users.id)
       : await db
-          .select({
-            id: users.id,
-            email: users.email,
-            name: users.name,
-            role: users.role,
-            communityId: users.communityId,
-            canReviewAllSources: users.canReviewAllSources,
-            status: users.status,
-            createdAt: users.createdAt,
-            updatedAt: users.updatedAt,
-          })
+          .select()
           .from(users)
           .where(eq(users.communityId, s.communityId ?? -1))
           .orderBy(users.id);
@@ -102,7 +79,6 @@ export async function POST(req: Request) {
         communityId: nextCommunity,
         canReviewAllSources: role !== "reviewer",
         status: "active",
-        sessionVersion: sql`${users.sessionVersion} + 1`,
       })
       .where(eq(users.id, existing.id));
     userId = existing.id;
@@ -135,14 +111,10 @@ export async function POST(req: Request) {
   }
 
   // Mint a sign-in link so the invite works even before email is configured.
-  await db
-    .update(loginTokens)
-    .set({ consumedAt: new Date() })
-    .where(eq(loginTokens.userId, userId));
   const rawToken = randomBytes(32).toString("hex");
   await db.insert(loginTokens).values({
     userId,
-    kind: "invite",
+    kind: "magic",
     tokenHash: createHash("sha256").update(rawToken).digest("hex"),
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });

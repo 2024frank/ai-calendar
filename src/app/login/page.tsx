@@ -70,7 +70,6 @@ export default function LoginPage() {
         <div className="auth-brand">
           <Image src="/brand/communityhub-wordmark.png" alt="CommunityHub" width={1662} height={255} priority />
           <div className="auth-brand__product">AI Calendar</div>
-          <p>Turn community information into events people can act on.</p>
         </div>
 
         <Card className="auth-card">
@@ -111,7 +110,6 @@ export default function LoginPage() {
             </form>
           )}
         </Card>
-        <p className="auth-footer">Access is managed by your CommunityHub administrator.</p>
       </div>
     </main>
   );

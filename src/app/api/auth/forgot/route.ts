@@ -25,15 +25,19 @@ export async function POST(req: Request) {
     .where(and(eq(users.email, email), eq(users.status, "active")))
     .limit(1);
 
-  // Uniform response prevents account enumeration.
+  // Only people already added here may set or reset a password. An unknown email
+  // is told plainly it is not authorized, rather than a quiet "check your inbox".
   if (!user) {
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(
+      { error: "This email is not authorized. Ask an admin to add you." },
+      { status: 401 },
+    );
   }
 
   const rawToken = randomBytes(32).toString("hex");
   await db.insert(loginTokens).values({
     userId: user.id,
-    kind: "password_reset",
+    kind: "magic",
     tokenHash: createHash("sha256").update(rawToken).digest("hex"),
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
   });

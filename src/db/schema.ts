@@ -19,7 +19,7 @@ const MODE = ["restricted", "unrestricted"] as const;
 const COMMUNITY_STATUS = ["active", "suspended"] as const;
 const USER_ROLE = ["platform_admin", "community_admin", "reviewer"] as const;
 const USER_STATUS = ["active", "disabled"] as const;
-const LOGIN_KIND = ["magic", "password_reset", "invite", "otp"] as const;
+const LOGIN_KIND = ["magic", "otp"] as const;
 const SOURCE_TYPE = ["web", "email"] as const;
 const SOURCE_KIND = ["original_org", "aggregator"] as const;
 const DISCOVERY_STATUS = ["pending", "discovering", "ready", "failed", "stale"] as const;
@@ -96,8 +96,6 @@ export const users = mysqlTable(
     name: varchar("name", { length: 200 }),
     passwordHash: varchar("password_hash", { length: 255 }),
     mustSetPassword: boolean("must_set_password").notNull().default(true),
-    // Incrementing this immediately revokes every previously issued JWT.
-    sessionVersion: int("session_version").notNull().default(1),
     canReviewAllSources: boolean("can_review_all_sources").notNull().default(false),
     status: mysqlEnum("status", USER_STATUS).notNull().default("active"),
     createdAt: timestamp("created_at").notNull().defaultNow(),

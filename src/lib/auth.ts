@@ -1,10 +1,7 @@
 import "server-only";
 import { SignJWT, jwtVerify } from "jose";
-import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { db } from "@/db";
-import { users } from "@/db/schema";
 
 const COOKIE = "ac_session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -17,7 +14,6 @@ export type Session = {
   role: Role;
   communityId: number | null;
   canReviewAllSources: boolean;
-  sessionVersion: number;
 };
 
 function secret() {
@@ -35,8 +31,6 @@ function secret() {
 export async function createSession(s: Session) {
   const token = await new SignJWT({ ...s })
     .setProtectedHeader({ alg: "HS256" })
-    .setIssuer("ai-calendar")
-    .setAudience("ai-calendar-web")
     .setIssuedAt()
     .setExpirationTime("7d")
     .sign(secret());
@@ -65,28 +59,8 @@ export async function getSession(): Promise<Session | null> {
   const raw = (await cookies()).get(COOKIE)?.value;
   if (!raw) return null;
   try {
-    const { payload } = await jwtVerify(raw, secret(), {
-      algorithms: ["HS256"],
-      issuer: "ai-calendar",
-      audience: "ai-calendar-web",
-    });
-    const uid = Number(payload.uid);
-    const sessionVersion = Number(payload.sessionVersion);
-    if (!Number.isInteger(uid) || !Number.isInteger(sessionVersion)) return null;
-
-    // Authorization is live, not a seven-day snapshot. Disabling, deleting,
-    // demoting or explicitly revoking a user takes effect on their next request.
-    const [user] = await db.select().from(users).where(eq(users.id, uid)).limit(1);
-    if (!user || user.status !== "active" || user.sessionVersion !== sessionVersion) return null;
-    return {
-      uid: user.id,
-      email: user.email,
-      name: user.name ?? null,
-      role: user.role,
-      communityId: user.communityId ?? null,
-      canReviewAllSources: user.canReviewAllSources,
-      sessionVersion: user.sessionVersion,
-    };
+    const { payload } = await jwtVerify(raw, secret());
+    return payload as unknown as Session;
   } catch {
     return null;
   }
