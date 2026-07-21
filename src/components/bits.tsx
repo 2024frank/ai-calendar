@@ -1,52 +1,63 @@
-/** Oberlin local time, so every timestamp in the app reads the same way. */
+import type { ReactNode } from "react";
+import { StatusBadge, type StatusTone } from "@/components/ui";
+
+/** Product-wide timezone until per-community formatting is available in every query. */
 export const APP_TZ = "America/New_York";
 
-export function fmtDate(d: unknown) {
-  if (!d) return "—";
-  const dt = new Date(d as string);
-  if (isNaN(dt.getTime())) return "—";
-  return dt.toLocaleString("en-US", {
-    timeZone: APP_TZ,
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+const dateTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: APP_TZ,
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+export function fmtDate(value: unknown) {
+  if (!value) return "—";
+  const date = new Date(value as string);
+  if (Number.isNaN(date.getTime())) return "—";
+  return dateTimeFormatter.format(date);
 }
 
-export function Badge({ kind, children }: { kind?: string; children: React.ReactNode }) {
-  return <span className={`badge ${kind ?? ""}`}>{children}</span>;
+export function Badge({ kind, children }: { kind?: string; children: ReactNode }) {
+  const tones: Record<string, StatusTone> = {
+    good: "success",
+    warn: "warning",
+    bad: "danger",
+    neutral: "neutral",
+  };
+  return <StatusBadge tone={tones[kind ?? ""] ?? "info"}>{children}</StatusBadge>;
 }
 
-const RUN: Record<string, string> = {
-  running: "warn",
-  completed: "good",
-  failed: "bad",
+const RUN: Record<string, StatusTone> = {
+  running: "warning",
+  completed: "success",
+  failed: "danger",
   stopped: "neutral",
 };
 export function RunStatus({ status }: { status: string }) {
-  return <Badge kind={RUN[status] ?? "neutral"}>{status}</Badge>;
+  return <StatusBadge tone={RUN[status] ?? "neutral"}>{status}</StatusBadge>;
 }
 
-const DISC: Record<string, string> = {
-  ready: "good",
+const DISCOVERY: Record<string, StatusTone> = {
+  ready: "success",
   pending: "neutral",
-  discovering: "warn",
-  failed: "bad",
-  stale: "warn",
+  discovering: "warning",
+  failed: "danger",
+  stale: "warning",
 };
 export function DiscoveryStatus({ status }: { status: string }) {
-  return <Badge kind={DISC[status] ?? "neutral"}>{status}</Badge>;
+  return <StatusBadge tone={DISCOVERY[status] ?? "neutral"}>{status}</StatusBadge>;
 }
 
-const EV: Record<string, string> = {
-  pending: "warn",
-  approved: "good",
-  submitted: "good",
-  rejected: "bad",
+const EVENT: Record<string, StatusTone> = {
+  pending: "warning",
+  approved: "success",
+  submitted: "success",
+  rejected: "danger",
   duplicate: "neutral",
-  auto_rejected: "bad",
+  auto_rejected: "danger",
 };
 export function EventStatus({ status }: { status: string }) {
-  return <Badge kind={EV[status] ?? "neutral"}>{status.replace("_", " ")}</Badge>;
+  return <StatusBadge tone={EVENT[status] ?? "neutral"}>{status.replaceAll("_", " ")}</StatusBadge>;
 }

@@ -29,13 +29,15 @@ export function CommunitySwitcher({
   }
 
   return (
-    <div style={{ padding: "0 12px 12px" }}>
-      <label className="label" style={{ fontSize: 11 }}>
+    <div className="community-switcher">
+      <label className="label" htmlFor="community-switcher">
         Community
       </label>
       <select
+        id="community-switcher"
+        name="community"
+        aria-busy={busy || undefined}
         className="input"
-        style={{ fontSize: 13 }}
         value={activeId ?? ""}
         disabled={busy}
         onChange={(e) => change(Number(e.target.value))}

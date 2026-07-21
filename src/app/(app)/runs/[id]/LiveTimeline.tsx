@@ -1,124 +1,96 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Skeleton, StatusBadge } from "@/components/ui";
 
-type Evt = {
-  id: number;
-  seq: number;
-  ts: string;
-  kind: string;
-  label: string | null;
-  data: Record<string, unknown> | null;
-};
+type TimelineEvent = { id: number; seq: number; ts: string; kind: string; label: string | null; data: Record<string, unknown> | null };
 
-const KIND_COLOR: Record<string, string> = {
-  run_started: "var(--accent)",
-  fetch_issued: "var(--muted)",
-  fetch_result: "var(--muted)",
-  model_turn: "var(--accent)",
-  budget_checkpoint: "var(--muted)",
-  candidates_parsed: "var(--accent)",
-  candidate_validated: "var(--ink)",
-  dedup_outcome: "var(--warn)",
-  queue_outcome: "var(--good)",
-  run_finished: "var(--good)",
-  run_failed: "var(--bad)",
+const KIND_TONE: Record<string, string> = {
+  run_started: "var(--accent)", fetch_issued: "var(--muted)", fetch_result: "var(--muted)",
+  model_turn: "var(--accent)", budget_checkpoint: "var(--muted)", candidates_parsed: "var(--accent)",
+  candidate_validated: "var(--ink)", dedup_outcome: "var(--warn)", queue_outcome: "var(--good)",
+  run_finished: "var(--good)", run_failed: "var(--bad)",
 };
+const numberFormatter = new Intl.NumberFormat("en-US");
+const timeFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 export function LiveTimeline({ runId }: { runId: number }) {
-  const [events, setEvents] = useState<Evt[]>([]);
-  const [status, setStatus] = useState<string>("running");
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [status, setStatus] = useState("running");
   const [tokens, setTokens] = useState({ prompt: 0, completion: 0 });
+  const [reconnecting, setReconnecting] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Per-effect flag (not a ref) so React's dev double-mount cannot leave two
-    // polling loops alive appending the same events.
     let cancelled = false;
     let after = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     async function tick() {
       if (cancelled) return;
       try {
-        const res = await fetch(`/api/runs/${runId}/events?after=${after}`, { cache: "no-store" });
-        const d = await res.json();
-        if (Array.isArray(d.events) && d.events.length) {
-          after = d.nextAfter;
-          setEvents((prev) => {
-            const seen = new Set(prev.map((e) => e.id));
-            const add = (d.events as Evt[]).filter((e) => !seen.has(e.id));
-            return add.length ? [...prev, ...add] : prev;
+        const response = await fetch(`/api/runs/${runId}/events?after=${after}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Timeline request failed with ${response.status}`);
+        const data = await response.json();
+        setReconnecting(false);
+        if (Array.isArray(data.events) && data.events.length) {
+          after = data.nextAfter;
+          setEvents((previous) => {
+            const seen = new Set(previous.map((event) => event.id));
+            const additions = (data.events as TimelineEvent[]).filter((event) => !seen.has(event.id));
+            return additions.length ? [...previous, ...additions] : previous;
           });
         }
-        if (d.status) setStatus(d.status);
-        if (d.tokens) setTokens(d.tokens);
-        if (d.terminal) return;
+        if (data.status) setStatus(data.status);
+        if (data.tokens) setTokens(data.tokens);
+        if (data.terminal) return;
       } catch {
-        /* transient; keep polling */
+        setReconnecting(true);
       }
-      if (!cancelled) setTimeout(tick, 1000);
+      if (!cancelled) timer = setTimeout(tick, 1000);
     }
     tick();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [runId]);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    bottom.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "nearest" });
   }, [events.length]);
 
   const live = status === "running";
+  const totalTokens = tokens.prompt + tokens.completion;
 
   return (
-    <div>
-      <div className="spread" style={{ marginBottom: 12 }}>
-        <h3>Timeline</h3>
+    <section aria-labelledby="timeline-title">
+      <div className="section-header">
+        <div><h2 id="timeline-title">Run Timeline</h2><p>New steps appear automatically while the agent is working.</p></div>
         <div className="row">
-          <span className="muted" style={{ fontSize: 12 }}>
-            {tokens.prompt + tokens.completion > 0
-              ? `${(tokens.prompt + tokens.completion).toLocaleString()} tokens`
-              : ""}
-          </span>
-          <span className={`badge ${live ? "warn" : status === "failed" ? "bad" : "good"}`}>
-            {live ? "live" : status}
-          </span>
+          {totalTokens > 0 && <span className="muted numeric" style={{ fontSize: 12 }}>{numberFormatter.format(totalTokens)} tokens</span>}
+          <StatusBadge tone={reconnecting ? "warning" : live ? "info" : status === "failed" ? "danger" : "success"}>
+            {reconnecting ? "Reconnecting" : live ? "Live" : status}
+          </StatusBadge>
         </div>
       </div>
 
       {events.length === 0 ? (
-        <div className="muted">{live ? "Waiting for the first step…" : "No steps recorded."}</div>
+        live ? <div className="timeline-loading" role="status" aria-live="polite"><span className="sr-only">Waiting for the first step…</span><Skeleton /><Skeleton /><Skeleton /></div>
+          : <p className="muted">No timeline steps were recorded for this run.</p>
       ) : (
-        <div className="grid" style={{ gap: 6 }}>
-          {events.map((ev) => (
-            <div key={ev.id} className="row" style={{ alignItems: "flex-start", gap: 12 }}>
-              <div className="muted" style={{ fontSize: 11, width: 62, flexShrink: 0 }}>
-                {new Date(ev.ts).toLocaleTimeString("en-US", {
-                  timeZone: "America/New_York",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })}
+        <div className="timeline" role="log" aria-live="polite" aria-relevant="additions">
+          {events.map((event) => (
+            <article key={event.id} className="timeline__event">
+              <time dateTime={event.ts}>{timeFormatter.format(new Date(event.ts))}</time>
+              <span className="timeline__marker" style={{ color: KIND_TONE[event.kind] ?? "var(--muted)" }} aria-hidden="true" />
+              <div className="timeline__content">
+                <span className="timeline__kind" style={{ color: KIND_TONE[event.kind] ?? "var(--muted)" }}>{event.kind.replaceAll("_", " ")}</span>
+                <p>{event.label || "Step completed"}</p>
               </div>
-              <div
-                style={{
-                  width: 132,
-                  flexShrink: 0,
-                  fontWeight: 700,
-                  fontSize: 11,
-                  letterSpacing: "0.03em",
-                  textTransform: "uppercase",
-                  color: KIND_COLOR[ev.kind] ?? "var(--muted)",
-                }}
-              >
-                {ev.kind.replace(/_/g, " ")}
-              </div>
-              <div style={{ fontSize: 13 }}>{ev.label}</div>
-            </div>
+            </article>
           ))}
           <div ref={bottom} />
         </div>
       )}
-    </div>
+    </section>
   );
 }

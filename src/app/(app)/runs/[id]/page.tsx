@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -6,63 +5,46 @@ import { runs, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { reapStaleRuns } from "@/lib/retention";
 import { RunStatus, fmtDate } from "@/components/bits";
+import { ButtonLink, Card, PageHeader } from "@/components/ui";
 import { LiveTimeline } from "./LiveTimeline";
 
 export const dynamic = "force-dynamic";
+const numberFormatter = new Intl.NumberFormat("en-US");
 
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const s = await requireUser();
-  // A run killed by the platform never marks itself failed; heal before showing.
+  const session = await requireUser();
   await reapStaleRuns().catch(() => undefined);
-  const [run] = await db
-    .select()
-    .from(runs)
-    .where(eq(runs.id, Number(id)))
-    .limit(1);
+  const [run] = await db.select().from(runs).where(eq(runs.id, Number(id))).limit(1);
   if (!run) notFound();
-  if (s.role !== "platform_admin" && run.communityId !== s.communityId) notFound();
-
-  const [source] = run.sourceId
-    ? await db.select().from(sources).where(eq(sources.id, run.sourceId)).limit(1)
-    : [null];
+  if (session.role !== "platform_admin" && run.communityId !== session.communityId) notFound();
+  const [source] = run.sourceId ? await db.select().from(sources).where(eq(sources.id, run.sourceId)).limit(1) : [null];
+  const backHref = source ? `/sources/${source.id}` : "/dashboard";
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
-      <div>
-        <Link href={source ? `/sources/${source.id}` : "/dashboard"} className="muted" style={{ fontSize: 13 }}>
-          ← {source ? source.name : "Dashboard"}
-        </Link>
-        <div className="spread" style={{ marginTop: 4 }}>
-          <div className="page-title">Run #{run.id}</div>
-          <RunStatus status={run.status} />
-        </div>
-        <div className="muted" style={{ marginTop: 4 }}>
-          {run.runKind} · started {fmtDate(run.startedAt)}
-          {run.finishedAt ? ` · finished ${fmtDate(run.finishedAt)}` : ""}
-        </div>
-      </div>
-
-      <div className="grid" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+    <div className="grid" style={{ gap: 22 }}>
+      <PageHeader
+        eyebrow={run.runKind}
+        title={`Run #${run.id}`}
+        description={<>Started {fmtDate(run.startedAt)}{run.finishedAt ? <> · Finished {fmtDate(run.finishedAt)}</> : <> · Updates live</>}</>}
+        actions={<><RunStatus status={run.status} /><ButtonLink href={backHref} icon="arrow-left">{source?.name || "Dashboard"}</ButtonLink></>}
+      />
+      <section className="kpi-grid" aria-label="Run metrics">
         {[
-          ["Found", run.eventsFound],
-          ["To review", run.eventsExtracted],
-          ["Duplicate", run.eventsDuplicate],
-          ["With issues", run.eventsInvalid],
-          ["Tokens", run.promptTokens + run.completionTokens],
-        ].map(([label, value]) => (
-          <div className="card" key={label as string}>
-            <div className="kpi-label">{label}</div>
-            <div className="kpi" style={{ fontSize: 22 }}>
-              {value as number}
-            </div>
-          </div>
+          ["Found", run.eventsFound, "Candidates discovered"],
+          ["To Review", run.eventsExtracted, "Queued for a reviewer"],
+          ["Duplicates", run.eventsDuplicate, "Prevented from republishing"],
+          ["With Issues", run.eventsInvalid, "Needs more information"],
+          ["Tokens", run.promptTokens + run.completionTokens, "Model usage"],
+        ].map(([label, value, hint]) => (
+          <Card className="kpi-card" key={label as string}>
+            <div className="kpi-card__top"><span>{label}</span></div>
+            <div className="kpi">{numberFormatter.format(value as number)}</div>
+            <div className="kpi-card__hint">{hint}</div>
+          </Card>
         ))}
-      </div>
-
-      <div className="card">
-        <LiveTimeline runId={run.id} />
-      </div>
+      </section>
+      <Card><LiveTimeline runId={run.id} /></Card>
     </div>
   );
 }

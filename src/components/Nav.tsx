@@ -3,60 +3,58 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Icon, type IconName } from "@/components/ui";
 
 const items = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/review", label: "Pending events" },
-  { href: "/sources", label: "Sources", adminOnly: true },
-  { href: "/users", label: "Users", adminOnly: true },
-  { href: "/communities", label: "Communities", platformOnly: true },
-  { href: "/metrics", label: "Pilot metrics", platformOnly: true },
-];
+  { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
+  { href: "/review", label: "Review Queue", icon: "review" },
+  { href: "/sources", label: "Sources", icon: "sources", adminOnly: true },
+  { href: "/users", label: "Users", icon: "users", adminOnly: true },
+  { href: "/communities", label: "Communities", icon: "communities", platformOnly: true },
+  { href: "/metrics", label: "Pilot Metrics", icon: "metrics", platformOnly: true },
+] as const;
 
 export function Nav({ role, pending = 0 }: { role: string; pending?: number }) {
-  const p = usePathname();
+  const pathname = usePathname();
   const admin = role === "platform_admin" || role === "community_admin";
-
-  // Seed from the server value, then keep it live so the badge never goes stale
-  // in the client router cache: refetch on navigation, on focus, and on a timer.
   const [count, setCount] = useState(pending);
+
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const res = await fetch("/api/pending-count", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = (await res.json()) as { count?: number };
+        const response = await fetch("/api/pending-count", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as { count?: number };
         if (alive && typeof data.count === "number") setCount(data.count);
       } catch {
-        /* keep the last value */
+        // Preserve the last known count while the network recovers.
       }
     };
     load();
-    const onFocus = () => load();
-    window.addEventListener("focus", onFocus);
+    window.addEventListener("focus", load);
     const timer = window.setInterval(load, 30_000);
     return () => {
       alive = false;
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", load);
       window.clearInterval(timer);
     };
-  }, [p]);
+  }, [pathname]);
 
   return (
-    <nav className="nav">
+    <nav className="nav" aria-label="Workspace">
+      <div className="nav__label">Workspace</div>
       {items
-        .filter((i) => (!i.platformOnly || role === "platform_admin") && (!i.adminOnly || admin))
-        .map((i) => {
-          const active = p === i.href || p.startsWith(i.href + "/");
+        .filter((item) => (!("platformOnly" in item) || !item.platformOnly || role === "platform_admin") && (!("adminOnly" in item) || !item.adminOnly || admin))
+        .map((item) => {
+          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
-            <Link key={i.href} href={i.href} className={active ? "active" : ""}>
-              <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                {i.label}
-                {i.href === "/review" && count > 0 && (
-                  <span className="badge good" style={{ minWidth: 20, textAlign: "center" }}>
-                    {count}
-                  </span>
+            <Link key={item.href} href={item.href} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>
+              <Icon name={item.icon as IconName} />
+              <span className="nav__text">
+                <span>{item.label}</span>
+                {item.href === "/review" && count > 0 && (
+                  <span className="nav__count" aria-label={`${count} pending events`}>{count}</span>
                 )}
               </span>
             </Link>

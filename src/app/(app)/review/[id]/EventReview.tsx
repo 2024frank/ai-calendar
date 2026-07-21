@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { cloneElement, isValidElement, useId, useMemo, useState, type ReactElement } from "react";
 import {
   DISPLAY_TYPES,
   EVENT_TYPES,
@@ -124,14 +124,25 @@ function Field({
   missing?: boolean;
   children: React.ReactNode;
 }) {
+  const fieldId = useId();
+  const labelId = `${fieldId}-label`;
+  const directControl = isValidElement(children) && typeof children.type === "string" && ["input", "select", "textarea"].includes(children.type);
+  const controlId = directControl ? (children.props as { id?: string }).id ?? fieldId : undefined;
+  const control = directControl
+    ? cloneElement(children as ReactElement<{ id?: string; name?: string; "aria-invalid"?: boolean }>, {
+        id: controlId,
+        name: (children.props as { name?: string }).name ?? fieldId,
+        "aria-invalid": missing || undefined,
+      })
+    : children;
   return (
-    <div>
-      <label className="label">
+    <div role={directControl ? undefined : "group"} aria-labelledby={directControl ? undefined : labelId}>
+      <label className="label" id={labelId} htmlFor={controlId}>
         {label}
         {required && <span style={{ color: "var(--bad)", marginLeft: 4 }}>*</span>}
         {missing && <span style={{ color: "var(--bad)", marginLeft: 8, fontWeight: 500 }}>required</span>}
       </label>
-      {children}
+      {control}
     </div>
   );
 }
@@ -152,6 +163,7 @@ function Segmented<T extends string>({
           type="button"
           key={o.value}
           className={`badge ${value === o.value ? "good" : "neutral"}`}
+          aria-pressed={value === o.value}
           style={{ border: "none", cursor: "pointer" }}
           onClick={() => onChange(o.value)}
         >
@@ -351,7 +363,7 @@ export function EventReview({
   const m = (k: keyof typeof missing) => showErrors && missing[k];
 
   return (
-    <div className="grid" style={{ gap: 16, gridTemplateColumns: "minmax(0,1fr) 320px", alignItems: "start" }}>
+    <div className="grid review-layout" style={{ gap: 16, gridTemplateColumns: "minmax(0,1fr) 320px", alignItems: "start" }}>
       {/* LEFT: the editor */}
       <div className="grid" style={{ gap: 16 }}>
         {!ready && (
@@ -534,6 +546,7 @@ export function EventReview({
                     type="button"
                     key={id}
                     className={`badge ${on ? "good" : "neutral"}`}
+                    aria-pressed={on}
                     style={{ border: "none", cursor: "pointer" }}
                     onClick={() => setCats(on ? cats.filter((x) => x !== id) : [...cats, id])}
                   >
@@ -565,7 +578,9 @@ export function EventReview({
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}
-                alt="Event"
+                alt={`Preview for ${f.title || "event"}`}
+                width={800}
+                height={450}
                 style={{ marginTop: 8, maxHeight: 220, maxWidth: "100%", borderRadius: 8, border: "1px solid var(--line)", objectFit: "cover" }}
                 onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
               />
@@ -653,7 +668,7 @@ export function EventReview({
           </div>
         </Section>
 
-        {msg && <div className="badge">{msg}</div>}
+        {msg && <div className="alert" role="status" aria-live="polite">{msg}</div>}
 
         {rejecting ? (
           <div className="card">
@@ -711,7 +726,9 @@ export function EventReview({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}
-              alt="Event"
+              alt={`Preview for ${f.title || "event"}`}
+              width={800}
+              height={450}
               style={{ width: "100%", maxHeight: 150, objectFit: "cover", borderRadius: 8, marginBottom: 10 }}
               onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
             />
