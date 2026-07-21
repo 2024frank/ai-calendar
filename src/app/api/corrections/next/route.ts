@@ -33,6 +33,19 @@ export async function GET(req: Request) {
         ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
         : and(eq(events.status, "auto_rejected"), untried),
     );
+  const [attemptedRow] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(events)
+    .where(
+      sourceId
+        ? and(
+            eq(events.sourceId, sourceId),
+            eq(events.status, "auto_rejected"),
+            sql`${events.rejectionReason} like '%[tried]%'`,
+          )
+        : and(eq(events.status, "auto_rejected"), sql`${events.rejectionReason} like '%[tried]%'`),
+    );
+
   const [correctedRow] = await db
     .select({ n: sql<number>`count(*)` })
     .from(events)
@@ -63,6 +76,9 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     remaining: Number(remainingRow?.n ?? 0),
+    // Already attempted and parked. Nothing picks these up again on its own,
+    // so the button offers them explicitly rather than looking finished.
+    attempted: Number(attemptedRow?.n ?? 0),
     correctedTotal: Number(correctedRow?.n ?? 0),
     openRunId: openRun?.id ?? null,
     checked: Number(openRun?.checked ?? 0),
@@ -81,8 +97,54 @@ export async function POST(req: Request) {
   if (!s) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (!isAdmin(s)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  const body = (await req.json().catch(() => ({}))) as { runId?: number; sourceId?: number };
+  const body = (await req.json().catch(() => ({}))) as {
+    runId?: number;
+    sourceId?: number;
+    retryAttempted?: boolean;
+  };
   const sourceId = body.sourceId ? Number(body.sourceId) : null;
+
+  // An event that could not be completed is parked with a [tried] marker so a
+  // pass cannot loop on it forever. Nothing ever cleared those, so once every
+  // event had been attempted the button had nothing left to do and looked
+  // broken. Asking to retry unparks them, which is what you want after the
+  // agent itself has been improved.
+  if (body.retryAttempted) {
+    const parked = sql`${events.rejectionReason} like '%[tried]%'`;
+    await db
+      .update(events)
+      .set({ rejectionReason: sql`replace(${events.rejectionReason}, ' [tried]', '')` })
+      .where(
+        sourceId
+          ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), parked)
+          : and(eq(events.status, "auto_rejected"), parked),
+      );
+  }
+
+  // Nothing to work on: say so without opening a run. Every click used to
+  // create an empty run row whether or not there was anything to do.
+  const untried = sql`(${events.rejectionReason} is null or ${events.rejectionReason} not like '%[tried]%')`;
+  const [work] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(events)
+    .where(
+      sourceId
+        ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
+        : and(eq(events.status, "auto_rejected"), isNotNull(events.sourceId), untried),
+    );
+  if (!Number(work?.n ?? 0)) {
+    return NextResponse.json({
+      done: true,
+      fixed: false,
+      title: null,
+      remaining: 0,
+      runId: Number(body.runId) || 0,
+      checked: 0,
+      corrected: 0,
+      costUsd: 0,
+      tokens: 0,
+    });
+  }
 
   // Reuse the caller's run so the whole pass shares one timeline and one cost
   // total; start one on the first call.

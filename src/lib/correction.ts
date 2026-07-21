@@ -55,14 +55,24 @@ async function imageAlreadyUsed(url: string, exceptEventId: number): Promise<boo
   return Boolean(row);
 }
 
-/** Try to complete one auto-rejected event. Returns true when it was re-queued. */
+/**
+ * What happened to one event.
+ *
+ * "failed" is not "incomplete". An event whose page genuinely lacks a field is
+ * parked so a pass cannot loop on it; an event whose model call errored has not
+ * been assessed at all, and parking it means a provider hiccup silently costs
+ * an event its only chance of being fixed.
+ */
+type Outcome = "fixed" | "incomplete" | "failed";
+
+/** Try to complete one auto-rejected event. */
 async function correctOne(
   runId: number,
   ev: EventRow,
   source: SourceRow,
   instructions: string,
   models: string[],
-): Promise<boolean> {
+): Promise<Outcome> {
   const missing = String(ev.rejectionReason ?? "").replace(/^[^:]*:\s*/, "");
   const pageUrl = ev.calendarSourceUrl || ev.website || source.url || "";
 
@@ -92,6 +102,7 @@ ${access}${imagery}
 Return only the missing fields from that page. For a missing image use THIS event's own photo in imageCdnUrl, or imageB64 if the host blocks downloads. Never a logo, and never a picture of the venue: a hall interior or a building exterior taken from the listing page belongs to every event there, not to this one, and will be refused. If this event has no picture of its own, leave the image null rather than substituting one. If a field truly is not on the page, leave it null and set found=false. One page, no crawling.`;
 
   let patch: Record<string, unknown> = {};
+  let callFailed = false;
   try {
     const res = await llmComplete({
       prompt,
@@ -105,8 +116,15 @@ Return only the missing fields from that page. For a missing image use THIS even
       runId,
     });
     patch = JSON.parse(res.text || "{}");
-  } catch {
+  } catch (e) {
+    // Swallowing this made a failing model call look like "the page had no
+    // image", which is a completely different problem and sent everyone
+    // looking in the wrong place.
     patch = {};
+    callFailed = true;
+    await emit(runId, "model_turn", `Correction call failed: ${(e as Error).message.slice(0, 200)}`, {
+      eventId: ev.id,
+    });
   }
 
   // Resolve the image: agent URL, agent base64, or a server-side page rescue.
@@ -168,10 +186,13 @@ Return only the missing fields from that page. For a missing image use THIS even
   const issues = validateEvent(candidate);
   const remaining = issues.filter((i) => HARD_ISSUES.has(i));
   if (remaining.length) {
+    // If the call never landed, we learned nothing about this event, so say so
+    // rather than blaming the page for a field the agent never went looking for.
+    if (callFailed) return "failed";
     await emit(runId, "dedup_outcome", `Still incomplete (${remaining.join(", ")}): ${ev.title}`, {
       eventId: ev.id,
     });
-    return false;
+    return "incomplete";
   }
 
   // A corrected event re-enters review exactly like a freshly extracted one:
@@ -195,7 +216,7 @@ Return only the missing fields from that page. For a missing image use THIS even
     })
     .where(eq(events.id, ev.id));
   await emit(runId, "queue_outcome", `Corrected and re-queued: ${ev.title}`, { eventId: ev.id });
-  return true;
+  return "fixed";
 }
 
 export type NextResult = {
@@ -203,6 +224,8 @@ export type NextResult = {
   done: boolean;
   /** True when the event just handled was completed and re-queued. */
   fixed: boolean;
+  /** The model call never landed, so nothing was learned about this event. */
+  failed: boolean;
   title: string | null;
   /** Auto-rejected events still waiting after this one. */
   remaining: number;
@@ -227,10 +250,10 @@ export async function correctNextEvent(runId: number, sourceId: number | null = 
     : and(eq(events.status, "auto_rejected"), isNotNull(events.sourceId), untried);
 
   const [ev] = await db.select().from(events).where(where).limit(1);
-  if (!ev) return { done: true, fixed: false, title: null, remaining: 0 };
+  if (!ev) return { done: true, fixed: false, failed: false, title: null, remaining: 0 };
 
   const [src] = await db.select().from(sources).where(eq(sources.id, ev.sourceId!)).limit(1);
-  if (!src) return { done: true, fixed: false, title: null, remaining: 0 };
+  if (!src) return { done: true, fixed: false, failed: false, title: null, remaining: 0 };
   const [community] = await db
     .select()
     .from(communities)
@@ -261,11 +284,21 @@ export async function correctNextEvent(runId: number, sourceId: number | null = 
     .set({ rejectionReason: `${ev.rejectionReason ?? "Auto-rejected (incomplete)"} [tried]` })
     .where(eq(events.id, ev.id));
 
-  let fixed = false;
+  let outcome: Outcome = "failed";
   try {
-    fixed = await correctOne(runId, ev, src, instructions, models);
+    outcome = await correctOne(runId, ev, src, instructions, models);
   } catch {
-    fixed = false;
+    outcome = "failed";
+  }
+  const fixed = outcome === "fixed";
+
+  // A call that never landed leaves the event exactly as it was found, so take
+  // the marker back off and let a later pass have a proper go at it.
+  if (outcome === "failed") {
+    await db
+      .update(events)
+      .set({ rejectionReason: sql`replace(${events.rejectionReason}, ' [tried]', '')` })
+      .where(eq(events.id, ev.id));
   }
 
   // Persist progress on the run as we go, so closing the tab loses nothing and
@@ -288,5 +321,11 @@ export async function correctNextEvent(runId: number, sourceId: number | null = 
         : and(eq(events.status, "auto_rejected"), untried),
     );
   const remaining = Number(row?.n ?? 0);
-  return { done: remaining === 0, fixed, title: ev.title, remaining };
+  return {
+    done: remaining === 0,
+    fixed,
+    failed: outcome === "failed",
+    title: ev.title,
+    remaining,
+  };
 }

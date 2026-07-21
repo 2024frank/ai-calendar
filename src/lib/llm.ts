@@ -144,7 +144,31 @@ async function billRun(runId: number, usage: LlmUsage, model: string | null): Pr
   }
 }
 
+/** Upstream hiccups, not our request being wrong. Worth trying again. */
+const TRANSIENT = new Set([500, 502, 503, 504, 429]);
+
 export async function llmComplete(call: LlmCall): Promise<LlmResult> {
+  // The provider intermittently answers a long agent call with a 500 "Stream
+  // error from backend". One of those used to fail the whole job and, in the
+  // correction agent, park the event as unfixable. Give it a few goes with a
+  // widening gap before believing it.
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await llmCompleteOnce(call);
+    } catch (e) {
+      lastError = e as Error;
+      const transient =
+        /Perplexity (5\d\d|429)/.test(lastError.message) ||
+        /stream error|timeout|fetch failed|network/i.test(lastError.message);
+      if (!transient || attempt === 2) throw lastError;
+      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+    }
+  }
+  throw lastError ?? new Error("llmComplete failed");
+}
+
+async function llmCompleteOnce(call: LlmCall): Promise<LlmResult> {
   const body: Record<string, unknown> = {
     input: call.prompt,
     models: call.models?.length ? call.models : MODEL_CHAIN,

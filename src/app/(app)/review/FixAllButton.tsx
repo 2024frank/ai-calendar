@@ -22,11 +22,13 @@ type Progress = {
   corrected: number;
   /** Auto-rejected events still worth attempting. */
   remaining: number;
+  /** Attempted once and parked, waiting to be offered again. */
+  attempted: number;
   costUsd: number;
   tokens: number;
 };
 
-const ZERO: Progress = { checked: 0, corrected: 0, remaining: 0, costUsd: 0, tokens: 0 };
+const ZERO: Progress = { checked: 0, corrected: 0, remaining: 0, attempted: 0, costUsd: 0, tokens: 0 };
 
 const money = (usd: number) =>
   usd >= 0.01 ? `$${usd.toFixed(2)}` : usd > 0 ? `$${usd.toFixed(4)}` : "$0.00";
@@ -54,6 +56,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
         checked: data.checked,
         corrected: data.corrected,
         remaining: data.remaining,
+        attempted: data.attempted ?? 0,
         costUsd: data.costUsd,
         tokens: data.tokens,
       });
@@ -64,7 +67,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
   }, [sourceId]);
 
   const go = useCallback(
-    async function go(resumeRunId?: number) {
+    async function go(resumeRunId?: number, retryAttempted = false) {
       setRunning(true);
       setMsg(null);
       stop.current = false;
@@ -84,7 +87,8 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
           const res = await fetch("/api/corrections/next", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ runId, sourceId }),
+            // Unpark on the first request only; after that the loop just walks.
+            body: JSON.stringify({ runId, sourceId, retryAttempted: retryAttempted && !runId }),
             signal: ctrl.signal,
           });
           inFlight.current = null;
@@ -106,19 +110,31 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
           const data = (await res.json()) as Progress & {
             done: boolean;
             fixed: boolean;
+            failed?: boolean;
             title: string | null;
             runId: number;
           };
+          // The request succeeded but the model call inside it did not. The
+          // event was left untouched, so stop rather than spin on it.
+          if (data.failed) {
+            if (++consecutiveFailures >= MAX_FAILURES) {
+              setMsg("The model service keeps failing. Stopped; nothing was lost.");
+              break;
+            }
+            setMsg(`Model service error, retrying (${consecutiveFailures} of ${MAX_FAILURES}).`);
+            continue;
+          }
           runId = data.runId;
           done = data.done;
           setCurrent(data.title);
-          setP({
+          setP((prev) => ({
             checked: data.checked,
             corrected: data.corrected,
             remaining: data.remaining,
+            attempted: prev.attempted,
             costUsd: data.costUsd,
             tokens: data.tokens,
-          });
+          }));
           if (data.fixed) router.refresh(); // the event is already in Pending
         } catch {
           inFlight.current = null;
@@ -161,7 +177,11 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
     };
   }, [go, refreshProgress]);
 
-  if (initialCount === 0 && p.remaining === 0 && p.checked === 0) return null;
+  if (initialCount === 0 && p.remaining === 0 && p.attempted === 0 && p.checked === 0) return null;
+
+  // Everything has been attempted and parked. Offer them again rather than
+  // showing a button that does nothing.
+  const onlyParked = p.remaining === 0 && p.attempted > 0;
 
   const total = p.checked + p.remaining;
   const pct = total > 0 ? Math.round((p.checked / total) * 100) : 0;
@@ -170,8 +190,17 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
   return (
     <div className="grid" style={{ gap: 10, marginBottom: 12 }}>
       <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button className="btn primary" type="button" disabled={running} onClick={() => go()}>
-          {running ? `Fixing… ${p.remaining} left` : `Fix ${p.remaining} auto-rejected`}
+        <button
+          className="btn primary"
+          type="button"
+          disabled={running}
+          onClick={() => go(undefined, onlyParked)}
+        >
+          {running
+            ? `Fixing… ${p.remaining} left`
+            : onlyParked
+              ? `Try ${p.attempted} again`
+              : `Fix ${p.remaining} auto-rejected`}
         </button>
         {running && (
           <button
@@ -188,7 +217,9 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
         )}
         {!showBar && (
           <span className="muted" style={{ fontSize: 12 }}>
-            Opens each event&rsquo;s page, fills what is missing, and sends it back to review one by one.
+            {onlyParked
+              ? `All ${p.attempted} have been tried once and could not be completed. Worth another go now the agent has been improved.`
+              : "Opens each event\u2019s page, fills what is missing, and sends it back to review one by one."}
           </span>
         )}
         {msg && <span className={`badge ${msg === "Finished." ? "good" : "bad"}`}>{msg}</span>}
