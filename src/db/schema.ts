@@ -24,7 +24,7 @@ const SOURCE_TYPE = ["web", "email"] as const;
 const SOURCE_KIND = ["original_org", "aggregator"] as const;
 const DISCOVERY_STATUS = ["pending", "discovering", "ready", "failed", "stale"] as const;
 const DESTINATION_TYPE = ["ai_calendar", "communityhub", "webhook", "ical"] as const;
-const RUN_KIND = ["extraction", "discovery"] as const;
+const RUN_KIND = ["extraction", "discovery", "correction"] as const;
 const RUN_STATUS = ["running", "completed", "failed", "stopped"] as const;
 const RUN_CONTROL = ["run", "pause", "stop"] as const;
 const EVENT_STATUS = [
@@ -245,6 +245,9 @@ export const events = mysqlTable(
     // The already-published CommunityHub post this duplicates, when the match
     // was remote rather than another event in this app.
     duplicateOfUrl: text("duplicate_of_url"),
+    // Set when the correction agent filled a missing field and re-queued a
+    // previously auto-rejected event. Drives the "corrected" metric.
+    correctedAt: timestamp("corrected_at"),
     rejectionReason: text("rejection_reason"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),

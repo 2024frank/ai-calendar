@@ -28,6 +28,8 @@ export type PilotMetrics = {
   runsCompleted: number;
   totalSpendUsd: number; // real API dollars, summed from what the Agent API billed
   costPerEventUsd: number; // spend divided by events gathered
+  correctedCount: number; // auto-rejected events the correction agent fixed and re-queued
+  correctedAccepted: number; // of those, how many a reviewer later approved/published
   bySource: SourceMetric[];
   byModel: ModelMetric[];
   activeModel: string;
@@ -92,6 +94,16 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     })
     .from(runs);
   const totalSpendUsd = n(runRow?.costMicros) / 1_000_000;
+
+  // Correction agent: events it rescued from auto-rejection, and how many of
+  // those a reviewer later accepted (a direct measure that the fixes were good).
+  const [corrRow] = await db
+    .select({
+      total: sql<number>`count(*)`,
+      accepted: sql<number>`sum(case when ${events.status} in ('approved','submitted') then 1 else 0 end)`,
+    })
+    .from(events)
+    .where(sql`${events.correctedAt} is not null`);
 
   // Per-model comparison, straight from run rows: what each model found, cost,
   // and how clean its output was. This is the "which is better and cheaper" view.
@@ -173,6 +185,8 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     runsCompleted: n(runRow?.completed),
     totalSpendUsd,
     costPerEventUsd: eventsGathered ? totalSpendUsd / eventsGathered : 0,
+    correctedCount: n(corrRow?.total),
+    correctedAccepted: n(corrRow?.accepted),
     byModel,
     activeModel: chosenModel,
     bySource: [...perSource.values()].filter((s) => s.gathered > 0 || s.duplicatesCaught > 0).sort((a, b) => b.gathered - a.gathered),

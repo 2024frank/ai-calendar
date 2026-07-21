@@ -29,7 +29,7 @@ const MAX_IMAGE_FETCHES = 24;
 // Contact details are still required before publishing, but some organizations
 // genuinely publish no phone, so a reviewer fills those in rather than losing
 // the event entirely.
-const HARD_ISSUES = new Set([
+export const HARD_ISSUES = new Set([
   "title_missing",
   "description_too_short",
   "sessions_missing",

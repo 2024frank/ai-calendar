@@ -44,7 +44,7 @@ async function fail(runId: number, reason: string) {
 export async function startRun(
   sourceId: number,
   communityId: number,
-  kind: "extraction" | "discovery",
+  kind: "extraction" | "discovery" | "correction",
 ) {
   const [res] = await db.insert(runs).values({
     sourceId,

@@ -93,7 +93,8 @@ WRITING
 - Announcement titles start with the action ("Register for...", "Apply for..."). Never a bare noun for an opportunity.
 - If registration is required, the short description includes "Registration required." If there is a cost, it includes "Paid event."
 - FIT BY REWRITING, NEVER BY CUTTING. When source text is longer than a field allows (200 for short, 1000 for long, 60 for title), REWRITE it shorter in complete sentences that end cleanly. Text chopped mid-word on a public screen is a defect.
-- NO description, short or long, ever carries a URL, a street address, or dates and times; the fields hold those, and descriptions name the venue instead of "here"/"there".
+- NO description, short or long, EVER contains a date, a day of the week, a time, or a schedule. Not "Thursday, August 6", not "2:30 p.m.", not "Round 1, Day 1". The sessions field holds every date and time; repeating them in the description is wrong and the server rejects it. Write what the event IS, not when it happens. The long description is for lasting detail (who runs it, what to expect, requirements), never a day-by-day agenda.
+- No description, short or long, ever carries a URL or a street address either; those fields hold them, and descriptions name the venue instead of "here"/"there".
 - A streamed or online event: set locationType "on" ("bo" if also attendable in person) and put the stream or meeting link in urlLink. A "Streaming Video:" or "Watch live:" link in a description is wrong; move it to urlLink.
 - Never use em dashes or en dashes. Write a plain hyphen or restructure.
 - Never invent, estimate, or carry forward stale facts. Absent value -> leave it out; a reviewer will see it. No qualifying events -> return an empty list.
@@ -448,6 +449,20 @@ export function validateEvent(e: ExtractedEvent): string[] {
   }
   if (e.extendedDescription && /https?:\/\//i.test(e.extendedDescription))
     issues.push("long_description_contains_url");
+  // Dates, days, and times belong in the sessions field, never in prose. Detect
+  // a weekday, a clock time, or a "Month DD" pattern (bare "May" is left alone
+  // so ordinary sentences do not trip it).
+  const hasDateish = (s: string | null | undefined): boolean => {
+    if (!s) return false;
+    return (
+      /\b(mon|tues|wednes|thurs|fri|satur|sun)day\b/i.test(s) ||
+      /\b\d{1,2}:\d{2}\s*[ap]\.?\s?m\.?/i.test(s) ||
+      /\b(january|february|march|april|june|july|august|september|october|november|december)\s+\d/i.test(s) ||
+      /\b(jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+\d{1,2}\b/i.test(s)
+    );
+  };
+  if (hasDateish(e.description)) issues.push("description_contains_date");
+  if (hasDateish(e.extendedDescription)) issues.push("long_description_contains_date");
   return issues;
 }
 

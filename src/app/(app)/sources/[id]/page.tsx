@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, runs } from "@/db/schema";
+import { communities, events, runs } from "@/db/schema";
+import { CorrectButton } from "./CorrectButton";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { getSource } from "@/lib/data";
 import { reapStaleRuns } from "@/lib/retention";
@@ -33,7 +34,7 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
   const source = await getSource(s, Number(id));
   if (!source) notFound();
 
-  const [recentRuns, [community]] = await Promise.all([
+  const [recentRuns, [community], [arRow]] = await Promise.all([
     db
       .select()
       .from(runs)
@@ -41,7 +42,12 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
       .orderBy(desc(runs.startedAt))
       .limit(10),
     db.select().from(communities).where(eq(communities.id, source.communityId)).limit(1),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(events)
+      .where(and(eq(events.sourceId, source.id), eq(events.status, "auto_rejected"))),
   ]);
+  const autoRejected = Number(arRow?.n ?? 0);
 
   const recipe = (source.extractionRecipe ?? null) as {
     extraction_method?: string;
@@ -66,6 +72,7 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
           </div>
         </div>
         <RunActions sourceId={source.id} discoveryStatus={source.discoveryStatus} />
+        <CorrectButton sourceId={source.id} autoRejected={autoRejected} />
       </div>
 
       <div className="card grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>

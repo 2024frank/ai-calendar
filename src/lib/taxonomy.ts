@@ -72,6 +72,10 @@ export const ISSUE_LABELS: Record<string, string> = {
     "The link back to the original event page does not exist (404). The event or its link was likely fabricated",
   description_is_title:
     "The short description just restates the title. It should say what happens at the event",
+  description_contains_date:
+    "The short description contains a date, day, or time. Those belong only in the schedule, not the text",
+  long_description_contains_date:
+    "The long description contains dates or times. Remove the schedule from the text; the sessions hold it",
   description_contains_url:
     "The short description contains a link. A stream or meeting link belongs in the online event URL field",
   long_description_contains_url:

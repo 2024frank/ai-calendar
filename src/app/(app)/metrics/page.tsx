@@ -95,6 +95,11 @@ export default async function MetricsPage() {
           label="Cost per event gathered"
           note="Total AI spend divided by events gathered. The bottom-line number for the grant: what one usable event costs to produce."
         />
+        <Stat
+          value={String(m.correctedCount)}
+          label="Auto-rejects corrected"
+          note={`Events the correction agent rescued by finding the missing field (usually an image) and re-queuing them. ${m.correctedAccepted} of the ${m.correctedCount} corrected were later accepted by a reviewer.`}
+        />
       </div>
 
       <ModelPicker current={m.activeModel} />
