@@ -99,6 +99,7 @@ WRITING
 
 WHAT TO INCLUDE
 - Only public events that are future or currently ongoing: at least one session must not have ended.
+- PUBLIC means a member of the general public could attend: concerts, plays, lectures, exhibitions, festivals, open houses, athletics. Skip internal and members-only items: student-only or staff-only programming, residence and orientation meetings, administrative deadlines, department meetings. When the source names its audience, trust it.
 
 WHAT THE SERVER DOES, SO YOU DO NOT
 - It converts your ISO dates to timestamps in the community timezone. Keep dates as ISO wall-clock strings; never compute a Unix timestamp.
@@ -160,12 +161,13 @@ ${aiInv}
 b. Read the source:
 ${links}
    If a fetch is refused (403, Cloudflare challenge, empty shell), do NOT give up: retry from the sandbox over HTTP/1.1 with a browser user agent, which passes most bot walls:
-     curl -sL --http1.1 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html" <url>
+     curl -sL --http1.1 --retry 3 --retry-all-errors -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html" <url>
+   PLATFORM PLAYBOOK - Localist (any calendar with /api/2/events, e.g. *.edu calendars): use the JSON API, not the HTML. Page through /api/2/events?days=365&pp=100&page=N until empty. Every event has photo_url (the image is NEVER missing on Localist; not carrying it is a bug in your work), dates in event_instances (one event with one session per instance), venue in location_name plus the address fields, and per-event contacts in custom_fields (contact_person, contact_phone_number, contact_email_address). The canonical page is localist_url.
    PLATFORM PLAYBOOK - Locable (any *.locable.com site): the calendar lives at /events, which lists links like /events/<id>/. Fetch each with the curl above using -L; it redirects to /YYYY/MM/DD/<id>/<slug>/ so the date is in the final URL. The page body has the title, full description, venue name and street address, exact times like "Jul 21, 2026 6:00 PM EDT to 7:00 PM EDT", a registration link, and the event flyer as an https://images.locable.com/... URL. That image host blocks the server too, so download each flyer in your script and put its base64 into imageB64.
    For any bot-walled site, work in TWO script passes. Pass 1: one sandbox python script lists the events, fetches every page and flyer with subprocess curl, parses all fields, base64s the flyers in code, saves the draft payload to a file, and prints ONLY a compact worklist: one line per event with its title and full description text. Never print page HTML or base64; that destroys your context. Pass 2: you write the short description for each worklist line yourself (see WRITING), then a tiny script merges them into the saved payload and POSTs it, printing only counts.
 c. Keep an item only if it is public, is future or currently ongoing, and is NOT already in either inventory by your judgment in (a).
 d. Build one payload per event (all its dates in sessions, per the contract).
-e. Hand your work back by POSTing it to the ingest endpoint below. Put the events you are KEEPING in "events". Put everything you judged already present in "duplicates", each as {"title": ..., "duplicateOfUrl": <the CommunityHub post url>} for a CommunityHub match, or {"title": ..., "duplicateOfEventId": <the id from the AI-calendar inventory>} for a match in this calendar. Never silently drop a duplicate; report it so a reviewer can confirm your call. Then reply with a one-line summary of the counts.
+e. POST ONLY FULLY BUILT EVENTS. If a page fails to fetch or parse even after retries, SKIP it and mention it in your final text summary; never post a title-only or partial entry, it is noise a human has to clean up. Hand your work back by POSTing it to the ingest endpoint below. Put the events you are KEEPING in "events". Put everything you judged already present in "duplicates", each as {"title": ..., "duplicateOfUrl": <the CommunityHub post url>} for a CommunityHub match, or {"title": ..., "duplicateOfEventId": <the id from the AI-calendar inventory>} for a match in this calendar. Never silently drop a duplicate; report it so a reviewer can confirm your call. Then reply with a one-line summary of the counts.
 ${ctx.communityHubPostUrlBase ? `   duplicateOfUrl is EXACTLY ${ctx.communityHubPostUrlBase}<id>, where <id> is the post's numeric "id" field from the CommunityHub inventory. Never use "token" or any hash; a wrong id makes a dead link.` : ""}
    In the sandbox, write your payloads to a file and post it, for example:
      python3 - <<'PY'
