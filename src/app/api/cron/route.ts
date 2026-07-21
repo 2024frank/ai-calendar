@@ -5,7 +5,7 @@ import { dueScheduledSources, reapStaleRuns, sweepExpiredEvents } from "@/lib/re
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 /**
  * Scheduled maintenance tick. Vercel Cron calls this with the CRON_SECRET.

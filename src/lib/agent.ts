@@ -398,10 +398,14 @@ export async function runExtraction(runId: number) {
         : `Fetch failed: ${page.error ?? page.status}`,
       { status: page.status, bytes: page.bytes },
     );
-    // Blocked by the site? Let the model fetch the page on its side.
+    // Blocked by the site? A source with saved instructions already tells the
+    // agent how to fetch from the sandbox, so the slow hosted-fetch detour is
+    // pure waste of the run's time budget: skip straight to the agent. Only a
+    // source with no instructions still tries the hosted fetcher.
     let sourceText = page.text;
     let usedHostedFetch = false;
-    if (!page.ok || !page.text) {
+    const hasPlaybook = Boolean(source.specialInstructions);
+    if ((!page.ok || !page.text) && !hasPlaybook) {
       usedHostedFetch = true;
       await emit(
         runId,
@@ -414,16 +418,16 @@ export async function runExtraction(runId: number) {
     // Blocked everywhere? The agent still has its sandbox curl playbook; hand
     // it the job instead of failing here.
     if (!sourceText) {
-      await emit(runId, "fetch_result", "Direct fetches blocked; the agent will read the source from the sandbox", {
+      await emit(runId, "fetch_result", "Direct fetch blocked; the agent will read the source from the sandbox", {
         url: target,
       });
-      sourceText = "(Direct fetch was blocked by the site. Read the source yourself using the sandbox playbook in [2]b.)";
+      sourceText = "(Direct fetch was blocked by the site. Read the source yourself using the sandbox playbook and the special instructions.)";
     }
     // Read the source's other pages and add them under their own headings.
     for (const extra of secondary) {
       try {
         const p2 = await fetchPage(extra);
-        const t2 = p2.ok && p2.text ? p2.text : await fetchViaModel(runId, extra);
+        const t2 = p2.ok && p2.text ? p2.text : hasPlaybook ? "" : await fetchViaModel(runId, extra);
         if (t2) {
           sourceText += `\n\n===== ADDITIONAL PAGE: ${extra} =====\n${t2}`;
           await emit(runId, "fetch_result", `Also read ${extra} (${Math.round(t2.length / 1024)} KB)`, {
