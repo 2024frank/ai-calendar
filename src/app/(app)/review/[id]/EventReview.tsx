@@ -46,6 +46,9 @@ type EventRow = {
   ingestedPostUrl: string | null;
   fieldNotes: Record<string, string> | null;
   rejectionReason: string | null;
+  duplicateOfEventId: number | null;
+  duplicateOfUrl: string | null;
+  duplicateOfTitle: string | null;
 };
 
 /*
@@ -357,6 +360,51 @@ export function EventReview({
             <div style={{ fontSize: 13 }}>
               {missingKeys.length} required field(s) still needed:{" "}
               {missingKeys.map((k) => LABELS[k] ?? k).join(", ")}.
+            </div>
+          </div>
+        )}
+        {event.status === "duplicate" && (
+          <div className="card" style={{ borderColor: "var(--warn)" }}>
+            <div className="label">Marked as a duplicate. Compare and confirm.</div>
+            <div className="grid" style={{ gap: 6, fontSize: 13, marginTop: 6 }}>
+              {event.duplicateOfEventId && (
+                <div>
+                  Duplicate of{" "}
+                  <a href={`/review/${event.duplicateOfEventId}`} style={{ color: "var(--accent)", fontWeight: 600 }}>
+                    #{event.duplicateOfEventId} {event.duplicateOfTitle || ""}
+                  </a>{" "}
+                  in this calendar.
+                </div>
+              )}
+              {event.duplicateOfUrl && (
+                <div>
+                  Already published on CommunityHub:{" "}
+                  <a href={event.duplicateOfUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                    open the live post
+                  </a>
+                  .
+                </div>
+              )}
+              {(event.ingestedPostUrl || event.calendarSourceUrl) && (
+                <div>
+                  This copy came from{" "}
+                  <a
+                    href={event.calendarSourceUrl || event.ingestedPostUrl || "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "var(--accent)", fontWeight: 600 }}
+                  >
+                    its original page on the source
+                  </a>
+                  .
+                </div>
+              )}
+              {!event.duplicateOfEventId && !event.duplicateOfUrl && (
+                <div className="muted">
+                  The match was found on the CommunityHub endpoint, but no link to the live post was
+                  recorded for this event.
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -3,7 +3,13 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { destinations } from "@/db/schema";
 
-export type InventoryItem = { title: string; startTimes: number[]; location: string | null };
+export type InventoryItem = {
+  title: string;
+  startTimes: number[];
+  location: string | null;
+  // The post's own page on CommunityHub, so a duplicate can link to what it duplicates.
+  url: string | null;
+};
 
 /**
  * What the community's endpoint already holds, approved and pending alike.
@@ -32,11 +38,15 @@ export async function fetchDestinationInventory(communityId: number): Promise<In
     return posts.map((p) => {
       const sessions = Array.isArray(p.sessions) ? (p.sessions as Record<string, unknown>[]) : [];
       const loc = p.location as Record<string, unknown> | null | undefined;
+      const url = [p.url, p.permalink, p.link, p.post_url]
+        .map((v) => (typeof v === "string" ? v.trim() : ""))
+        .find((v) => /^https?:\/\//i.test(v));
       return {
         // CommunityHub calls the title "name".
         title: String(p.name ?? p.title ?? ""),
         startTimes: sessions.map((s) => Number(s.start)).filter((n) => Number.isFinite(n) && n > 0),
         location: (loc?.address ?? loc?.name ?? null) as string | null,
+        url: url ?? null,
       };
     });
   } catch {

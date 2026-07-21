@@ -250,6 +250,15 @@ export async function ingestEvents(
 
     // 3) already published on the community's endpoint
     let remoteDup = false;
+    let duplicateOfUrl: string | null = null;
+    // The agent may have already matched this to a CommunityHub post and told
+    // us its URL; keep it so the reviewer can open what it duplicates.
+    const agentDup = (raw as Record<string, unknown>)._agentDuplicateOf;
+    if (typeof agentDup === "string" && /^https?:\/\//i.test(agentDup)) {
+      duplicateOfUrl = agentDup;
+      remoteDup = true;
+      dupReason = "the agent matched it to this CommunityHub post";
+    }
     if (!duplicateOf) {
       for (const r of remoteInventory) {
         const m = contentMatches(
@@ -259,6 +268,7 @@ export async function ingestEvents(
         if (m.match) {
           remoteDup = true;
           dupReason = `already on the endpoint (${m.reason})`;
+          duplicateOfUrl = r.url ?? duplicateOfUrl;
           break;
         }
       }
@@ -326,6 +336,7 @@ export async function ingestEvents(
       dedupKey,
       provenance: source.sourceKind === "aggregator" ? "aggregator" : "original_org",
       duplicateOfEventId: duplicateOf,
+      duplicateOfUrl,
       rejectionReason,
       calendarSourceName: source.calendarSourceName ?? source.name,
       // Prefer this event's own page so a reviewer can open the original and

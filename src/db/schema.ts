@@ -241,6 +241,9 @@ export const events = mysqlTable(
     duplicateOfEventId: int("duplicate_of_event_id").references((): AnyMySqlColumn => events.id, {
       onDelete: "set null",
     }),
+    // The already-published CommunityHub post this duplicates, when the match
+    // was remote rather than another event in this app.
+    duplicateOfUrl: text("duplicate_of_url"),
     rejectionReason: text("rejection_reason"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, sources } from "@/db/schema";
+import { communities, events, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
 import { EventStatus } from "@/components/bits";
@@ -24,6 +24,15 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
     .from(communities)
     .where(eq(communities.id, ev.communityId))
     .limit(1);
+
+  // For a duplicate, load the event it duplicates so the reviewer can compare.
+  const [original] = ev.duplicateOfEventId
+    ? await db
+        .select({ id: events.id, title: events.title, status: events.status })
+        .from(events)
+        .where(eq(events.id, ev.duplicateOfEventId))
+        .limit(1)
+    : [null];
 
   return (
     <div className="grid" style={{ gap: 18, maxWidth: 1200 }}>
@@ -71,6 +80,9 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
           ingestedPostUrl: ev.ingestedPostUrl,
           fieldNotes: (ev.fieldNotes ?? null) as Record<string, string> | null,
           rejectionReason: ev.rejectionReason,
+          duplicateOfEventId: ev.duplicateOfEventId,
+          duplicateOfUrl: ev.duplicateOfUrl,
+          duplicateOfTitle: original?.title ?? null,
         }}
         sourceName={source?.name ?? "Unknown source"}
         publishEmail={process.env.PUBLISH_EMAIL ?? ""}
