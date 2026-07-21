@@ -59,6 +59,7 @@ IMAGES (required, the second most common mistake)
 - From JSON or an API, the image is a field: photo_url, image, image_url, imageUrl, thumbnail, thumb, picture, cover, poster, featured_image, enclosure, media. Copy it verbatim.
 - From a web page, the text has [IMAGE: https://...] markers. Use the one that sits with THAT event, normally just before or inside its block.
 - Every event gets its OWN image, never a shared one. If two events would share a URL you matched the wrong marker. Never use a logo, banner, or share graphic.
+- If the image lives on a bot-walled host the server cannot reach (you needed the curl playbook to read the site), download the image yourself in the sandbox with that same curl and put its raw base64 in imageB64 instead of relying on the URL. Example: curl -sL --http1.1 -A "<browser UA>" <image-url> | base64
 - Only if an event truly has no picture anywhere, leave imageCdnUrl empty and add a fieldNotes entry saying so.
 
 FIELDS
@@ -67,6 +68,7 @@ FIELDS
 - description: the short description, one factual sentence, 10-200 characters.
 - extendedDescription: optional detail, up to 1000 characters.
 - sessions: non-empty array of { start, end } ISO strings (see DATES).
+- A RECURRING program (the same title at the same venue repeating, like a weekly Storytime) is ONE event with one session per upcoming date, never a separate event per week. Its single image covers all sessions. Separate events are only for genuinely different programs.
 - locationType: "ph2" physical, "on" online, "bo" both, "ne" neither. ph2/bo need location; on/bo need urlLink.
 - location, placeName, roomNum: the venue when physical.
 - display: "all".
@@ -80,6 +82,7 @@ ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 - calendarSourceUrl: THIS event's own page on the source, so a person can open the original. A distinct URL per event; fall back to the listing only if it has none.
 - imageCdnUrl: REQUIRED (see IMAGES).
 - imageUrls: when ONE item covers several things that each have their own picture (for example an announcement listing several movies), give a list of one picture URL per thing here instead of imageCdnUrl. The server merges them side by side into one image. Use this so an item about two movies shows both posters, not one.
+- imageB64: the image itself, base64-encoded, for images the server cannot download because the host blocks it (see IMAGES). When set it wins over imageCdnUrl.
 - fieldNotes: optional array of { field, reason }. When you leave a field empty because the source genuinely has no value, add one short factual sentence why, for example [{"field":"imageCdnUrl","reason":"No image on the page or its share data."}]. State only what you checked. Never carry a real value here, never invent a reason.
 
 WRITING
@@ -150,7 +153,7 @@ b. Read the source:
 ${links}
    If a fetch is refused (403, Cloudflare challenge, empty shell), do NOT give up: retry from the sandbox over HTTP/1.1 with a browser user agent, which passes most bot walls:
      curl -sL --http1.1 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html" <url>
-   PLATFORM PLAYBOOK - Locable (any *.locable.com site): the calendar lives at /events, which lists links like /events/<id>/. Fetch each with the curl above using -L; it redirects to /YYYY/MM/DD/<id>/<slug>/ so the date is in the final URL. The page body has the title, full description, venue name and street address, exact times like "Jul 21, 2026 6:00 PM EDT to 7:00 PM EDT", a registration link, and the event flyer as an https://images.locable.com/... URL. Use that flyer as the event's image (it has no file extension; pass it as-is).
+   PLATFORM PLAYBOOK - Locable (any *.locable.com site): the calendar lives at /events, which lists links like /events/<id>/. Fetch each with the curl above using -L; it redirects to /YYYY/MM/DD/<id>/<slug>/ so the date is in the final URL. The page body has the title, full description, venue name and street address, exact times like "Jul 21, 2026 6:00 PM EDT to 7:00 PM EDT", a registration link, and the event flyer as an https://images.locable.com/... URL. That image host blocks the server, so download each flyer yourself with the same curl and send it as imageB64: curl -sL --http1.1 -A "<the browser UA above>" <image-url> | base64
 c. Keep an item only if it is public, is future or currently ongoing, and is NOT already in either inventory. Compare by content (title + date + location), never by id.
 d. Build one payload per event or per occurrence.
 e. Hand your work back by POSTing it to the ingest endpoint below. Put the events you are KEEPING in "events", and any items you found already on CommunityHub in "duplicates" (each with a "duplicateOfUrl" pointing at the CommunityHub post). Then reply with a one-line summary of the counts.
@@ -215,6 +218,7 @@ export const EVENTS_SCHEMA = {
           registrationUrl: { type: ["string", "null"] },
           imageCdnUrl: { type: ["string", "null"] },
           imageUrls: { type: "array", items: { type: "string" } },
+          imageB64: { type: ["string", "null"] },
           contactEmail: { type: ["string", "null"] },
           phone: { type: ["string", "null"] },
           cost: { type: ["string", "null"] },
@@ -354,7 +358,16 @@ export function normalizeEvent(
     phone: clean(raw.phone) || null,
     cost: clean(raw.cost) || null,
     calendarSourceUrl: clean(raw.calendarSourceUrl) || null,
-    imageData: typeof raw.imageData === "string" && raw.imageData ? raw.imageData : null,
+    imageData: (() => {
+      // imageB64 is the agent-side download for bot-walled hosts. Strip any
+      // data: prefix and the newlines the `base64` command emits.
+      const b64 = [raw.imageData, raw.imageB64].find((v) => typeof v === "string" && v) as
+        | string
+        | undefined;
+      if (!b64) return null;
+      const compact = b64.replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+      return /^[A-Za-z0-9+/=]{100,}$/.test(compact) ? compact : null;
+    })(),
     imageUrls: (Array.isArray(raw.imageUrls) ? raw.imageUrls : [])
       .map((u) => String(u).trim())
       .filter((u) => /^https?:\/\//i.test(u)),

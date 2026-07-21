@@ -120,6 +120,17 @@ export async function ingestEvents(
 
     // Drop site furniture the agent may still have picked up.
     if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;
+    // Agent-supplied image bytes (imageB64, for bot-walled hosts): keep only a
+    // real image, checked by magic bytes, capped at 4 MB.
+    if (e.imageData) {
+      const head = Buffer.from(e.imageData.slice(0, 16), "base64");
+      const realImage =
+        (head[0] === 0xff && head[1] === 0xd8) || // JPEG
+        (head[0] === 0x89 && head[1] === 0x50) || // PNG
+        (head[0] === 0x52 && head[1] === 0x49) || // WebP (RIFF)
+        (head[0] === 0x47 && head[1] === 0x49); // GIF
+      if (!realImage || e.imageData.length > 5_600_000) e.imageData = null;
+    }
     if (e.imageData) e.imageCdnUrl = e.imageCdnUrl ?? null;
 
     // Several pictures for one item (e.g. two movie posters) -> merge into one.
