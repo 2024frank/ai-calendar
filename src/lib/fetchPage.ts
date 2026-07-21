@@ -239,6 +239,27 @@ function extractFeeds(html: string, base: string): { type: string; href: string 
   return feeds;
 }
 
+// A COMPLETE modern-Chrome navigation fingerprint. Many venue sites sit behind
+// Cloudflare or another WAF that 403s anything missing the sec-ch-ua / sec-fetch
+// headers a real browser sends. This is the same bypass the agents use from the
+// sandbox, so the server's own fetches (image rescue, discovery, extraction)
+// pass the same bot walls without a per-source workaround.
+const BROWSER_HEADERS: Record<string, string> = {
+  "user-agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,text/calendar;q=0.9,application/json;q=0.8,*/*;q=0.7",
+  "accept-language": "en-US,en;q=0.9",
+  "accept-encoding": "gzip, deflate, br",
+  "upgrade-insecure-requests": "1",
+  "sec-ch-ua": '"Chromium";v="126", "Google Chrome";v="126", "Not.A/Brand";v="24"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"macOS"',
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "none",
+  "sec-fetch-user": "?1",
+};
+
 export async function fetchPage(rawUrl: string, timeoutMs = 20_000): Promise<FetchedPage> {
   // Fetch with the real credential, but report the placeholder form so the
   // token never reaches run timelines, logs, or the UI.
@@ -273,15 +294,7 @@ export async function fetchPage(rawUrl: string, timeoutMs = 20_000): Promise<Fet
       res = await fetch(current, {
         signal: ctrl.signal,
         redirect: "manual",
-        headers: {
-          // A realistic browser UA: several venue sites sit behind WAFs that
-          // 403 any obviously-automated agent string.
-          "user-agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-          accept:
-            "text/html,application/xhtml+xml,application/xml,text/calendar,application/json;q=0.9,*/*;q=0.8",
-          "accept-language": "en-US,en;q=0.9",
-        },
+        headers: BROWSER_HEADERS,
       });
 
       if (res.status >= 300 && res.status < 400) {
