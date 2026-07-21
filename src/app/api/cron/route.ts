@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { runExtraction, startRun } from "@/lib/agent";
 import { getSession } from "@/lib/auth";
-import { dueScheduledSources, sweepExpiredEvents } from "@/lib/retention";
+import { dueScheduledSources, reapStaleRuns, sweepExpiredEvents } from "@/lib/retention";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +28,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const reaped = await reapStaleRuns();
   const deleted = await sweepExpiredEvents();
 
   // The hosting plan allows a single daily cron, so this one tick starts every
@@ -45,6 +46,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
+    staleRunsFailed: reaped,
     expiredDeleted: deleted,
     scheduledRunsStarted: started.length,
     started,

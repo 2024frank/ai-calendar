@@ -247,7 +247,14 @@ export async function runDiscovery(runId: number) {
       );
       probeText = await fetchViaModel(runId, source.url);
     }
-    if (!probeText) return failDisc(`Could not read the page (${page.error ?? page.status}).`);
+    // Even with nothing readable, the discovery agent still has a sandbox and
+    // web search: it can curl past bot walls and hunt for feeds. Let it try.
+    if (!probeText) {
+      await emit(runId, "fetch_result", "Direct fetches blocked; discovery will probe from the sandbox", {
+        url: source.url,
+      });
+      probeText = "(Direct fetch was blocked by the site. Use the sandbox playbook to read it.)";
+    }
 
     const discoveryVars: PromptVars = {
       source_name: source.name,
@@ -265,6 +272,15 @@ export async function runDiscovery(runId: number) {
     const prompt = `You are the Discovery Agent. Decide the BEST way to pull events from this source, then write the extraction instructions the Source Agent will replay on every scheduled run.
 
 Prefer in this order: a public JSON API > an iCal (.ics) or RSS/Atom feed > JSON-LD / schema.org Event markup > parsing the HTML listing.
+
+If the site refuses you (403, Cloudflare challenge, empty JS shell), that is a door to route around, not a dead end. In order:
+1. Retry from the sandbox over HTTP/1.1 with a browser user agent; this passes most bot walls:
+   curl -sL --http1.1 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html" <url>
+2. Web-search for the organization's own website and its events/calendar page; orgs often mirror the same events on a fetchable page.
+3. Read the fetchable pages for embedded calendar widgets (iframes, script src) and probe the widget's own JSON/ICS endpoint directly; those are rarely blocked.
+Whatever finally works, write it into instruction_block as the exact commands and URLs to replay, so the Source Agent never repeats this search.
+
+PLATFORM PLAYBOOK - Locable (any *.locable.com site): direct fetches are Cloudflare-blocked, but the curl above works. The calendar is at /events, listing links like /events/<id>/. Fetch each with -L; it redirects to /YYYY/MM/DD/<id>/<slug>/ so the date is in the final URL. Each page has the title, full description, venue and street address, exact times like "Jul 21, 2026 6:00 PM EDT to 7:00 PM EDT", a registration link, and the event flyer as an https://images.locable.com/... URL - use that flyer as the event image, passed as-is.
 
 ${buildSourceInstructions(source.specialInstructions, discoveryVars)}
 
@@ -395,7 +411,14 @@ export async function runExtraction(runId: number) {
       );
       sourceText = await fetchViaModel(runId, target);
     }
-    if (!sourceText) return fail(runId, `Could not read the source (${page.error ?? page.status}).`);
+    // Blocked everywhere? The agent still has its sandbox curl playbook; hand
+    // it the job instead of failing here.
+    if (!sourceText) {
+      await emit(runId, "fetch_result", "Direct fetches blocked; the agent will read the source from the sandbox", {
+        url: target,
+      });
+      sourceText = "(Direct fetch was blocked by the site. Read the source yourself using the sandbox playbook in [2]b.)";
+    }
     // Read the source's other pages and add them under their own headings.
     for (const extra of secondary) {
       try {

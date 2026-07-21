@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { reapStaleRuns } from "@/lib/retention";
 import { RunStatus, fmtDate } from "@/components/bits";
 import { LiveTimeline } from "./LiveTimeline";
 
@@ -12,6 +13,8 @@ export const dynamic = "force-dynamic";
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const s = await requireUser();
+  // A run killed by the platform never marks itself failed; heal before showing.
+  await reapStaleRuns().catch(() => undefined);
   const [run] = await db
     .select()
     .from(runs)

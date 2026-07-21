@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, lt, max } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { events, runs, sources } from "@/db/schema";
 import { cronToValue } from "./schedule";
@@ -16,6 +16,49 @@ export async function sweepExpiredEvents(nowSecs = Math.floor(Date.now() / 1000)
     .delete(events)
     .where(and(isNotNull(events.startTimeMax), lt(events.startTimeMax, nowSecs)));
   return (res as { affectedRows?: number }).affectedRows ?? 0;
+}
+
+/**
+ * Fail runs that died without saying so. A serverless run killed by the
+ * platform's time limit never updates its own row, so it sits "running"
+ * forever and a discovery leaves its source stuck on "discovering". Any run
+ * still "running" past its deadline, or silent for 15 minutes, is dead: mark
+ * it failed and put its source back to a re-triable state.
+ */
+export async function reapStaleRuns(nowMs = Date.now()) {
+  const stale = await db
+    .select({ id: runs.id, sourceId: runs.sourceId, kind: runs.runKind })
+    .from(runs)
+    .where(and(eq(runs.status, "running"), lt(runs.deadlineAt, new Date(nowMs))));
+
+  const silent = await db
+    .select({ id: runs.id, sourceId: runs.sourceId, kind: runs.runKind })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.status, "running"),
+        sql`not exists (select 1 from run_events re where re.run_id = ${runs.id} and re.ts > ${new Date(nowMs - 15 * 60_000)})`,
+      ),
+    );
+
+  const dead = [...new Map([...stale, ...silent].map((r) => [r.id, r])).values()];
+  if (!dead.length) return 0;
+
+  await db
+    .update(runs)
+    .set({ status: "failed", phase: "done", finishedAt: new Date(nowMs) })
+    .where(inArray(runs.id, dead.map((r) => r.id)));
+
+  // A discovery that died leaves its source claiming "discovering"; flip it to
+  // failed so the UI says so and Re-discover becomes the obvious next step.
+  const discoverySources = dead.filter((r) => r.kind === "discovery" && r.sourceId).map((r) => r.sourceId as number);
+  if (discoverySources.length) {
+    await db
+      .update(sources)
+      .set({ discoveryStatus: "failed" })
+      .where(and(inArray(sources.id, discoverySources), eq(sources.discoveryStatus, "discovering")));
+  }
+  return dead.length;
 }
 
 // Minimum spacing per schedule choice, so a frequent cron tick can't double-run

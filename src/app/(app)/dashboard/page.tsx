@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { dashboardStats, listCommunities } from "@/lib/data";
+import { reapStaleRuns } from "@/lib/retention";
 import { fmtDate, RunStatus } from "@/components/bits";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,9 @@ function Kpi({ label, value, href }: { label: string; value: number; href?: stri
 export default async function DashboardPage() {
   const s = await requireUser();
   const admin = isAdmin(s);
+  // Self-heal: a run killed by the platform never marks itself failed, so do
+  // it here where the stale "running" badge would otherwise sit forever.
+  await reapStaleRuns().catch(() => undefined);
   const stats = await dashboardStats(s);
   const comms = s.role === "platform_admin" ? await listCommunities() : [];
 

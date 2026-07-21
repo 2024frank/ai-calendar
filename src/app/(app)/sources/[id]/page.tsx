@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { communities, runs } from "@/db/schema";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { getSource } from "@/lib/data";
+import { reapStaleRuns } from "@/lib/retention";
 import { cronToLabel, cronToValue } from "@/lib/schedule";
 import { DiscoveryStatus, RunStatus, fmtDate, Badge } from "@/components/bits";
 import { RunActions } from "./RunActions";
@@ -27,6 +28,8 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const s = await requireUser();
   if (!isAdmin(s)) redirect("/review");
+  // Self-heal stuck runs before reading, so "discovering" can't stick forever.
+  await reapStaleRuns().catch(() => undefined);
   const source = await getSource(s, Number(id));
   if (!source) notFound();
 
