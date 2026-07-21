@@ -10,8 +10,7 @@ type UserRow = {
   role: string;
   communityId: number | null;
   status: string;
-  canReviewAllSources: boolean;
-  sourceIds: number[];
+  communityIds: number[];
 };
 type Opt = { id: number; name: string };
 
@@ -165,8 +164,10 @@ export function UsersAdmin({
           <UserCard
             key={u.id}
             user={u}
+            communities={communities}
             communityName={communityName}
             isSelf={u.id === myUserId}
+            isPlatformAdmin={isPlatformAdmin}
           />
         ))}
       </div>
@@ -177,28 +178,46 @@ export function UsersAdmin({
 /** One user row that expands into an access editor. */
 function UserCard({
   user,
+  communities,
   communityName,
   isSelf,
+  isPlatformAdmin,
 }: {
   user: UserRow;
+  communities: Opt[];
   communityName: Map<number, string>;
   isSelf: boolean;
+  isPlatformAdmin: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState(user.role);
   const [status, setStatus] = useState(user.status);
+  const [communityIds, setCommunityIds] = useState<number[]>(user.communityIds);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // Only a platform admin can assign communities. A member of two or more gets
+  // the switcher, so this is where you enable "switch between communities".
+  const canAssignCommunities = isPlatformAdmin && role !== "platform_admin";
+
   async function save() {
+    if (canAssignCommunities && communityIds.length === 0) {
+      return setMsg("Pick at least one community.");
+    }
     setBusy(true);
     setMsg(null);
     const res = await fetch(`/api/users/${user.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      // Reviewers are community-scoped: grant the whole community, no per-source list.
-      body: JSON.stringify({ role, status, canReviewAllSources: true, sourceIds: [] }),
+      // Reviewers are community-scoped: whole community, no per-source list.
+      body: JSON.stringify({
+        role,
+        status,
+        canReviewAllSources: true,
+        sourceIds: [],
+        ...(canAssignCommunities ? { communityIds } : {}),
+      }),
     });
     const d = await res.json().catch(() => ({}));
     setBusy(false);
@@ -242,9 +261,18 @@ function UserCard({
           <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label className="label">Role</label>
-              <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+              <select
+                className="input"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                disabled={isSelf}
+                title={isSelf ? "You cannot change your own role." : undefined}
+              >
                 <option value="reviewer">Reviewer</option>
                 <option value="community_admin">Community admin</option>
+                {(isPlatformAdmin || user.role === "platform_admin") && (
+                  <option value="platform_admin">Platform admin</option>
+                )}
               </select>
             </div>
             <div>
@@ -256,10 +284,42 @@ function UserCard({
             </div>
           </div>
 
-          {role === "reviewer" && (
+          {canAssignCommunities && (
+            <div>
+              <label className="label">
+                Communities they can review (pick more than one so they can switch between them)
+              </label>
+              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                {communities.map((c) => {
+                  const on = communityIds.includes(c.id);
+                  return (
+                    <button
+                      type="button"
+                      key={c.id}
+                      className={`badge ${on ? "good" : "neutral"}`}
+                      style={{ border: "none", cursor: "pointer" }}
+                      onClick={() =>
+                        setCommunityIds(
+                          on ? communityIds.filter((x) => x !== c.id) : [...communityIds, c.id],
+                        )
+                      }
+                    >
+                      {c.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {communityIds.length > 1
+                  ? "They can switch between these from the sidebar."
+                  : "They see every source in this community. Add another to let them switch."}
+              </div>
+            </div>
+          )}
+
+          {role === "platform_admin" && (
             <div className="muted" style={{ fontSize: 13 }}>
-              Reviewers see every source in their community. Access is set by the community
-              they belong to, above.
+              Platform admins see and switch between every community.
             </div>
           )}
 

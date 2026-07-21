@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { reviewerSources, sources, users } from "@/db/schema";
+import { reviewerSources, sources, userCommunities, users } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -40,17 +40,22 @@ export async function PATCH(req: Request, { params }: Ctx) {
     canReviewAllSources?: boolean;
     sourceIds?: number[];
     communityId?: number;
+    communityIds?: number[];
     status?: string;
   };
   const patch: Record<string, unknown> = {};
 
-  if (body.role !== undefined) {
+  if (body.role !== undefined && String(body.role) !== target.role) {
     const role = String(body.role);
     if (!["platform_admin", "community_admin", "reviewer"].includes(role)) {
       return NextResponse.json({ error: "Invalid role." }, { status: 400 });
     }
     if (s.role !== "platform_admin" && role === "platform_admin") {
       return NextResponse.json({ error: "Only a platform admin can do that." }, { status: 403 });
+    }
+    // You cannot change your own role: it is how admins avoid locking themselves out.
+    if (uid === s.uid) {
+      return NextResponse.json({ error: "You cannot change your own role." }, { status: 400 });
     }
     patch.role = role;
     // An admin reviews everything; a reviewer is scoped unless review-all is set.
@@ -60,12 +65,32 @@ export async function PATCH(req: Request, { params }: Ctx) {
     patch.canReviewAllSources = Boolean(body.canReviewAllSources);
   }
   if (body.status === "active" || body.status === "disabled") patch.status = body.status;
-  if (s.role === "platform_admin" && body.communityId !== undefined) {
+
+  // Community membership. Only a platform admin can move users across communities.
+  // A list of communities is what lets a reviewer switch between them: the first
+  // is their home community, the rest are extra memberships.
+  let newCommunityIds: number[] | null = null;
+  if (s.role === "platform_admin" && Array.isArray(body.communityIds)) {
+    newCommunityIds = [...new Set(body.communityIds.map(Number).filter(Boolean))];
+    if (newCommunityIds.length) patch.communityId = newCommunityIds[0];
+  } else if (s.role === "platform_admin" && body.communityId !== undefined) {
     patch.communityId = body.communityId ? Number(body.communityId) : null;
   }
 
   if (Object.keys(patch).length) {
     await db.update(users).set(patch).where(eq(users.id, uid));
+  }
+
+  // Replace the extra memberships (everything past the home community).
+  if (newCommunityIds) {
+    await db.delete(userCommunities).where(eq(userCommunities.userId, uid));
+    const extra = newCommunityIds.slice(1);
+    if (extra.length) {
+      await db
+        .insert(userCommunities)
+        .values(extra.map((cid) => ({ userId: uid, communityId: cid })))
+        .catch(() => undefined);
+    }
   }
 
   // Replace the reviewer's source assignments when a list is provided.

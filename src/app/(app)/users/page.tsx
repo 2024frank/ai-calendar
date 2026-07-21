@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { reviewerSources, users } from "@/db/schema";
+import { userCommunities, users } from "@/db/schema";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { listCommunities } from "@/lib/data";
 import { UsersAdmin } from "./UsersAdmin";
@@ -23,18 +23,20 @@ export default async function UsersPage() {
 
   const comms = await listCommunities();
 
-  // Each reviewer's current source assignments, so the editor shows what's on.
-  const rsRows = rows.length
+  // Each user's extra community memberships, so the editor shows every community
+  // they can reach (home community + extras). Belonging to more than one is what
+  // gives them the community switcher.
+  const ucRows = rows.length
     ? await db
-        .select({ userId: reviewerSources.userId, sourceId: reviewerSources.sourceId })
-        .from(reviewerSources)
-        .where(inArray(reviewerSources.userId, rows.map((u) => u.id)))
+        .select({ userId: userCommunities.userId, communityId: userCommunities.communityId })
+        .from(userCommunities)
+        .where(inArray(userCommunities.userId, rows.map((u) => u.id)))
     : [];
-  const assignedByUser = new Map<number, number[]>();
-  for (const r of rsRows) {
-    const arr = assignedByUser.get(r.userId) ?? [];
-    arr.push(r.sourceId);
-    assignedByUser.set(r.userId, arr);
+  const extraByUser = new Map<number, number[]>();
+  for (const r of ucRows) {
+    const arr = extraByUser.get(r.userId) ?? [];
+    arr.push(r.communityId);
+    extraByUser.set(r.userId, arr);
   }
 
   return (
@@ -46,8 +48,8 @@ export default async function UsersPage() {
         role: u.role,
         communityId: u.communityId,
         status: u.status,
-        canReviewAllSources: u.canReviewAllSources,
-        sourceIds: assignedByUser.get(u.id) ?? [],
+        // Home community first, then the extra memberships, de-duplicated.
+        communityIds: [...new Set([u.communityId, ...(extraByUser.get(u.id) ?? [])].filter(Boolean))] as number[],
       }))}
       communities={comms.map((c) => ({ id: c.id, name: c.name }))}
       isPlatformAdmin={s.role === "platform_admin"}
