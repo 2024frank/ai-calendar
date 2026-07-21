@@ -25,6 +25,8 @@ export type PilotMetrics = {
   totalReviewerEdits: number;
   estimatedHoursSaved: number;
   runsCompleted: number;
+  totalSpendUsd: number; // real API dollars, summed from what the Agent API billed
+  costPerEventUsd: number; // spend divided by events gathered
   bySource: SourceMetric[];
 };
 
@@ -72,8 +74,12 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   const approvedAsIs = approvedRows.filter((e) => !editedSet.has(e.id)).length;
 
   const [runRow] = await db
-    .select({ completed: sql<number>`sum(case when ${runs.status} = 'completed' then 1 else 0 end)` })
+    .select({
+      completed: sql<number>`sum(case when ${runs.status} = 'completed' then 1 else 0 end)`,
+      costMicros: sql<number>`sum(${runs.costMicros})`,
+    })
     .from(runs);
+  const totalSpendUsd = n(runRow?.costMicros) / 1_000_000;
 
   // Aggregate.
   // Events shown to a reviewer (pending/approved/submitted). Auto-rejected events
@@ -122,6 +128,8 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     totalReviewerEdits: editRows.reduce((a, r) => a + n(r.edits), 0),
     estimatedHoursSaved: Math.round((eventsGathered * MINUTES_PER_MANUAL_EVENT) / 60),
     runsCompleted: n(runRow?.completed),
+    totalSpendUsd,
+    costPerEventUsd: eventsGathered ? totalSpendUsd / eventsGathered : 0,
     bySource: [...perSource.values()].filter((s) => s.gathered > 0 || s.duplicatesCaught > 0).sort((a, b) => b.gathered - a.gathered),
   };
 }

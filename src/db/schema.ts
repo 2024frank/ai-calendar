@@ -278,6 +278,9 @@ export const runs = mysqlTable(
     budgetTotal: int("budget_total"),
     promptTokens: int("prompt_tokens").notNull().default(0),
     completionTokens: int("completion_tokens").notNull().default(0),
+    // Dollar cost of this run, as reported by the Agent API (no markup). Stored
+    // in micro-dollars (millionths) to keep it an exact integer.
+    costMicros: int("cost_micros").notNull().default(0),
     eventsFound: int("events_found").notNull().default(0),
     eventsExtracted: int("events_extracted").notNull().default(0),
     eventsDuplicate: int("events_duplicate").notNull().default(0),

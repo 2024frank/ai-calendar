@@ -66,6 +66,16 @@ export default async function MetricsPage() {
           label="Staff time saved (estimate)"
           note={`Rough figure: ${m.eventsGathered} events times ${MINUTES_PER_MANUAL_EVENT} minutes to find and enter one by hand. An estimate, not a measurement.`}
         />
+        <Stat
+          value={m.totalSpendUsd < 1 ? `${(m.totalSpendUsd * 100).toFixed(1)}¢` : `$${m.totalSpendUsd.toFixed(2)}`}
+          label="AI spend so far"
+          note="Real dollars billed by the API across every run, no estimate. This is the whole cost of running the system to date."
+        />
+        <Stat
+          value={m.costPerEventUsd < 1 ? `${(m.costPerEventUsd * 100).toFixed(1)}¢` : `$${m.costPerEventUsd.toFixed(2)}`}
+          label="Cost per event gathered"
+          note="Total AI spend divided by events gathered. The bottom-line number for the grant: what one usable event costs to produce."
+        />
       </div>
 
       <div className="card">

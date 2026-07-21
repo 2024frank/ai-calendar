@@ -347,6 +347,7 @@ Write "instruction_block" as concrete, durable guidance for extracting THIS sour
         finishedAt: new Date(),
         promptTokens: res.usage.input,
         completionTokens: res.usage.output,
+        costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
       })
       .where(eq(runs.id, runId));
     await emit(runId, "run_finished", `Recipe saved for ${source.name} (${recipe.extraction_method})`, {
@@ -555,6 +556,17 @@ Only include events that have a real date. Skip anything already past. If there 
     );
 
     // If the agent posted its results, the ingest endpoint already completed the
+    // run. Record what the model cost either way, BEFORE the early return, so
+    // token and dollar usage is never lost on the normal (agent-posted) path.
+    await db
+      .update(runs)
+      .set({
+        promptTokens: res.usage.input,
+        completionTokens: res.usage.output,
+        costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
+      })
+      .where(eq(runs.id, runId));
+
     // run. Nothing more to do.
     const [afterPost] = await db
       .select({ status: runs.status })
@@ -579,6 +591,7 @@ Only include events that have a real date. Skip anything already past. If there 
         finishedAt: new Date(),
         promptTokens: res.usage.input,
         completionTokens: res.usage.output,
+        costMicros: Math.round((res.usage.costUsd ?? 0) * 1_000_000),
         eventsFound: counts.found,
         eventsExtracted: counts.inserted,
         eventsDuplicate: counts.duplicate,
