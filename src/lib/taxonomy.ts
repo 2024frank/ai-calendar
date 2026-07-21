@@ -68,6 +68,8 @@ export const ISSUE_LABELS: Record<string, string> = {
   url_link_required: "An online event needs a link to join",
   missing_registration_required_text:
     'This event takes registrations, so the short description should end with "Registration required."',
+  source_link_dead:
+    "The link back to the original event page does not exist (404). The event or its link was likely fabricated",
   description_is_title:
     "The short description just restates the title. It should say what happens at the event",
   description_contains_url:

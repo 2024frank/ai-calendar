@@ -41,7 +41,41 @@ const HARD_ISSUES = new Set([
   // No reachable contact, no event: the public must have someone to ask.
   "contact_email_missing",
   "phone_missing",
+  // The link to the original is the ground truth. A page that does not exist
+  // means the event (or its link) was fabricated, so it never reaches review.
+  "source_link_dead",
 ]);
+
+/** Which of these source links definitely do not exist (a real 404). */
+async function deadSourceLinks(urls: string[]): Promise<Set<string>> {
+  const dead = new Set<string>();
+  const uniq = [...new Set(urls.filter((u) => /^https?:\/\//i.test(u)))];
+  const headers = {
+    "user-agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+  };
+  const BATCH = 8;
+  for (let i = 0; i < uniq.length; i += BATCH) {
+    await Promise.all(
+      uniq.slice(i, i + BATCH).map(async (u) => {
+        try {
+          const r = await fetch(u, {
+            redirect: "follow",
+            signal: AbortSignal.timeout(9000),
+            headers,
+          });
+          // Only a definite 404/410 means "does not exist". A 403 is a bot wall,
+          // a timeout is the network, and neither proves the link is fake.
+          if (r.status === 404 || r.status === 410) dead.add(u);
+        } catch {
+          /* network error or timeout: give the link the benefit of the doubt */
+        }
+      }),
+    );
+  }
+  return dead;
+}
 
 export type IngestCounts = {
   found: number;
@@ -118,6 +152,17 @@ export async function ingestEvents(
       .map((u) => String(u).replace(/\/+$/, "")),
   );
   const isListing = (u: string) => listingUrls.has(u.replace(/\/+$/, ""));
+
+  // Ground-truth link check: an event's source page must actually exist. A
+  // fabricated event usually gives itself away with a link that 404s.
+  const deadLinks = await deadSourceLinks(
+    rawEvents.flatMap((r) => [r.calendarSourceUrl, r.website].filter((u): u is string => typeof u === "string")),
+  );
+  if (deadLinks.size) {
+    await emit(runId, "fetch_result", `Source links checked; ${deadLinks.size} did not exist (dropped)`, {
+      dead: deadLinks.size,
+    });
+  }
 
   // Bulk image rescue BEFORE the main loop: every event still missing a
   // picture gets its own page fetched (concurrently) and the page's share
@@ -262,6 +307,9 @@ export async function ingestEvents(
     }
 
     const issues = validateEvent(e);
+    if ((e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) || (e.website && deadLinks.has(e.website))) {
+      issues.push("source_link_dead");
+    }
     const dedupKey = computeDedupKey(e);
     const startTimes = e.sessions.map((s) => s.startTime);
 

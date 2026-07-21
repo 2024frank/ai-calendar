@@ -21,7 +21,10 @@ That's the whole loop. Add a source once, and it keeps itself up to date.
 - Images that live behind a bot wall get downloaded by the agent and sent along as data, since the server can't reach them.
 - Duplicates are judged by what the event actually is, not by matching strings, and each one links to the version it matched so a reviewer can check.
 - Events delete themselves once they're over, so the calendar only holds what's coming up.
+- Every event links back to the exact page it came from, so a reviewer can check it against the source.
 - Every run is written down step by step (each fetch, each model call, each decision) and shown on a live timeline, so a run never just hangs with no explanation.
+
+It is multi-tenant: one install serves several communities, each with its own sources, calendar, and destination. A person can belong to more than one and switch between them. There is also a metrics view that reports how many events were gathered, how many reposts were caught, and how much a reviewer still had to correct, which is the kind of thing a pilot needs to show whether the approach works.
 
 ## Words the code uses
 

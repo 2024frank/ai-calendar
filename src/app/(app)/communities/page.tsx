@@ -2,6 +2,7 @@ import { requirePlatformAdmin } from "@/lib/auth";
 import { listCommunities, listDestinations } from "@/lib/data";
 import { Badge } from "@/components/bits";
 import { CommunitySettings } from "./CommunitySettings";
+import { EndpointEditor } from "./EndpointEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -47,37 +48,18 @@ export default async function CommunitiesPage() {
               timezone={c.timezone}
             />
 
-            <div style={{ marginTop: 16 }}>
-              <div className="label">Endpoints</div>
-              {ds.length === 0 ? (
-                <div className="muted">No external endpoint. Events live in the AI calendar.</div>
-              ) : (
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Type</th>
-                      <th>Active</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ds.map((d) => (
-                      <tr key={d.id}>
-                        <td style={{ fontWeight: 600 }}>{d.name}</td>
-                        <td>{d.type}</td>
-                        <td>
-                          {d.active ? (
-                            <Badge kind="good">on</Badge>
-                          ) : (
-                            <Badge kind="warn">off</Badge>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            <EndpointEditor
+              communityId={c.id}
+              currentName={ds[0]?.name ?? ""}
+              currentApiBase={
+                (() => {
+                  const cfg = ds[0]?.config;
+                  const o = (typeof cfg === "string" ? JSON.parse(cfg) : cfg) as { api_base?: string } | null;
+                  return o?.api_base ?? "";
+                })()
+              }
+              currentActive={Boolean(ds[0]?.active && c.defaultDestinationId)}
+            />
           </div>
         );
       })}

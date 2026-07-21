@@ -79,7 +79,7 @@ ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 - registrationUrl: the exact registration link when registration is required. It becomes the button; never put it inside a description.
 - contactEmail, phone: REQUIRED. The event's own, else the source's standing contact. An event with no contact email or no phone after those fallbacks is DROPPED, not posted: the public must have someone to ask.
 - buttons: [{ title, link }] when the page offers one (Register, Buy Tickets).
-- calendarSourceUrl: THIS event's own page on the source, so a person can open the original. A distinct URL per event; fall back to the listing only if it has none.
+- calendarSourceUrl: THIS event's own page on the source, and it must be a REAL link you actually fetched and that returned this event. NEVER build, guess, or pattern-match a URL. If an event has no dedicated page, use the listing URL you really read. A link that 404s means the event is not real: do not invent an event out of an ongoing program, ensemble, or class that has no scheduled date. The server checks this link and drops any event whose page does not exist.
 - imageCdnUrl: REQUIRED (see IMAGES).
 - imageUrls: when ONE item covers several things that each have their own picture (for example an announcement listing several movies), give a list of one picture URL per thing here instead of imageCdnUrl. The server merges them side by side into one image. Use this so an item about two movies shows both posters, not one.
 - imageB64: the image itself, base64-encoded, for images the server cannot download because the host blocks it (see IMAGES). When set it wins over imageCdnUrl.
