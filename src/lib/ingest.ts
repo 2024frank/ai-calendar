@@ -81,6 +81,7 @@ export async function ingestEvents(
       id: events.id,
       title: events.title,
       location: events.location,
+      description: events.description,
       sessions: events.sessions,
       dedupKey: events.dedupKey,
     })
@@ -230,15 +231,15 @@ export async function ingestEvents(
     let duplicateOf: number | null = existingByKey.get(dedupKey) ?? null;
     let dupReason = duplicateOf ? "identical title and date signature" : "";
 
-    // 2) content match: date + location first, then title
+    // 2) content match on title + start time + location + short description
     if (!duplicateOf) {
       for (const x of existing) {
         const xs = Array.isArray(x.sessions)
           ? (x.sessions as { startTime?: number }[]).map((s) => Number(s.startTime)).filter(Boolean)
           : [];
         const m = contentMatches(
-          { title: e.title, startTimes, location: e.location ?? null },
-          { title: x.title ?? "", startTimes: xs, location: x.location ?? null },
+          { title: e.title, startTimes, location: e.location ?? null, description: e.description },
+          { title: x.title ?? "", startTimes: xs, location: x.location ?? null, description: x.description ?? null },
         );
         if (m.match) {
           duplicateOf = x.id;
@@ -262,8 +263,8 @@ export async function ingestEvents(
     if (!duplicateOf) {
       for (const r of remoteInventory) {
         const m = contentMatches(
-          { title: e.title, startTimes, location: e.location ?? null },
-          { title: r.title, startTimes: r.startTimes, location: r.location },
+          { title: e.title, startTimes, location: e.location ?? null, description: e.description },
+          { title: r.title, startTimes: r.startTimes, location: r.location, description: r.description },
         );
         if (m.match) {
           remoteDup = true;

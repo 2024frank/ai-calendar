@@ -438,26 +438,36 @@ export function computeDedupKey(e: ExtractedEvent): string {
   return createHash("sha256").update(basis).digest("hex");
 }
 
-/** Content match used to flag duplicates: date and location first, then title. */
+/**
+ * Content match used to flag duplicates, built on four signals: title, start
+ * time, location, and short description. A duplicate always shares the title
+ * or the description; a shared venue and day alone is NEVER enough, because
+ * one venue hosts many different events on the same day.
+ */
 export function contentMatches(
-  a: { title: string; startTimes: number[]; location: string | null },
-  b: { title: string; startTimes: number[]; location: string | null },
+  a: { title: string; startTimes: number[]; location: string | null; description?: string | null },
+  b: { title: string; startTimes: number[]; location: string | null; description?: string | null },
 ): { match: boolean; reason: string } {
-  const sameDay = a.startTimes.some((x) =>
-    b.startTimes.some((y) => Math.abs(x - y) < 12 * 3600),
-  );
-  const normLoc = (s: string | null) =>
+  const norm = (s: string | null | undefined) =>
     (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const sameLoc =
-    normLoc(a.location) && normLoc(b.location)
-      ? normLoc(a.location) === normLoc(b.location) ||
-        normLoc(a.location).includes(normLoc(b.location)) ||
-        normLoc(b.location).includes(normLoc(a.location))
-      : false;
-  const normTitle = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const sameTitle = normTitle(a.title) === normTitle(b.title);
 
-  if (sameDay && sameTitle) return { match: true, reason: "same date and title" };
-  if (sameDay && sameLoc) return { match: true, reason: "same date and location" };
+  const sameStart = a.startTimes.some((x) => b.startTimes.some((y) => Math.abs(x - y) < 3600));
+  const sameDay = a.startTimes.some((x) => b.startTimes.some((y) => Math.abs(x - y) < 12 * 3600));
+  const la = norm(a.location);
+  const lb = norm(b.location);
+  const sameLoc = la && lb ? la === lb || la.includes(lb) || lb.includes(la) : false;
+  const sameTitle = norm(a.title) === norm(b.title) && norm(a.title).length > 0;
+  const da = norm(a.description);
+  const db = norm(b.description);
+  const sameDesc = da.length > 15 && db.length > 15 && da === db;
+
+  // Same title on the same day is the classic repost.
+  if (sameTitle && sameDay) return { match: true, reason: "same title and date" };
+  // Same title and venue with no usable date still reads as the same listing.
+  if (sameTitle && sameLoc && !a.startTimes.length) return { match: true, reason: "same title and location" };
+  // A retitled repost: identical description at the same start time and venue.
+  if (sameDesc && sameStart && sameLoc) {
+    return { match: true, reason: "same description, start time and location" };
+  }
   return { match: false, reason: "" };
 }

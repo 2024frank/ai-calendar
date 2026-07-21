@@ -7,6 +7,7 @@ export type InventoryItem = {
   title: string;
   startTimes: number[];
   location: string | null;
+  description: string | null;
   // The post's own page on CommunityHub, so a duplicate can link to what it duplicates.
   url: string | null;
 };
@@ -46,6 +47,7 @@ export async function fetchDestinationInventory(communityId: number): Promise<In
         title: String(p.name ?? p.title ?? ""),
         startTimes: sessions.map((s) => Number(s.start)).filter((n) => Number.isFinite(n) && n > 0),
         location: (loc?.address ?? loc?.name ?? null) as string | null,
+        description: (typeof p.description === "string" && p.description) || (typeof p.excerpt === "string" && p.excerpt) || null,
         url: url ?? null,
       };
     });
