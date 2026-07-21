@@ -39,6 +39,8 @@ An admin can pick which AI model runs extraction for every source (Claude, Gemin
 
 Sign-ins and the actions that change something are written to an activity log, so who did what is always answerable.
 
+The app sends four emails: a sign-in link, a password setup or reset, an invite to a community, and a digest to reviewers when a run brings in new events. They share one frame, so a change to it changes all four. Each goes out with a plain-text version alongside the HTML and a preheader line, which is the grey text an inbox shows next to the subject.
+
 ## Words the code uses
 
 | Word | Means |
