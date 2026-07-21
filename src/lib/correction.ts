@@ -234,6 +234,16 @@ export async function correctNextEvent(runId: number, sourceId: number | null = 
       .where(eq(events.id, ev.id));
   }
 
+  // Persist progress on the run as we go, so closing the tab loses nothing and
+  // coming back can pick up exactly where this left off.
+  await db
+    .update(runs)
+    .set({
+      eventsFound: sql`${runs.eventsFound} + 1`,
+      ...(fixed ? { eventsExtracted: sql`${runs.eventsExtracted} + 1` } : {}),
+    })
+    .where(eq(runs.id, runId));
+
   // What is still worth attempting, so the caller knows when to stop.
   const [row] = await db
     .select({ n: sql<number>`count(*)` })

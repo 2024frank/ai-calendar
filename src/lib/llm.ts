@@ -224,12 +224,15 @@ export async function llmComplete(call: LlmCall): Promise<LlmResult> {
         : null,
   };
 
-  const result = { ...readResponse(parsed), usage };
+  // Bill BEFORE reading the payload. Perplexity has already charged for these
+  // tokens, so a response we cannot parse still costs money and must still be
+  // counted; billing after readResponse would silently lose it on every
+  // malformed or refused answer. Doing it HERE, rather than at each call site,
+  // also means every agent (extraction, correction, hosted fetch, and anything
+  // added later) counts toward the cost automatically and none can forget to.
+  if (call.runId) {
+    await billRun(call.runId, usage, typeof parsed.model === "string" ? parsed.model : null);
+  }
 
-  // Bill this call to its run. Doing it HERE, rather than at each call site,
-  // means every agent (extraction, correction, hosted fetch, and anything added
-  // later) counts toward the cost automatically and none can forget to.
-  if (call.runId) await billRun(call.runId, usage, result.model);
-
-  return result;
+  return { ...readResponse(parsed), usage };
 }
