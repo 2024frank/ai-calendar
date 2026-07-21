@@ -107,7 +107,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (Array.isArray(body.sessions)) {
     const next = (body.sessions as { startTime?: unknown; endTime?: unknown }[])
-      .map((s) => ({ startTime: Number(s.startTime), endTime: Number(s.endTime) }))
+      .map((s) => {
+        const startTime = Number(s.startTime);
+        let endTime = Number(s.endTime);
+        // A missing, inverted, or equal end defaults to two hours after the start.
+        if (!Number.isFinite(endTime) || endTime <= startTime) endTime = startTime + 2 * 3600;
+        return { startTime, endTime };
+      })
       .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0);
     const prev = (ev.sessions ?? []) as { startTime: number; endTime: number }[];
     if (JSON.stringify(prev) !== JSON.stringify(next)) {

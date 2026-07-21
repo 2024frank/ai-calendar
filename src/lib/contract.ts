@@ -52,7 +52,7 @@ DATES (this is the most common mistake, read it twice)
 - In each session, write start and end as the date and time EXACTLY as the page states them, in ISO wall-clock form "YYYY-MM-DDThh:mm" (24-hour), for example "2026-07-27T18:30". Copy the calendar date and clock time shown.
 - Do NOT convert to a number, a Unix timestamp, or another timezone. The server does that. Never compute or do arithmetic on dates.
 - Always write a four-digit year. If the page shows only month and day, use the next occurrence that is today or later.
-- Always take the stated end time. If an event gives a start but no end, use the start for both; a person sets the real end. Never invent a duration.
+- Always take the stated end time. If an event gives a start but no end, use the start for both; the server then sets the end to two hours after the start. Never invent any other duration yourself.
 
 IMAGES (required, the second most common mistake)
 - Every event has its own picture. An event with none is discarded, so finding it is not optional.
@@ -319,8 +319,9 @@ export function normalizeEvent(
       const endRaw = o.end ?? o.endTime;
       const startTime = toUnixSeconds(String(startRaw ?? ""), timeZone, ref);
       let endTime = toUnixSeconds(String(endRaw ?? ""), timeZone, ref);
-      // An end before the start is a mis-read end, not a real one; a person sets it.
-      if (!endTime || endTime < startTime) endTime = startTime;
+      // No end, an end before the start, or an end equal to the start is a
+      // mis-read end, not a real one: default to two hours after the start.
+      if (!endTime || endTime <= startTime) endTime = startTime + 2 * 3600;
       return { startTime, endTime };
     })
     .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0);
@@ -402,7 +403,7 @@ export function validateEvent(e: ExtractedEvent): string[] {
   for (const s of e.sessions) {
     if (!Number.isInteger(s.startTime) || s.startTime <= 0) issues.push("session_start_invalid");
     if (s.endTime < s.startTime) issues.push("session_end_before_start");
-    if (e.eventType !== "an" && s.endTime === s.startTime) issues.push("end_equals_start");
+    // end == start no longer occurs: normalization shifts it to start + 2h.
   }
   if ((e.locationType === "ph2" || e.locationType === "bo") && !e.location)
     issues.push("location_required");
