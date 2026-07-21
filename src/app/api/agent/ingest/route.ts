@@ -8,6 +8,7 @@ import { emit } from "@/lib/runEvents";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 /**
  * Where the extraction agent hands back its work.

@@ -116,6 +116,48 @@ export async function ingestEvents(
   );
   const isListing = (u: string) => listingUrls.has(u.replace(/\/+$/, ""));
 
+  // Bulk image rescue BEFORE the main loop: every event still missing a
+  // picture gets its own page fetched (concurrently) and the page's share
+  // image (og:image) used. This covers an agent that shipped events without
+  // their photos even though the pages have them.
+  const needingImage = rawEvents.filter((r) => {
+    const has =
+      (typeof r.imageCdnUrl === "string" && r.imageCdnUrl) ||
+      (typeof r.imageB64 === "string" && r.imageB64) ||
+      (typeof r.imageData === "string" && r.imageData) ||
+      (Array.isArray(r.imageUrls) && r.imageUrls.length);
+    return !has;
+  });
+  if (needingImage.length) {
+    let rescued = 0;
+    const BATCH = 8;
+    for (let i = 0; i < needingImage.length; i += BATCH) {
+      await Promise.all(
+        needingImage.slice(i, i + BATCH).map(async (r) => {
+          const detail = [r.calendarSourceUrl, r.website, r.registrationUrl, r.urlLink].find(
+            (u): u is string => typeof u === "string" && isPublicHttpUrl(u) && !isListing(u),
+          );
+          if (!detail) return;
+          try {
+            const page = await fetchPage(detail, 10_000);
+            if (page.image && !isGenericImage(page.image)) {
+              r.imageCdnUrl = page.image;
+              rescued++;
+            }
+          } catch {
+            /* leave it; validation reports image_missing */
+          }
+        }),
+      );
+    }
+    await emit(
+      runId,
+      "image_enriched",
+      `Fetched ${needingImage.length} event page(s) for missing pictures; found ${rescued}`,
+      { missing: needingImage.length, rescued },
+    );
+  }
+
   for (const raw of rawEvents) {
     const e: ExtractedEvent = normalizeEvent(raw, community.timezone);
 
@@ -172,7 +214,7 @@ export async function ingestEvents(
     // Only enrich from a page belonging to THIS event. The source's own listing
     // page is shared by every event, so its og:image is not a per-event photo.
     if (!e.imageCdnUrl && imageFetches < MAX_IMAGE_FETCHES) {
-      const detailUrl = [e.registrationUrl, e.urlLink, e.website].find(
+      const detailUrl = [e.calendarSourceUrl, e.registrationUrl, e.urlLink, e.website].find(
         (u): u is string => !!u && isPublicHttpUrl(u) && !isListing(u),
       );
       if (detailUrl) {
