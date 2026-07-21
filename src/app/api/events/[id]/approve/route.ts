@@ -19,6 +19,30 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const wasRejected = ev.status === "rejected" || ev.status === "auto_rejected";
 
+  // Publish FIRST, and only then call it approved.
+  //
+  // This used to mark the event approved before sending, and leave it that way
+  // when the send failed. The reviewer saw it move to Approved, the tab counted
+  // it, and nothing had reached CommunityHub. publishEvent sets the status
+  // itself on success, so a failure now leaves the event exactly where it was,
+  // still waiting, which is the truth.
+  const result = await publishEvent(ev.id, "approved");
+
+  if (!result.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        status: ev.status,
+        publish: result.state,
+        error: `${result.message} The event has NOT been approved and is still waiting.`,
+      },
+      { status: 502 },
+    );
+  }
+
+  // Reached CommunityHub, or there is no endpoint and it simply lives here. A
+  // reviewer's approval stays labelled "approved"; "submitted" is reserved for
+  // the automatic path where nobody here read it.
   await db
     .update(events)
     .set({ status: "approved", publishedVia: "reviewer", rejectionReason: null })
@@ -26,8 +50,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   // Approving something that was rejected reverses that judgement, so anything
   // taught by the rejection is withdrawn too. Otherwise the agents keep being
-  // instructed by a decision the reviewer themselves took back, and the
-  // training data carries a lesson its own author no longer stands behind.
+  // instructed by a decision the reviewer themselves took back, and the training
+  // data carries a rule its own author no longer stands behind.
   if (wasRejected) {
     const [{ n } = { n: 0 }] = await db
       .select({ n: sql<number>`count(*)` })
@@ -53,17 +77,6 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
         summary: `Approved a rejected event, withdrawing ${n} lesson${Number(n) === 1 ? "" : "s"} taught by the rejection`,
       });
     }
-  }
-
-  // A reviewer approving in restricted mode both publishes to CommunityHub AND
-  // keeps the event labelled "approved" (it belongs in the Approved tab, because
-  // a human approved it). "submitted" is reserved for the unrestricted auto path.
-  const result = await publishEvent(ev.id, "approved");
-  if (!result.ok && result.state !== "skipped") {
-    return NextResponse.json(
-      { ok: false, status: "approved", publish: result.state, error: result.message },
-      { status: 502 },
-    );
   }
 
   await logActivity({
