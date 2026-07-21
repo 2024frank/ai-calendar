@@ -144,6 +144,8 @@ export const sources = mysqlTable(
     extractionRecipe: json("extraction_recipe"),
     startUrls: json("start_urls"),
     scheduleCron: varchar("schedule_cron", { length: 120 }),
+    // How many days ahead the agent looks for events. NULL = the 14-day default.
+    lookaheadDays: int("lookahead_days"),
     active: boolean("active").notNull().default(true),
     discoveryError: text("discovery_error"),
     recipeUpdatedAt: timestamp("recipe_updated_at"),

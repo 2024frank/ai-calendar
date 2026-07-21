@@ -100,7 +100,7 @@ WRITING
 
 WHAT TO INCLUDE
 - Only public events that are future or currently ongoing: at least one session must not have ended.
-- ONLY THE NEXT 14 DAYS: extract events whose first upcoming session starts within 14 days of today (plus anything already ongoing). Skip everything further out; the source is re-checked on schedule, so later events arrive when their date approaches. A small batch done perfectly beats a year of events done sloppily.
+- ONLY THE NEXT {{LOOKAHEAD}} DAYS: extract events whose first upcoming session starts within {{LOOKAHEAD}} days of today (plus anything already ongoing). Skip everything further out; the source is re-checked on schedule, so later events arrive when their date approaches. A small batch done perfectly beats a year of events done sloppily.
 - SPARSE-SOURCE EXCEPTION: if the source has only a handful of upcoming items in total (about ten or fewer), take ALL of them regardless of the window. The 14-day cap exists to keep huge calendars manageable, never to hide a small organization's lone annual event.
 - PUBLIC means a member of the general public could attend: concerts, plays, lectures, exhibitions, festivals, open houses, athletics. Skip internal and members-only items: student-only or staff-only programming, residence and orientation meetings, administrative deadlines, department meetings. When the source names its audience, trust it.
 
@@ -129,6 +129,8 @@ export type AgentPromptContext = {
   runToken: string;
   /** The source's special instructions, placeholders already filled. */
   specialInstructions?: string | null;
+  /** How many days ahead this source's agent looks. Default 14. */
+  lookaheadDays?: number | null;
 };
 
 /**
@@ -141,6 +143,7 @@ export type AgentPromptContext = {
  */
 export function buildSystemPrompt(ctx: AgentPromptContext): string {
   const SEP = "=".repeat(60);
+  const lookahead = ctx.lookaheadDays && ctx.lookaheadDays > 0 ? ctx.lookaheadDays : 14;
   const special = (ctx.specialInstructions ?? "").trim();
   const links = ctx.urls.length ? ctx.urls.map((u) => `  ${u}`).join("\n") : "  (none given)";
 
@@ -161,11 +164,11 @@ ${chInv}
    - The AI calendar, APPROVED events only:
 ${aiInv}
    YOU are the duplicate judge, and you judge by MEANING, not by string equality. The same real-world event often appears with slightly different wording: a shortened title, a rephrased description, a venue written two ways. If the title, dates, venue and what the description says all point at the same actual event, it IS a duplicate even when no field matches word for word. Two different events at the same venue on the same day are NOT duplicates. When you are unsure, open the actual CommunityHub post or event page and read it before deciding.
-b. Read the source, TWO WEEKS AHEAD ONLY: fetch and process only items starting within the next 14 days (plus anything already ongoing). When an API takes a date range, request 14 days; when reading pages, stop at items past that horizon. The schedule re-checks this source, so later events arrive when their dates approach.
+b. Read the source, ${lookahead} DAYS AHEAD ONLY: fetch and process only items starting within the next ${lookahead} days (plus anything already ongoing). When an API takes a date range, request ${lookahead} days; when reading pages, stop at items past that horizon. The schedule re-checks this source, so later events arrive when their dates approach.
 ${links}
    If a fetch is refused (403, Cloudflare challenge, empty shell), do NOT give up: retry from the sandbox over HTTP/1.1 with a browser user agent, which passes most bot walls:
      curl -sL --http1.1 --retry 3 --retry-all-errors -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html" <url>
-   PLATFORM PLAYBOOK - Localist (any calendar with /api/2/events, e.g. *.edu calendars): use the JSON API, not the HTML. Page through /api/2/events?days=14&pp=100&page=N until empty (14 days: see WHAT TO INCLUDE). Every event has photo_url (the image is NEVER missing on Localist; not carrying it is a bug in your work), dates in event_instances (one event with one session per instance), venue in location_name plus the address fields, and per-event contacts in custom_fields (contact_person, contact_phone_number, contact_email_address). The canonical page is localist_url.
+   PLATFORM PLAYBOOK - Localist (any calendar with /api/2/events, e.g. *.edu calendars): use the JSON API, not the HTML. Page through /api/2/events?days=${lookahead}&pp=100&page=N until empty. Every event has photo_url (the image is NEVER missing on Localist; not carrying it is a bug in your work), dates in event_instances (one event with one session per instance), venue in location_name plus the address fields, and per-event contacts in custom_fields (contact_person, contact_phone_number, contact_email_address). The canonical page is localist_url.
    PLATFORM PLAYBOOK - Locable (any *.locable.com site): the calendar lives at /events, which lists links like /events/<id>/. Fetch each with the curl above using -L; it redirects to /YYYY/MM/DD/<id>/<slug>/ so the date is in the final URL. The page body has the title, full description, venue name and street address, exact times like "Jul 21, 2026 6:00 PM EDT to 7:00 PM EDT", a registration link, and the event flyer as an https://images.locable.com/... URL. That image host blocks the server too, so download each flyer in your script and put its base64 into imageB64.
    For any bot-walled site, work in TWO script passes. Pass 1: one sandbox python script lists the events, fetches every page and flyer with subprocess curl, parses all fields, base64s the flyers in code, saves the draft payload to a file, and prints ONLY a compact worklist: one line per event with its title and full description text. Never print page HTML or base64; that destroys your context. Pass 2: you write the short description for each worklist line yourself (see WRITING), then a tiny script merges them into the saved payload and POSTs it, printing only counts.
 c. Keep an item only if it is public, is future or currently ongoing, and is NOT already in either inventory by your judgment in (a).
@@ -182,7 +185,7 @@ ${ctx.communityHubPostUrlBase ? `   duplicateOfUrl is EXACTLY ${ctx.communityHub
      PY
 
 [3] CONTRACT
-${NORMALIZED_EVENT_CONTRACT}
+${NORMALIZED_EVENT_CONTRACT.replaceAll("{{LOOKAHEAD}}", String(lookahead))}
 
 Hard-coded for this source: calendarSourceName = "${ctx.calendarSourceName}" on every event.
 

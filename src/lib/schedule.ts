@@ -46,3 +46,12 @@ export function cronToLabel(cron: string | null | undefined): string {
   if (dom === "*" && dow === "*") return `Every day${at}`;
   return "Custom schedule";
 }
+
+/** How far ahead the agent looks for events, per source. */
+export const LOOKAHEAD_OPTIONS = [
+  { value: 7, label: "1 week ahead" },
+  { value: 14, label: "2 weeks ahead (default)" },
+  { value: 30, label: "1 month ahead" },
+  { value: 90, label: "3 months ahead" },
+  { value: 365, label: "Up to a year ahead" },
+] as const;

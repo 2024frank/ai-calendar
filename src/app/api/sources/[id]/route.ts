@@ -27,6 +27,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   if ("active" in body) patch.active = Boolean(body.active);
   if ("schedule" in body) patch.scheduleCron = valueToCron(String(body.schedule));
+  if ("lookaheadDays" in body) {
+    const n = Number(body.lookaheadDays);
+    patch.lookaheadDays = Number.isInteger(n) && n >= 1 && n <= 365 ? n : null;
+  }
   if ("specialInstructions" in body) {
     patch.specialInstructions = body.specialInstructions
       ? String(body.specialInstructions).slice(0, 32000)

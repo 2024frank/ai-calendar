@@ -100,6 +100,7 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
         schedule={cronToValue(source.scheduleCron)}
         active={source.active}
         communityDefaultMode={community?.defaultMode ?? "restricted"}
+        lookaheadDays={source.lookaheadDays}
       />
 
       <EditSource

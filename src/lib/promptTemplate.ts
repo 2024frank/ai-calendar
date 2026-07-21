@@ -13,12 +13,14 @@ export type PromptVars = {
   org_website?: string | null;
   contact_email?: string | null;
   phone?: string | null;
+  lookahead_days?: string | null;
 };
 
 /** Placeholders an author may use in a source's instructions. */
 export const PLACEHOLDERS = [
   "source_name",
   "url",
+  "lookahead_days",
   "urls",
   "today",
   "timezone",
@@ -48,6 +50,8 @@ function valueFor(name: string, v: PromptVars): string | null {
       return v.contact_email ?? "";
     case "phone":
       return v.phone ?? "";
+    case "lookahead_days":
+      return v.lookahead_days ?? "14";
     default:
       return null;
   }

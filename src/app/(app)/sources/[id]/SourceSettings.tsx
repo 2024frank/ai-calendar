@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { SCHEDULE_OPTIONS } from "@/lib/schedule";
+import { LOOKAHEAD_OPTIONS, SCHEDULE_OPTIONS } from "@/lib/schedule";
 
 export function SourceSettings({
   sourceId,
@@ -10,16 +10,19 @@ export function SourceSettings({
   schedule,
   active,
   communityDefaultMode,
+  lookaheadDays,
 }: {
   sourceId: number;
   mode: "restricted" | "unrestricted" | null;
   schedule: string;
   active: boolean;
   communityDefaultMode: string;
+  lookaheadDays: number | null;
 }) {
   const router = useRouter();
   const [m, setM] = useState<string>(mode ?? "inherit");
   const [sch, setSch] = useState(schedule);
+  const [ahead, setAhead] = useState<number>(lookaheadDays ?? 14);
   const [on, setOn] = useState(active);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -47,7 +50,7 @@ export function SourceSettings({
         {saved && <span className="badge good">saved</span>}
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
         <div>
           <label className="label">Review mode</label>
           <select
@@ -77,6 +80,26 @@ export function SourceSettings({
             }}
           >
             {SCHEDULE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="label">How far ahead to look</label>
+          <select
+            className="input"
+            value={ahead}
+            disabled={busy}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setAhead(next);
+              save({ lookaheadDays: next });
+            }}
+          >
+            {LOOKAHEAD_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>

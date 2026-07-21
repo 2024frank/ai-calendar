@@ -469,6 +469,7 @@ export async function runExtraction(runId: number) {
       org_website: source.orgWebsite,
       contact_email: source.orgContactEmail,
       phone: source.orgPhone,
+      lookahead_days: String(source.lookaheadDays ?? 14),
     };
     // Where the agent reads and writes: the two inventories to dedupe against,
     // and the endpoint it posts its results to. All source-driven, no literals.
@@ -490,6 +491,7 @@ export async function runExtraction(runId: number) {
       calendarSourceName: source.calendarSourceName ?? source.orgName ?? source.name,
       communityHubInventoryUrl: destCfg.inventory_url ?? null,
       communityHubPostUrlBase: destCfg.api_base ? `${destCfg.api_base}/calendar/post/` : null,
+      lookaheadDays: source.lookaheadDays ?? 14,
       aiCalendarApprovedUrl: `${appUrl}/api/public/events?status=approved,submitted&community=${community.slug}`,
       ingestUrl: `${appUrl}/api/agent/ingest`,
       runId,

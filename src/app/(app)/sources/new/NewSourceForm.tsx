@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { SCHEDULE_OPTIONS } from "@/lib/schedule";
+import { LOOKAHEAD_OPTIONS, SCHEDULE_OPTIONS } from "@/lib/schedule";
 
 type Community = { id: number; name: string };
 
@@ -37,6 +37,7 @@ export function NewSourceForm({
   const [sourceType, setSourceType] = useState<"web" | "email">("web");
   const [special, setSpecial] = useState("");
   const [schedule, setSchedule] = useState("daily");
+  const [lookaheadDays, setLookaheadDays] = useState(14);
   const [communityId, setCommunityId] = useState<number>(communities[0]?.id ?? 0);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -81,6 +82,7 @@ export function NewSourceForm({
           sourceType,
           specialInstructions: special,
           schedule,
+          lookaheadDays,
           communityId,
         }),
       });
@@ -160,15 +162,31 @@ export function NewSourceForm({
       )}
 
       {stepKey === "Schedule" && (
-        <div>
-          <label className="label">How often should the agent check {name || "this source"}?</label>
-          <select className="input" value={schedule} onChange={(e) => setSchedule(e.target.value)} autoFocus>
-            {SCHEDULE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            The scheduled run picks it up automatically. You can change this later on the source page.
+        <div className="grid" style={{ gap: 14 }}>
+          <div>
+            <label className="label">How often should the agent check {name || "this source"}?</label>
+            <select className="input" value={schedule} onChange={(e) => setSchedule(e.target.value)} autoFocus>
+              {SCHEDULE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">How far ahead should it look for events?</label>
+            <select
+              className="input"
+              value={lookaheadDays}
+              onChange={(e) => setLookaheadDays(Number(e.target.value))}
+            >
+              {LOOKAHEAD_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              Two weeks keeps big calendars manageable. A small organization with only a few
+              events a year can look further out. Sources with about ten or fewer upcoming items
+              always take all of them. Both settings can be changed later on the source page.
+            </div>
           </div>
         </div>
       )}

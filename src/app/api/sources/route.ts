@@ -44,6 +44,9 @@ export async function POST(req: Request) {
   const specialInstructions = String(body.specialInstructions ?? "").trim() || null;
   const sourceType = body.sourceType === "email" ? "email" : "web";
   const scheduleCron = "schedule" in body ? valueToCron(String(body.schedule)) : null;
+  const lookaheadRaw = Number(body.lookaheadDays);
+  const lookaheadDays =
+    Number.isInteger(lookaheadRaw) && lookaheadRaw >= 1 && lookaheadRaw <= 365 ? lookaheadRaw : null;
   const communityId =
     s.role === "platform_admin" ? Number(body.communityId) : (s.communityId ?? 0);
 
@@ -74,6 +77,7 @@ export async function POST(req: Request) {
     discoveryStatus: specialInstructions ? "ready" : "pending",
     startUrls: urls.length ? urls : null,
     scheduleCron,
+    lookaheadDays,
   });
 
   const id = (res as { insertId: number }).insertId;
