@@ -38,6 +38,10 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
   const [current, setCurrent] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const stop = useRef(false);
+  // Stop has to cut the request that is in flight. A correction can run for
+  // minutes, and setting a flag only took effect once that request came back,
+  // so the button looked dead and the work carried on.
+  const inFlight = useRef<AbortController | null>(null);
 
   /** Read the true totals from the database. Used on load and after a failure. */
   const refreshProgress = useCallback(async () => {
@@ -75,11 +79,15 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
 
       while (!done && !stop.current) {
         try {
+          const ctrl = new AbortController();
+          inFlight.current = ctrl;
           const res = await fetch("/api/corrections/next", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ runId, sourceId }),
+            signal: ctrl.signal,
           });
+          inFlight.current = null;
           if (!res.ok) {
             // 401 and 403 will never fix themselves; stop on those immediately.
             if (res.status === 401 || res.status === 403) {
@@ -113,6 +121,9 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
           });
           if (data.fixed) router.refresh(); // the event is already in Pending
         } catch {
+          inFlight.current = null;
+          // Aborting is what Stop does, not a failure to report.
+          if (stop.current) break;
           if (++consecutiveFailures >= MAX_FAILURES) {
             setMsg("Stopped after three failures in a row.");
             break;
@@ -122,9 +133,12 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
         }
       }
 
+      inFlight.current = null;
       setRunning(false);
       setCurrent(null);
-      if (done) setMsg("Finished.");
+      if (stop.current) setMsg("Stopped.");
+      else if (done) setMsg("Finished.");
+      await refreshProgress();
       router.refresh();
     },
     [router, sourceId, refreshProgress],
@@ -165,6 +179,8 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
             type="button"
             onClick={() => {
               stop.current = true;
+              setMsg("Stopping…");
+              inFlight.current?.abort(); // cut the request that is running now
             }}
           >
             Stop

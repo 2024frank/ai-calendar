@@ -66,20 +66,30 @@ async function correctOne(
   const missing = String(ev.rejectionReason ?? "").replace(/^[^:]*:\s*/, "");
   const pageUrl = ev.calendarSourceUrl || ev.website || source.url || "";
 
-  // Keep the context TINY. This is a one-page lookup for a couple of fields, so
-  // sending the source's whole extraction playbook (which can be many KB) with
-  // every event is pure token waste. Only a short excerpt goes along, and only
-  // when the site needs a special trick to read at all.
+  // The source's own recipe knows how this site works, and the agent should not
+  // have to guess. Sending the whole playbook with every event is token waste,
+  // so pull out only the parts that bear on the job in hand: how to get in at
+  // all, and where this site keeps its pictures. That second part is what was
+  // missing when the agent settled for the venue photo off the listing page.
   const needsTrick = /curl|http1\.1|user agent|blocked|cloudflare|403/i.test(instructions);
-  const hint = needsTrick ? `\nHOW TO READ THIS SITE (excerpt):\n${instructions.slice(0, 700)}\n` : "";
+  const access = needsTrick ? `\nHOW TO READ THIS SITE:\n${instructions.slice(0, 700)}\n` : "";
+  const imageLines = instructions
+    .split(/\r?\n/)
+    .filter((line) => /image|photo|flyer|poster|thumbnail|imageb64|\.jpg|\.png/i.test(line))
+    .join("\n")
+    .slice(0, 900);
+  const imagery =
+    missing.includes("image") && imageLines
+      ? `\nHOW THIS SITE HANDLES IMAGES (from the source's own recipe, follow it):\n${imageLines}\n`
+      : "";
 
   const prompt = `One event is missing a field. Open its page, find the field, return it. Invent nothing.
 
 EVENT: ${ev.title}
 MISSING: ${missing}
 PAGE: ${pageUrl}
-${hint}
-Return only the missing fields from that page. For a missing image use the event's own photo in imageCdnUrl, or imageB64 if the host blocks downloads; never a logo or a shared site image. If a field truly is not on the page, leave it null and set found=false. One page, no crawling.`;
+${access}${imagery}
+Return only the missing fields from that page. For a missing image use THIS event's own photo in imageCdnUrl, or imageB64 if the host blocks downloads. Never a logo, and never a picture of the venue: a hall interior or a building exterior taken from the listing page belongs to every event there, not to this one, and will be refused. If this event has no picture of its own, leave the image null rather than substituting one. If a field truly is not on the page, leave it null and set found=false. One page, no crawling.`;
 
   let patch: Record<string, unknown> = {};
   try {
