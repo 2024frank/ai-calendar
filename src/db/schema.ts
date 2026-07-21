@@ -15,7 +15,15 @@ import {
 } from "drizzle-orm/mysql-core";
 
 /* Enum value sets (MySQL enums are per-column) */
-const MODE = ["restricted", "unrestricted"] as const;
+// Three review levels, plus the two original spellings that older rows may
+// still carry. See lib/modeLabels.ts, which is what the app speaks.
+const MODE = [
+  "needs_approval",
+  "auto_send",
+  "auto_publish",
+  "restricted",
+  "unrestricted",
+] as const;
 const COMMUNITY_STATUS = ["active", "suspended"] as const;
 const USER_ROLE = ["platform_admin", "community_admin", "reviewer"] as const;
 const USER_STATUS = ["active", "disabled"] as const;
@@ -34,6 +42,8 @@ const EVENT_STATUS = [
   "rejected",
   "duplicate",
   "auto_rejected",
+  // Live on CommunityHub with nobody having checked it.
+  "published",
 ] as const;
 const PUBLISHED_VIA = ["reviewer", "auto"] as const;
 const PROVENANCE = ["direct", "original_org", "aggregator"] as const;

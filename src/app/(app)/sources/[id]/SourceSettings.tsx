@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { LOOKAHEAD_OPTIONS, SCHEDULE_OPTIONS } from "@/lib/schedule";
+import { MODE_LABELS, REVIEW_MODES, type ReviewMode } from "@/lib/modeLabels";
 
 export function SourceSettings({
   sourceId,
@@ -14,10 +15,10 @@ export function SourceSettings({
   pendingCount,
 }: {
   sourceId: number;
-  mode: "restricted" | "unrestricted" | null;
+  mode: ReviewMode | null;
   schedule: string;
   active: boolean;
-  communityDefaultMode: string;
+  communityDefaultMode: ReviewMode;
   lookaheadDays: number | null;
   /** Events waiting in review for this source right now. */
   pendingCount: number;
@@ -76,14 +77,13 @@ export function SourceSettings({
             disabled={busy}
             onChange={(e) => {
               const next = e.target.value;
-              const becomesUnrestricted =
-                next === "unrestricted" ||
-                (next === "inherit" && communityDefaultMode === "unrestricted");
+              const effective: ReviewMode =
+                next === "inherit" ? communityDefaultMode : (next as ReviewMode);
               // Publishing a backlog to CommunityHub cannot be taken back, so
               // the number goes in front of the person before it happens.
-              if (becomesUnrestricted && pendingCount > 0) {
+              if (effective !== "needs_approval" && pendingCount > 0) {
                 const ok = window.confirm(
-                  `This publishes the ${pendingCount} event${pendingCount === 1 ? "" : "s"} waiting in review to CommunityHub right away, and every new one after that goes straight through without review.\n\nPublish them now?`,
+                  `${MODE_LABELS[effective].name}: this sends the ${pendingCount} event${pendingCount === 1 ? "" : "s"} waiting in review to CommunityHub right away, and every new one after that skips review here.\n\n${MODE_LABELS[effective].blurb}\n\nSend them now?`,
                 );
                 if (!ok) return;
               }
@@ -91,10 +91,18 @@ export function SourceSettings({
               save({ mode: next === "inherit" ? null : next });
             }}
           >
-            <option value="inherit">Use community default ({communityDefaultMode})</option>
-            <option value="restricted">Restricted, review every event</option>
-            <option value="unrestricted">Unrestricted, publish automatically</option>
+            <option value="inherit">
+              Use community default ({MODE_LABELS[communityDefaultMode].name})
+            </option>
+            {REVIEW_MODES.map((value) => (
+              <option key={value} value={value}>
+                {MODE_LABELS[value].name}
+              </option>
+            ))}
           </select>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {MODE_LABELS[m === "inherit" ? communityDefaultMode : (m as ReviewMode)].blurb}
+          </div>
         </div>
 
         <div>

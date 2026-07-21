@@ -9,12 +9,23 @@ import { FixAllButton } from "./FixAllButton";
 
 export const dynamic = "force-dynamic";
 
+// The last three say how an event reached CommunityHub, not merely that it
+// did: who checked it, and whether anyone did at all.
 const TABS = [
-  { key: "pending", label: "Pending" },
-  { key: "duplicates", label: "Duplicates" },
-  { key: "rejected", label: "Rejected" },
-  { key: "approved", label: "Approved" },
-  { key: "submitted", label: "Submitted" },
+  { key: "pending", label: "Pending", hint: "Waiting for someone here to read them." },
+  { key: "duplicates", label: "Duplicates", hint: "Already on the calendar, kept for reference." },
+  { key: "rejected", label: "Rejected", hint: "Turned down here, or too incomplete to publish." },
+  { key: "approved", label: "Approved", hint: "A person here read these and approved them." },
+  {
+    key: "submitted",
+    label: "Auto-sent",
+    hint: "Skipped review here and are waiting in CommunityHub's own queue.",
+  },
+  {
+    key: "published",
+    label: "Auto-published",
+    hint: "Went straight out with nobody checking them, here or at CommunityHub.",
+  },
 ] as const;
 
 const SHORT_ISSUE: Record<string, string> = {
@@ -58,9 +69,11 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
     : tab === "rejected" ? await eventsForTab(session, ["rejected", "auto_rejected"], filter)
       : tab === "approved" ? await eventsForTab(session, ["approved"], filter)
         : tab === "submitted" ? await eventsForTab(session, ["submitted"], filter)
-          : await reviewQueue(session, filter);
+          : tab === "published" ? await eventsForTab(session, ["published"], filter)
+            : await reviewQueue(session, filter);
   const sourceName = new Map(sources.map((source) => [source.id, source.name]));
-  const activeLabel = TABS.find((item) => item.key === tab)?.label ?? "Pending";
+  const activeTab = TABS.find((item) => item.key === tab);
+  const activeLabel = activeTab?.label ?? "Pending";
 
   const emptyCopy = tab === "duplicates" ? "No duplicate events match these filters."
     : tab === "rejected" ? "No rejected events match these filters."
@@ -90,7 +103,13 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
 
       <Card className="surface--flush">
         <div className="section-header" style={{ padding: "18px 20px 4px" }}>
-          <div><h2>{activeLabel} Events</h2><p>{rows.length} {rows.length === 1 ? "event" : "events"}</p></div>
+          <div>
+            <h2>{activeLabel} Events</h2>
+            <p>
+              {rows.length} {rows.length === 1 ? "event" : "events"}
+              {activeTab?.hint ? ` · ${activeTab.hint}` : ""}
+            </p>
+          </div>
         </div>
         {rows.length === 0 ? <EmptyState title="Nothing to Review" description={emptyCopy} /> : (
           <TableShell label={`${activeLabel} events`}>

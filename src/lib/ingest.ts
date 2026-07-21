@@ -13,6 +13,13 @@ import {
   type ExtractedEvent,
 } from "./contract";
 import { fetchPage, hasImageExtension, isGenericImage, isPublicHttpUrl } from "./fetchPage";
+import {
+  MODE_LABELS,
+  normalizeMode,
+  publishedStatus,
+  skipsOurReview,
+  type ReviewMode,
+} from "./modeLabels";
 import { mergePosterImages } from "./mergePosters";
 import { fetchDestinationInventory } from "./inventory";
 import { publishEvent } from "./publishEvent";
@@ -89,8 +96,9 @@ export type IngestCounts = {
 type SourceRow = typeof sources.$inferSelect;
 type CommunityRow = typeof communities.$inferSelect;
 
-export function effectiveMode(source: SourceRow, community: CommunityRow) {
-  return source.mode ?? community.defaultMode;
+export function effectiveMode(source: SourceRow, community: CommunityRow): ReviewMode {
+  // A source with no setting of its own follows its community.
+  return normalizeMode(source.mode) ?? normalizeMode(community.defaultMode) ?? "needs_approval";
 }
 
 /**
@@ -481,21 +489,23 @@ export async function ingestEvents(
       counts.inserted++;
       existingByKey.set(dedupKey, newId);
 
-      if (mode === "unrestricted") {
-        // No human review: send it straight to CommunityHub. On success the
-        // event becomes 'submitted'; on failure it stays pending for a person.
+      if (skipsOurReview(mode)) {
+        // Nobody here reads it: send it straight to CommunityHub. The status it
+        // lands on records how it got there, so "waiting on CommunityHub" and
+        // "live with nobody checking" stay tellable apart afterwards. A failure
+        // leaves it pending for a person, which is the safe direction.
         try {
-          const pub = await publishEvent(newId);
+          const pub = await publishEvent(newId, publishedStatus(mode));
           await emit(
             runId,
             "queue_outcome",
             pub.state === "succeeded"
-              ? `Auto-submitted to CommunityHub (#${newId})`
-              : `Auto-submit ${pub.state}, left for review (#${newId}): ${pub.message}`,
-            { eventId: newId, publish: pub.state },
+              ? `${MODE_LABELS[mode].name}: sent to CommunityHub (#${newId})`
+              : `${MODE_LABELS[mode].name} ${pub.state}, left for review (#${newId}): ${pub.message}`,
+            { eventId: newId, publish: pub.state, mode },
           );
         } catch {
-          await emit(runId, "queue_outcome", `Auto-submit failed, left for review (#${newId})`, {
+          await emit(runId, "queue_outcome", `Sending failed, left for review (#${newId})`, {
             eventId: newId,
           });
         }

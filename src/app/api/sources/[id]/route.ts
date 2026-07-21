@@ -7,6 +7,7 @@ import { getSource } from "@/lib/data";
 import { valueToCron } from "@/lib/schedule";
 import { flushSourceIfUnrestricted, type FlushResult } from "@/lib/autoPublish";
 import { logActivity } from "@/lib/activity";
+import { MODE_LABELS, normalizeMode } from "@/lib/modeLabels";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,8 +26,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const patch: Record<string, unknown> = {};
 
   if ("mode" in body) {
-    const m = body.mode;
-    patch.mode = m === "restricted" || m === "unrestricted" ? m : null; // null = inherit
+    // null means "follow the community default".
+    patch.mode = normalizeMode(body.mode);
   }
   if ("active" in body) patch.active = Boolean(body.active);
   if ("schedule" in body) patch.scheduleCron = valueToCron(String(body.schedule));
@@ -87,7 +88,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         actorEmail: s.email,
         targetType: "source",
         targetId: source.id,
-        summary: `Switched ${source.name} to unrestricted and published ${flushed.published} waiting event${flushed.published === 1 ? "" : "s"}`,
+        summary: `Set ${source.name} to ${MODE_LABELS[(normalizeMode(patch.mode as string) ?? "needs_approval")].name} and sent ${flushed.published} waiting event${flushed.published === 1 ? "" : "s"}`,
       });
     }
   }

@@ -5,6 +5,7 @@ import { communities } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { flushCommunityInheritors, type FlushResult } from "@/lib/autoPublish";
 import { logActivity } from "@/lib/activity";
+import { MODE_LABELS, normalizeMode, type ReviewMode } from "@/lib/modeLabels";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,9 +23,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const body = await req.json().catch(() => ({}));
   const patch: Record<string, unknown> = {};
-  if (body.defaultMode === "restricted" || body.defaultMode === "unrestricted") {
-    patch.defaultMode = body.defaultMode;
-  }
+  const nextMode = normalizeMode(body.defaultMode);
+  if (nextMode) patch.defaultMode = nextMode;
   if (body.timezone) patch.timezone = String(body.timezone).slice(0, 64);
   if (body.name) patch.name = String(body.name).slice(0, 200);
   if ("defaultDestinationId" in body) {
@@ -40,7 +40,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // unrestricted, the events waiting under every source that inherits it go out
   // now. Sources with their own explicit mode are untouched.
   let flushed: FlushResult | null = null;
-  if (patch.defaultMode === "unrestricted") {
+  if (patch.defaultMode && patch.defaultMode !== "needs_approval") {
     flushed = await flushCommunityInheritors(communityId);
     if (flushed.published) {
       await logActivity({
@@ -49,7 +49,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         actorEmail: s.email,
         targetType: "community",
         targetId: communityId,
-        summary: `Switched the community default to unrestricted and published ${flushed.published} waiting event${flushed.published === 1 ? "" : "s"}`,
+        summary: `Set the community default to ${MODE_LABELS[patch.defaultMode as ReviewMode].name} and sent ${flushed.published} waiting event${flushed.published === 1 ? "" : "s"}`,
       });
     }
   }

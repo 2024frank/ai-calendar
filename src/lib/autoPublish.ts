@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, sources } from "@/db/schema";
 import { publishEvent } from "./publishEvent";
+import { normalizeMode, publishedStatus, skipsOurReview, type ReviewMode } from "./modeLabels";
 
 /**
  * Switching a source to unrestricted means "I trust this one, stop asking me".
@@ -20,14 +21,14 @@ const TIME_BUDGET_MS = 240_000;
 export type FlushResult = { published: number; failed: number; remaining: number };
 
 /** The mode a source actually runs in, resolving inherit against its community. */
-export async function effectiveMode(sourceId: number): Promise<"restricted" | "unrestricted"> {
+export async function effectiveMode(sourceId: number): Promise<ReviewMode> {
   const [row] = await db
     .select({ mode: sources.mode, defaultMode: communities.defaultMode })
     .from(sources)
     .leftJoin(communities, eq(communities.id, sources.communityId))
     .where(eq(sources.id, sourceId))
     .limit(1);
-  return row?.mode ?? row?.defaultMode ?? "restricted";
+  return normalizeMode(row?.mode) ?? normalizeMode(row?.defaultMode) ?? "needs_approval";
 }
 
 /**
@@ -36,7 +37,10 @@ export async function effectiveMode(sourceId: number): Promise<"restricted" | "u
  * Anything that fails to reach the hub keeps its pending status so a person can
  * still deal with it.
  */
-export async function publishPendingForSources(sourceIds: number[]): Promise<FlushResult> {
+export async function publishPendingForSources(
+  sourceIds: number[],
+  finalStatus: "submitted" | "published" = "submitted",
+): Promise<FlushResult> {
   if (!sourceIds.length) return { published: 0, failed: 0, remaining: 0 };
   const startedAt = Date.now();
 
@@ -55,7 +59,7 @@ export async function publishPendingForSources(sourceIds: number[]): Promise<Flu
     const results = await Promise.all(
       batch.map(async (row) => {
         try {
-          const res = await publishEvent(row.id, "submitted");
+          const res = await publishEvent(row.id, finalStatus);
           return res.state === "succeeded";
         } catch {
           return false;
@@ -71,10 +75,9 @@ export async function publishPendingForSources(sourceIds: number[]): Promise<Flu
 
 /** Flush one source, but only if it is actually unrestricted now. */
 export async function flushSourceIfUnrestricted(sourceId: number): Promise<FlushResult> {
-  if ((await effectiveMode(sourceId)) !== "unrestricted") {
-    return { published: 0, failed: 0, remaining: 0 };
-  }
-  return publishPendingForSources([sourceId]);
+  const mode = await effectiveMode(sourceId);
+  if (!skipsOurReview(mode)) return { published: 0, failed: 0, remaining: 0 };
+  return publishPendingForSources([sourceId], publishedStatus(mode) as "submitted" | "published");
 }
 
 /**

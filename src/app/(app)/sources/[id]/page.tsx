@@ -7,6 +7,7 @@ import { CorrectButton } from "./CorrectButton";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { getSource } from "@/lib/data";
 import { reapStaleRuns } from "@/lib/retention";
+import { normalizeMode, MODE_LABELS } from "@/lib/modeLabels";
 import { cronToLabel, cronToValue } from "@/lib/schedule";
 import { DiscoveryStatus, RunStatus, fmtDate, Badge } from "@/components/bits";
 import { RunActions } from "./RunActions";
@@ -93,13 +94,12 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
         />
         <Field
           label="Review mode"
-          value={
-            source.mode
-              ? source.mode === "restricted"
-                ? "Restricted, every event reviewed"
-                : "Unrestricted, publishes automatically"
-              : `Community default (${community?.defaultMode ?? "restricted"})`
-          }
+          value={(() => {
+            const own = normalizeMode(source.mode);
+            const inherited = normalizeMode(community?.defaultMode) ?? "needs_approval";
+            const active = own ?? inherited;
+            return `${MODE_LABELS[active].name}${own ? "" : " (community default)"}`;
+          })()}
         />
         <Field label="Extraction method" value={recipe?.extraction_method ?? "not discovered yet"} />
         <Field label="Checks for events" value={cronToLabel(source.scheduleCron)} />
@@ -108,10 +108,10 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
 
       <SourceSettings
         sourceId={source.id}
-        mode={source.mode}
+        mode={normalizeMode(source.mode)}
         schedule={cronToValue(source.scheduleCron)}
         active={source.active}
-        communityDefaultMode={community?.defaultMode ?? "restricted"}
+        communityDefaultMode={normalizeMode(community?.defaultMode) ?? "needs_approval"}
         lookaheadDays={source.lookaheadDays}
         pendingCount={pendingHere}
       />

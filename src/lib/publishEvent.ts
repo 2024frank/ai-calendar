@@ -71,7 +71,7 @@ const permanentFailure = (status: number) => status === 400 || status === 401 ||
  */
 export async function publishEvent(
   eventId: number,
-  finalStatus: "approved" | "submitted" = "submitted",
+  finalStatus: "approved" | "submitted" | "published" = "submitted",
 ): Promise<PublishResult> {
   const [ev] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!ev) return { ok: false, state: "failed", message: "Event not found." };
@@ -202,9 +202,10 @@ export async function publishEvent(
     .where(
       and(eq(publishSubmissions.eventId, ev.id), eq(publishSubmissions.payloadHash, payloadHash)),
     );
-  // The status reflects the PATH, not just "reached the hub": a human approval
-  // (restricted mode) stays "approved"; an automatic send (unrestricted) is
-  // "submitted". Both may sit on CommunityHub.
+  // The status reflects the PATH, not just "reached the hub". "approved" means
+  // a person here read it. "submitted" means nobody here did and it is waiting
+  // on CommunityHub. "published" means nobody checked it at either end. All
+  // three sit on CommunityHub; only the accountability differs.
   await db.update(events).set({ status: finalStatus }).where(eq(events.id, ev.id));
 
   return { ok: true, state: "succeeded", message: "Sent to CommunityHub.", remoteId };

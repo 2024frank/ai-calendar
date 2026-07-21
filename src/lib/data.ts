@@ -154,7 +154,7 @@ export async function getEventScoped(s: Session, id: number) {
   return row;
 }
 
-type EventStatus = "pending" | "approved" | "submitted" | "duplicate" | "rejected" | "auto_rejected";
+type EventStatus = "pending" | "approved" | "submitted" | "duplicate" | "rejected" | "auto_rejected" | "published";
 type EventFilter = { sourceId?: number; eventType?: string; q?: string };
 
 async function eventsByStatus(
