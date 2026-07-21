@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { events } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
+import { logActivity } from "@/lib/activity";
 import { recordRejection } from "@/lib/learning";
 
 export const runtime = "nodejs";
@@ -27,6 +28,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   // This is what teaches the next run.
   await recordRejection(ev.id, ev.sourceId, reasonCode, note, s.uid);
+  await logActivity({
+    action: "reject",
+    actorUserId: s.uid,
+    actorEmail: s.email,
+    targetType: "event",
+    targetId: ev.id,
+    summary: `Rejected "${(ev.title ?? "untitled").slice(0, 70)}" (${reasonCode})`,
+    detail: { reasonCode, note },
+  });
 
   return NextResponse.json({ ok: true, status: "rejected" });
 }

@@ -5,6 +5,7 @@ import { events } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
 import { publishEvent } from "@/lib/publishEvent";
+import { logActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,16 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       { status: 502 },
     );
   }
+
+  await logActivity({
+    action: "approve",
+    actorUserId: s.uid,
+    actorEmail: s.email,
+    targetType: "event",
+    targetId: ev.id,
+    summary: `Approved "${(ev.title ?? "untitled").slice(0, 80)}"`,
+    detail: { publish: result.state },
+  });
 
   return NextResponse.json({
     ok: true,

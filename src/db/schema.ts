@@ -483,3 +483,20 @@ export const appSettings = mysqlTable("app_settings", {
   value: text("value"),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
+
+/** Audit trail: who did what and when (logins, approvals, edits, admin actions). */
+export const activityLog = mysqlTable(
+  "activity_log",
+  {
+    id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+    actorUserId: int("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: varchar("actor_email", { length: 320 }),
+    action: varchar("action", { length: 40 }).notNull(),
+    targetType: varchar("target_type", { length: 40 }),
+    targetId: int("target_id"),
+    summary: varchar("summary", { length: 300 }),
+    detail: json("detail"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_activity_created").on(t.createdAt)],
+);

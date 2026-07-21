@@ -6,6 +6,7 @@ import { getSession } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
 import { refreshPendingFlag } from "@/lib/flags";
 import { recordFieldEdits, type FieldChange } from "@/lib/learning";
+import { logActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -135,6 +136,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   await recordFieldEdits(ev.id, ev.sourceId, changes, s.uid);
   // The flag reflects what is saved NOW, so completing an event clears its tag.
   await refreshPendingFlag(ev.id);
+  if (changes.length) {
+    await logActivity({
+      action: "edit",
+      actorUserId: s.uid,
+      actorEmail: s.email,
+      targetType: "event",
+      targetId: ev.id,
+      summary: `Edited ${changes.length} field(s) on "${(ev.title ?? "untitled").slice(0, 60)}"`,
+      detail: { fields: changes.map((c) => c.field) },
+    });
+  }
 
   return NextResponse.json({ ok: true, changed: changes.length });
 }

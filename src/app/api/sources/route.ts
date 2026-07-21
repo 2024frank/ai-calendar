@@ -82,5 +82,14 @@ export async function POST(req: Request) {
 
   const id = (res as { insertId: number }).insertId;
 
+  const { logActivity } = await import("@/lib/activity");
+  await logActivity({
+    action: "source_added",
+    actorUserId: s.uid,
+    actorEmail: s.email,
+    targetType: "source",
+    targetId: id,
+    summary: `Added source "${name}"`,
+  });
   return NextResponse.json({ ok: true, id, slug });
 }

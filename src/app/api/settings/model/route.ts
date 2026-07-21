@@ -20,5 +20,12 @@ export async function PUT(req: Request) {
   } catch {
     return NextResponse.json({ error: "Unknown model" }, { status: 400 });
   }
+  const { logActivity } = await import("@/lib/activity");
+  await logActivity({
+    action: "model_switched",
+    actorUserId: s.uid,
+    actorEmail: s.email,
+    summary: `Switched extraction model to ${body.model}`,
+  });
   return NextResponse.json({ ok: true, model: body.model });
 }

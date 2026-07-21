@@ -111,6 +111,16 @@ export async function PATCH(req: Request, { params }: Ctx) {
     }
   }
 
+  const { logActivity } = await import("@/lib/activity");
+  await logActivity({
+    action: "user_updated",
+    actorUserId: s.uid,
+    actorEmail: s.email,
+    targetType: "user",
+    targetId: uid,
+    summary: `Updated access for ${target.email}`,
+    detail: patch,
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -129,5 +139,14 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   if ("error" in loaded) return NextResponse.json({ error: loaded.error }, { status: loaded.status });
 
   await db.delete(users).where(eq(users.id, uid));
+  const { logActivity } = await import("@/lib/activity");
+  await logActivity({
+    action: "user_deleted",
+    actorUserId: s.uid,
+    actorEmail: s.email,
+    targetType: "user",
+    targetId: uid,
+    summary: `Deleted user ${loaded.target.email}`,
+  });
   return NextResponse.json({ ok: true });
 }

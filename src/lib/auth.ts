@@ -41,6 +41,14 @@ export async function createSession(s: Session) {
     path: "/",
     maxAge: MAX_AGE,
   });
+  // Every login path funnels through here, so this is the one place to record it.
+  const { logActivity } = await import("./activity");
+  await logActivity({
+    action: "login",
+    actorUserId: s.uid,
+    actorEmail: s.email,
+    summary: `${s.email} signed in`,
+  });
 }
 
 export async function clearSession() {
