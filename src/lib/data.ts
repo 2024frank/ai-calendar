@@ -6,7 +6,6 @@ import {
   communities,
   destinations,
   events,
-  reviewerSources,
   runs,
   sources,
   userCommunities,
@@ -56,21 +55,15 @@ export async function scopedSourceIds(s: Session): Promise<number[] | null> {
       .where(eq(sources.communityId, active));
     return rows.map((r) => r.id);
   }
-  if (s.role === "community_admin" || s.canReviewAllSources) {
-    const rows = await db
-      .select({ id: sources.id })
-      .from(sources)
-      .where(eq(sources.communityId, active ?? s.communityId ?? -1));
-    return rows.map((r) => r.id);
-  }
-  // A reviewer sees only the sources explicitly assigned to them. An admin grants
-  // access by assigning sources (or the review-all flag); no assignment means no
-  // access, by design.
-  const assigned = await db
-    .select({ id: reviewerSources.sourceId })
-    .from(reviewerSources)
-    .where(eq(reviewerSources.userId, s.uid));
-  return assigned.map((r) => r.id);
+  // Community admins and reviewers alike see every source in their active
+  // community. Access is granted by community membership: if you belong to a
+  // community, you review everything in it. Reviewers are scoped to a community,
+  // not to individual sources.
+  const rows = await db
+    .select({ id: sources.id })
+    .from(sources)
+    .where(eq(sources.communityId, active ?? s.communityId ?? -1));
+  return rows.map((r) => r.id);
 }
 
 export async function listCommunities() {

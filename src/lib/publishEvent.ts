@@ -69,7 +69,10 @@ const permanentFailure = (status: number) => status === 400 || status === 401 ||
  * post even though the response never reached us. Retrying blindly is how you
  * get a duplicate public post.
  */
-export async function publishEvent(eventId: number): Promise<PublishResult> {
+export async function publishEvent(
+  eventId: number,
+  finalStatus: "approved" | "submitted" = "submitted",
+): Promise<PublishResult> {
   const [ev] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!ev) return { ok: false, state: "failed", message: "Event not found." };
 
@@ -199,7 +202,10 @@ export async function publishEvent(eventId: number): Promise<PublishResult> {
     .where(
       and(eq(publishSubmissions.eventId, ev.id), eq(publishSubmissions.payloadHash, payloadHash)),
     );
-  await db.update(events).set({ status: "submitted" }).where(eq(events.id, ev.id));
+  // The status reflects the PATH, not just "reached the hub": a human approval
+  // (restricted mode) stays "approved"; an automatic send (unrestricted) is
+  // "submitted". Both may sit on CommunityHub.
+  await db.update(events).set({ status: finalStatus }).where(eq(events.id, ev.id));
 
   return { ok: true, state: "succeeded", message: "Sent to CommunityHub.", remoteId };
 }

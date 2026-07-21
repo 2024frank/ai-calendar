@@ -18,14 +18,12 @@ type Opt = { id: number; name: string };
 export function UsersAdmin({
   users,
   communities,
-  sources,
   isPlatformAdmin,
   myCommunityId,
   myUserId,
 }: {
   users: UserRow[];
   communities: Opt[];
-  sources: Opt[];
   isPlatformAdmin: boolean;
   myCommunityId: number | null;
   myUserId: number;
@@ -38,7 +36,6 @@ export function UsersAdmin({
   const [communityId, setCommunityId] = useState<number>(
     myCommunityId ?? communities[0]?.id ?? 0,
   );
-  const [sourceIds, setSourceIds] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -54,7 +51,8 @@ export function UsersAdmin({
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, name, role, communityId, sourceIds }),
+      // Reviewers are community-scoped; no per-source list to send.
+      body: JSON.stringify({ email, name, role, communityId, sourceIds: [] }),
     });
     const d = await res.json();
     setBusy(false);
@@ -66,7 +64,6 @@ export function UsersAdmin({
     if (d.inviteLink) setInviteLink(d.inviteLink);
     setEmail("");
     setName("");
-    setSourceIds([]);
     router.refresh();
   }
 
@@ -127,29 +124,8 @@ export function UsersAdmin({
           </div>
 
           {role === "reviewer" && (
-            <div>
-              <label className="label">
-                Which sources can they review? (choose at least one, or make them a community admin
-                to review everything)
-              </label>
-              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-                {sources.map((s) => {
-                  const on = sourceIds.includes(s.id);
-                  return (
-                    <button
-                      type="button"
-                      key={s.id}
-                      className={`badge ${on ? "good" : "neutral"}`}
-                      style={{ border: "none", cursor: "pointer" }}
-                      onClick={() =>
-                        setSourceIds(on ? sourceIds.filter((x) => x !== s.id) : [...sourceIds, s.id])
-                      }
-                    >
-                      {s.name}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Reviewers can review every source in the community you choose above.
             </div>
           )}
 
@@ -189,7 +165,6 @@ export function UsersAdmin({
           <UserCard
             key={u.id}
             user={u}
-            sources={sources}
             communityName={communityName}
             isSelf={u.id === myUserId}
           />
@@ -202,20 +177,16 @@ export function UsersAdmin({
 /** One user row that expands into an access editor. */
 function UserCard({
   user,
-  sources,
   communityName,
   isSelf,
 }: {
   user: UserRow;
-  sources: Opt[];
   communityName: Map<number, string>;
   isSelf: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState(user.role);
-  const [reviewAll, setReviewAll] = useState(user.canReviewAllSources);
-  const [sourceIds, setSourceIds] = useState<number[]>(user.sourceIds);
   const [status, setStatus] = useState(user.status);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -226,7 +197,8 @@ function UserCard({
     const res = await fetch(`/api/users/${user.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role, canReviewAllSources: reviewAll, status, sourceIds }),
+      // Reviewers are community-scoped: grant the whole community, no per-source list.
+      body: JSON.stringify({ role, status, canReviewAllSources: true, sourceIds: [] }),
     });
     const d = await res.json().catch(() => ({}));
     setBusy(false);
@@ -285,40 +257,10 @@ function UserCard({
           </div>
 
           {role === "reviewer" && (
-            <>
-              <label className="row" style={{ gap: 8, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={reviewAll} onChange={(e) => setReviewAll(e.target.checked)} />
-                <span>Can review every source in their community</span>
-              </label>
-              {!reviewAll && (
-                <div>
-                  <label className="label">Sources they can review</label>
-                  <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-                    {sources.map((s) => {
-                      const on = sourceIds.includes(s.id);
-                      return (
-                        <button
-                          type="button"
-                          key={s.id}
-                          className={`badge ${on ? "good" : "neutral"}`}
-                          style={{ border: "none", cursor: "pointer" }}
-                          onClick={() =>
-                            setSourceIds(on ? sourceIds.filter((x) => x !== s.id) : [...sourceIds, s.id])
-                          }
-                        >
-                          {s.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {sourceIds.length === 0 && (
-                    <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      With no sources selected and review-all off, this reviewer sees nothing.
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Reviewers see every source in their community. Access is set by the community
+              they belong to, above.
+            </div>
           )}
 
           <div className="row" style={{ gap: 8 }}>

@@ -317,11 +317,12 @@ export function EventReview({
     setBusy(null);
     if (res.ok) {
       setMsg(
-        d.status === "submitted"
-          ? "Approved and submitted to CommunityHub."
+        d.publish === "succeeded"
+          ? "Approved and sent to CommunityHub. Find it under Approved."
           : "Approved. It is in your calendar (no CommunityHub endpoint, so not sent there).",
       );
-      setTimeout(() => router.push("/review"), 1400);
+      // Land on the Approved tab so the event you just approved is right there.
+      setTimeout(() => router.push("/review?tab=approved"), 1400);
     } else {
       setMsg(d.error ? `Could not approve: ${d.error}` : "Could not approve.");
     }

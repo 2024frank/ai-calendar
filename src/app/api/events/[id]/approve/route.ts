@@ -21,9 +21,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .set({ status: "approved", publishedVia: "reviewer", rejectionReason: null })
     .where(eq(events.id, ev.id));
 
-  // Approving means publishing: send it to the community's endpoint exactly
-  // once. With no endpoint configured it simply stays in the AI calendar.
-  const result = await publishEvent(ev.id);
+  // A reviewer approving in restricted mode both publishes to CommunityHub AND
+  // keeps the event labelled "approved" (it belongs in the Approved tab, because
+  // a human approved it). "submitted" is reserved for the unrestricted auto path.
+  const result = await publishEvent(ev.id, "approved");
   if (!result.ok && result.state !== "skipped") {
     return NextResponse.json(
       { ok: false, status: "approved", publish: result.state, error: result.message },
@@ -33,7 +34,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   return NextResponse.json({
     ok: true,
-    status: result.state === "succeeded" ? "submitted" : "approved",
+    status: "approved",
     publish: result.state,
     message: result.message,
   });
