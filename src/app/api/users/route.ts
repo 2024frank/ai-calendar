@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, loginTokens, reviewerSources, sources, users } from "@/db/schema";
+import {
+  communities,
+  loginTokens,
+  reviewerSources,
+  sources,
+  userCommunities,
+  users,
+} from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
 import { sendInvite } from "@/lib/email";
 
@@ -47,12 +54,23 @@ export async function POST(req: Request) {
   if (s.role !== "platform_admin" && role === "platform_admin") {
     return NextResponse.json({ error: "Only a platform admin can do that." }, { status: 403 });
   }
-  const communityId =
+  // A person can be invited into several communities at once. The first is the
+  // home community on the user row; the rest become memberships, which is what
+  // puts the switcher in their sidebar. Older callers sending a single
+  // communityId still work.
+  const requested: number[] =
     s.role === "platform_admin"
-      ? body.communityId
-        ? Number(body.communityId)
-        : null
-      : (s.communityId ?? null);
+      ? [
+          ...new Set<number>(
+            (Array.isArray(body.communityIds) ? body.communityIds : [body.communityId])
+              .map((v: unknown) => Number(v))
+              .filter((n: number) => Number.isInteger(n) && n > 0),
+          ),
+        ]
+      : s.communityId
+        ? [s.communityId]
+        : [];
+  const communityId = requested[0] ?? null;
   if (role !== "platform_admin" && !communityId) {
     return NextResponse.json({ error: "A community is required." }, { status: 400 });
   }
@@ -94,6 +112,19 @@ export async function POST(req: Request) {
     userId = (res as { insertId: number }).insertId;
   }
 
+  // Everything past the home community is a membership row. Replaced outright
+  // so re-inviting an existing person sets their access rather than adding to it.
+  if (s.role === "platform_admin" && requested.length) {
+    await db.delete(userCommunities).where(eq(userCommunities.userId, userId));
+    const extra = requested.slice(1);
+    if (extra.length) {
+      await db
+        .insert(userCommunities)
+        .values(extra.map((cid) => ({ userId, communityId: cid })))
+        .catch(() => undefined);
+    }
+  }
+
   if (role === "reviewer" && sourceIds.length && communityId) {
     // Only assign sources that actually belong to this reviewer's community.
     const owned = await db
@@ -121,10 +152,21 @@ export async function POST(req: Request) {
   const base = process.env.APP_URL || new URL(req.url).origin;
   const link = `${base}/set-password?token=${rawToken}`;
 
+  // Name every community they were given, so someone added to two is not told
+  // about only one of them.
   let communityName = "AI Calendar";
-  if (communityId) {
-    const [c] = await db.select().from(communities).where(eq(communities.id, communityId)).limit(1);
-    if (c) communityName = c.name;
+  if (requested.length) {
+    const rows = await db
+      .select({ id: communities.id, name: communities.name })
+      .from(communities)
+      .where(inArray(communities.id, requested));
+    const names = requested
+      .map((id) => rows.find((r) => r.id === id)?.name)
+      .filter(Boolean) as string[];
+    if (names.length === 1) communityName = names[0];
+    else if (names.length === 2) communityName = `${names[0]} and ${names[1]}`;
+    else if (names.length > 2)
+      communityName = `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
   }
   const res = await sendInvite(email, link, communityName);
 

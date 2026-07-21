@@ -32,9 +32,12 @@ export function UsersAdmin({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState("reviewer");
-  const [communityId, setCommunityId] = useState<number>(
-    myCommunityId ?? communities[0]?.id ?? 0,
-  );
+  // More than one can be picked. The first is their home community; the rest
+  // are what give them the switcher in the sidebar.
+  const [communityIds, setCommunityIds] = useState<number[]>(() => {
+    const first = myCommunityId ?? communities[0]?.id;
+    return first ? [first] : [];
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -44,6 +47,9 @@ export function UsersAdmin({
 
   async function invite(e: React.FormEvent) {
     e.preventDefault();
+    if (isPlatformAdmin && role !== "platform_admin" && communityIds.length === 0) {
+      return setError("Pick at least one community.");
+    }
     setBusy(true);
     setError(null);
     setInviteLink(null);
@@ -51,7 +57,7 @@ export function UsersAdmin({
       method: "POST",
       headers: { "content-type": "application/json" },
       // Reviewers are community-scoped; no per-source list to send.
-      body: JSON.stringify({ email, name, role, communityId, sourceIds: [] }),
+      body: JSON.stringify({ email, name, role, communityIds, sourceIds: [] }),
     });
     const d = await res.json();
     setBusy(false);
@@ -104,27 +110,43 @@ export function UsersAdmin({
                 {isPlatformAdmin && <option value="platform_admin">Platform admin</option>}
               </select>
             </div>
-            {isPlatformAdmin && role !== "platform_admin" && (
-              <div>
-                <label className="label">Community</label>
-                <select
-                  className="input"
-                  value={communityId}
-                  onChange={(e) => setCommunityId(Number(e.target.value))}
-                >
-                  {communities.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
+
+          {isPlatformAdmin && role !== "platform_admin" && (
+            <div>
+              <label className="label">Communities (pick more than one so they can switch)</label>
+              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                {communities.map((c) => {
+                  const on = communityIds.includes(c.id);
+                  return (
+                    <button
+                      type="button"
+                      key={c.id}
+                      className={`badge ${on ? "good" : "neutral"}`}
+                      style={{ border: "none", cursor: "pointer" }}
+                      aria-pressed={on}
+                      onClick={() =>
+                        setCommunityIds(
+                          on ? communityIds.filter((x) => x !== c.id) : [...communityIds, c.id],
+                        )
+                      }
+                    >
+                      {c.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {communityIds.length > 1
+                  ? "They can switch between these from the sidebar."
+                  : "Add another to let them switch between communities."}
+              </div>
+            </div>
+          )}
 
           {role === "reviewer" && (
             <div className="muted" style={{ fontSize: 13 }}>
-              Reviewers can review every source in the community you choose above.
+              Reviewers can review every source in the communities you pick above.
             </div>
           )}
 
