@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { communities, events, runs, sources } from "@/db/schema";
 import { HARD_ISSUES } from "./ingest";
 import { mergePosterImages } from "./mergePosters";
-import { validateEvent, type ExtractedEvent } from "./contract";
+import { stripDateSentences, validateEvent, type ExtractedEvent } from "./contract";
 import { fillTemplate, type PromptVars } from "./promptTemplate";
 import { llmComplete } from "./llm";
 import { modelChain } from "./models";
@@ -136,8 +136,12 @@ Return only the missing fields from that page. For a missing image use the event
 
   const candidate = {
     ...ev,
-    description: (patch.description as string) || ev.description,
-    extendedDescription: (patch.extendedDescription as string) ?? ev.extendedDescription,
+    // Same scrub the ingest path runs: a stray "tickets go on sale September 8"
+    // must not be what keeps an otherwise finished event out of the queue.
+    description: stripDateSentences((patch.description as string) || ev.description) ?? ev.description,
+    extendedDescription: stripDateSentences(
+      (patch.extendedDescription as string) ?? ev.extendedDescription,
+    ),
     contactEmail: (patch.contactEmail as string) || ev.contactEmail,
     phone: (patch.phone as string) || ev.phone,
     location: (patch.location as string) || ev.location,

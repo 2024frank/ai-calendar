@@ -8,6 +8,7 @@ import {
   contentMatches,
   maxStartTime,
   normalizeEvent,
+  stripDateSentences,
   validateEvent,
   type ExtractedEvent,
 } from "./contract";
@@ -305,6 +306,13 @@ export async function ingestEvents(
     if (!e.sponsors.length && (source.orgName ?? source.name)) {
       e.sponsors = [source.orgName ?? source.name];
     }
+
+    // Drop any sentence that carries a date or a time. The agent is told the
+    // sessions hold the schedule, but it also lifts blocks off the page, and a
+    // single "tickets go on sale September 8" line was enough to hold a
+    // finished event out of the queue for a person to delete by hand.
+    e.description = stripDateSentences(e.description) ?? e.description;
+    e.extendedDescription = stripDateSentences(e.extendedDescription);
 
     const issues = validateEvent(e);
     if ((e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) || (e.website && deadLinks.has(e.website))) {

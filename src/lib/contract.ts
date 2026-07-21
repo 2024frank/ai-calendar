@@ -94,6 +94,7 @@ WRITING
 - If registration is required, the short description includes "Registration required." If there is a cost, it includes "Paid event."
 - FIT BY REWRITING, NEVER BY CUTTING. When source text is longer than a field allows (200 for short, 1000 for long, 60 for title), REWRITE it shorter in complete sentences that end cleanly. Text chopped mid-word on a public screen is a defect.
 - NO description, short or long, EVER contains a date, a day of the week, a time, or a schedule. Not "Thursday, August 6", not "2:30 p.m.", not "Round 1, Day 1". The sessions field holds every date and time; repeating them in the description is wrong and the server rejects it. Write what the event IS, not when it happens. The long description is for lasting detail (who runs it, what to expect, requirements), never a day-by-day agenda.
+- The long description is something YOU write, not a region of the page you copied. Do not paste the page's ticket block, pricing notice, run-time line, credits list, or "tickets go on sale ..." sentence. Those carry dates, and a single one of them holds an otherwise finished event out of the queue. Read the page, then say in your own words what this event is and what someone attending should know. If the only thing a sentence tells the reader is when something happens or when tickets appear, it does not belong in the description at all.
 - No description, short or long, ever carries a URL or a street address either; those fields hold them, and descriptions name the venue instead of "here"/"there".
 - A streamed or online event: set locationType "on" ("bo" if also attendable in person) and put the stream or meeting link in urlLink. A "Streaming Video:" or "Watch live:" link in a description is wrong; move it to urlLink.
 - Never use em dashes or en dashes. Write a plain hyphen or restructure.
@@ -452,18 +453,42 @@ export function validateEvent(e: ExtractedEvent): string[] {
   // Dates, days, and times belong in the sessions field, never in prose. Detect
   // a weekday, a clock time, or a "Month DD" pattern (bare "May" is left alone
   // so ordinary sentences do not trip it).
-  const hasDateish = (s: string | null | undefined): boolean => {
-    if (!s) return false;
-    return (
-      /\b(mon|tues|wednes|thurs|fri|satur|sun)day\b/i.test(s) ||
-      /\b\d{1,2}:\d{2}\s*[ap]\.?\s?m\.?/i.test(s) ||
-      /\b(january|february|march|april|june|july|august|september|october|november|december)\s+\d/i.test(s) ||
-      /\b(jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+\d{1,2}\b/i.test(s)
-    );
-  };
+  const hasDateish = (s: string | null | undefined): boolean =>
+    Boolean(s) && DATEISH.some((re) => re.test(s as string));
   if (hasDateish(e.description)) issues.push("description_contains_date");
   if (hasDateish(e.extendedDescription)) issues.push("long_description_contains_date");
   return issues;
+}
+
+/** The date and time shapes a description must never carry. */
+const DATEISH = [
+  /\b(mon|tues|wednes|thurs|fri|satur|sun)day\b/i,
+  /\b\d{1,2}:\d{2}\s*[ap]\.?\s?m\.?/i,
+  /\b(january|february|march|april|june|july|august|september|october|november|december)\s+\d/i,
+  /\b(jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+\d{1,2}\b/i,
+];
+
+/**
+ * Remove only the sentences that carry a date or a time.
+ *
+ * The rule is that the sessions hold the schedule and no description repeats
+ * it. The agent is told this, and mostly obeys, but it also copies blocks
+ * straight off a page: a ticket notice saying tickets go on sale September 8
+ * is one stray sentence that holds an otherwise finished event out of the
+ * queue. Dropping that sentence is a cleaner outcome than making a person
+ * delete it by hand, and it keeps everything around it intact.
+ *
+ * Returns the original when the cut would leave too little to be a
+ * description, so a text that is nothing but schedule still gets flagged
+ * rather than silently gutted.
+ */
+export function stripDateSentences(text: string | null | undefined): string | null {
+  if (!text) return text ?? null;
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter((s) => !DATEISH.some((re) => re.test(s)));
+  if (kept.length === sentences.length) return text;
+  const out = kept.join(" ").replace(/\s+/g, " ").trim();
+  return out.length >= 60 ? out : text;
 }
 
 /** Latest session start, used for the expiry sweep. */
