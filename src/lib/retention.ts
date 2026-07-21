@@ -1,24 +1,20 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, max } from "drizzle-orm";
 import { db } from "@/db";
 import { events, runs, sources } from "@/db/schema";
 import { cronToValue } from "./schedule";
 
 /**
- * Delete events whose start date has passed and that were never published.
- * Approved/submitted events are kept as a record; everything else that is in
- * the past (pending, duplicate, rejected) is purged.
+ * Delete events once their date has passed. Every event whose start time is in
+ * the past is removed, in every status, approved and submitted included: the
+ * calendar shows what is upcoming, not a permanent archive. For an event with
+ * more than one date, start_time_max is its last date, so a run stays until it
+ * is fully over. Events with no date are left alone.
  */
 export async function sweepExpiredEvents(nowSecs = Math.floor(Date.now() / 1000)) {
   const [res] = await db
     .delete(events)
-    .where(
-      and(
-        isNotNull(events.startTimeMax),
-        lt(events.startTimeMax, nowSecs),
-        sql`${events.status} not in ('approved','submitted')`,
-      ),
-    );
+    .where(and(isNotNull(events.startTimeMax), lt(events.startTimeMax, nowSecs)));
   return (res as { affectedRows?: number }).affectedRows ?? 0;
 }
 
