@@ -160,7 +160,7 @@ ${chInv}
    - The AI calendar, APPROVED events only:
 ${aiInv}
    YOU are the duplicate judge, and you judge by MEANING, not by string equality. The same real-world event often appears with slightly different wording: a shortened title, a rephrased description, a venue written two ways. If the title, dates, venue and what the description says all point at the same actual event, it IS a duplicate even when no field matches word for word. Two different events at the same venue on the same day are NOT duplicates. When you are unsure, open the actual CommunityHub post or event page and read it before deciding.
-b. Read the source:
+b. Read the source, TWO WEEKS AHEAD ONLY: fetch and process only items starting within the next 14 days (plus anything already ongoing). When an API takes a date range, request 14 days; when reading pages, stop at items past that horizon. The schedule re-checks this source, so later events arrive when their dates approach.
 ${links}
    If a fetch is refused (403, Cloudflare challenge, empty shell), do NOT give up: retry from the sandbox over HTTP/1.1 with a browser user agent, which passes most bot walls:
      curl -sL --http1.1 --retry 3 --retry-all-errors -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html" <url>
