@@ -86,6 +86,9 @@ ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 - fieldNotes: optional array of { field, reason }. When you leave a field empty because the source genuinely has no value, add one short factual sentence why, for example [{"field":"imageCdnUrl","reason":"No image on the page or its share data."}]. State only what you checked. Never carry a real value here, never invent a reason.
 
 WRITING
+- The short description is a COMPOSED factual sentence about what happens at the event. It is NEVER the title restated, never the title plus leftover text, and never identical to the long description. If the source has no usable description, compose one true sentence from what you verified (what it is, who runs it, where); if you know nothing beyond the title, the event is not extractable.
+- Models get sloppy on repetitive lists (66 fixtures, 20 recitals): the first items get care and the rest get junk. That is why mechanical work happens in your script, so item 80 is exactly as complete as item 1.
+- BEFORE POSTING, self-check the payload IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, contacts filled where the source has them.
 - Announcement titles start with the action ("Register for...", "Apply for..."). Never a bare noun for an opportunity.
 - If registration is required, the short description ends with "Registration required." If there is a cost, it includes "Paid event."
 - NO description, short or long, ever carries a URL, a street address, or dates and times; the fields hold those, and descriptions name the venue instead of "here"/"there".
@@ -339,7 +342,9 @@ export function normalizeEvent(
     .map((s) => clean(s))
     .filter(Boolean);
 
-  const ext = clean(raw.extendedDescription);
+  // A long description that just repeats the short one adds nothing; drop it.
+  const extRaw = clean(raw.extendedDescription);
+  const ext = extRaw && extRaw.trim() === clean(raw.description).trim() ? "" : extRaw;
 
   return {
     eventType: (["ot", "an", "jp"].includes(String(raw.eventType)) ? raw.eventType : "ot") as
@@ -417,6 +422,13 @@ export function validateEvent(e: ExtractedEvent): string[] {
   if (e.registrationUrl && !/Registration required\.$/.test(e.description))
     issues.push("missing_registration_required_text");
   if (e.description && /https?:\/\//i.test(e.description)) issues.push("description_contains_url");
+  {
+    // A description that is just the title restated (with or without junk
+    // around it) is not a description.
+    const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (e.description && e.title && clean(e.description).startsWith(clean(e.title)) && clean(e.description).length < clean(e.title).length + 12)
+      issues.push("description_is_title");
+  }
   if (e.extendedDescription && /https?:\/\//i.test(e.extendedDescription))
     issues.push("long_description_contains_url");
   if (e.extendedDescription && /\b(here|there)\b/i.test(e.extendedDescription))
