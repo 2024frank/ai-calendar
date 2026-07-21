@@ -1,24 +1,37 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, Icon } from "@/components/ui";
 import { EVENT_TYPES } from "@/lib/taxonomy";
 
 export function ReviewFilters({ sources }: { sources: { id: number; name: string }[] }) {
   const router = useRouter();
   const params = useSearchParams();
-  const [query, setQuery] = useState(params.get("q") ?? "");
+  const activeQuery = params.get("q") ?? "";
+  const [query, setQuery] = useState(activeQuery);
 
-  function apply(next: Record<string, string>) {
-    const search = new URLSearchParams(params.toString());
-    for (const [key, value] of Object.entries(next)) {
-      if (value) search.set(key, value);
-      else search.delete(key);
-    }
-    const suffix = search.toString();
-    router.push(suffix ? `/review?${suffix}` : "/review");
-  }
+  const apply = useCallback(
+    (next: Record<string, string>) => {
+      const search = new URLSearchParams(params.toString());
+      for (const [key, value] of Object.entries(next)) {
+        if (value) search.set(key, value);
+        else search.delete(key);
+      }
+      const suffix = search.toString();
+      router.push(suffix ? `/review?${suffix}` : "/review");
+    },
+    [params, router],
+  );
+
+  // Search as you type. It used to wait for the Enter key, with no button and
+  // nothing on screen saying so, so typing a word and watching the list not
+  // change looked exactly like a broken search.
+  useEffect(() => {
+    if (query.trim() === activeQuery) return;
+    const timer = setTimeout(() => apply({ q: query.trim() }), 350);
+    return () => clearTimeout(timer);
+  }, [query, activeQuery, apply]);
 
   return (
     <div className="filter-bar" aria-label="Review filters">

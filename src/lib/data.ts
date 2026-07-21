@@ -172,9 +172,25 @@ async function eventsByStatus(
   if (active) conds.push(eq(events.communityId, active));
   if (filter.sourceId) conds.push(eq(events.sourceId, filter.sourceId));
   if (filter.eventType) conds.push(eq(events.eventType, filter.eventType));
-  if (filter.q) {
-    const like = `%${filter.q}%`;
-    conds.push(sql`(${events.title} like ${like} or ${events.location} like ${like})`);
+  const term = filter.q?.trim();
+  if (term) {
+    const like = `%${term}%`;
+    // Match what someone would actually type. Title and location alone missed
+    // the obvious ones: searching an organization's name, or a word that only
+    // appears in the event's own description, found nothing at all.
+    const named = await db
+      .select({ id: sources.id })
+      .from(sources)
+      .where(sql`${sources.name} like ${like} or ${sources.orgName} like ${like}`);
+    const bySource = named.length
+      ? sql` or ${events.sourceId} in (${sql.join(
+          named.map((row) => sql`${row.id}`),
+          sql`, `,
+        )})`
+      : sql``;
+    conds.push(
+      sql`(${events.title} like ${like} or ${events.location} like ${like} or ${events.description} like ${like}${bySource})`,
+    );
   }
   return db.select().from(events).where(and(...conds)).orderBy(desc(events.createdAt)).limit(limit);
 }

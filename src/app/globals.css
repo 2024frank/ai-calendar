@@ -313,6 +313,9 @@ table.tbl tbody tr:last-child td { border-bottom: 0; }
   .loading-state__grid { grid-template-columns: 1fr; }
   .loading-state__grid .skeleton--card:nth-child(n+2) { display: none; }
   .filter-bar { align-items: stretch; flex-direction: column; }
+  /* In a column the 260px basis becomes a height, which stretched the search
+     box into a tall empty panel with the magnifier floating in the middle. */
+  .filter-bar__search { flex: 0 0 auto; }
   .filter-bar > .input { max-width: none; }
   .auth-card { padding: 22px 18px; }
   .main .grid[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
