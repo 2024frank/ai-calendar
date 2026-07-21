@@ -58,6 +58,32 @@ export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string)
   return payload;
 }
 
+/**
+ * Turn CommunityHub's answer into something a reviewer can act on.
+ *
+ * A failure used to arrive as a raw PHP stack trace, which tells a reviewer
+ * nothing and looks like our bug. The known ones are named; anything else keeps
+ * a trimmed version of the original so it can still be reported upstream.
+ */
+function explainPublishFailure(status: number, body: string): string {
+  if (/setGooglePlaceId\(\)|googlePlaceId/i.test(body)) {
+    return (
+      "CommunityHub could not place this address on the map and its server stopped " +
+      "on that instead of continuing. Editing the address to a plain street address " +
+      "(no suite or unit number) usually gets it through. This is a fault on the " +
+      "CommunityHub side, not with this event."
+    );
+  }
+  if (status === 401 || status === 403) {
+    return "CommunityHub refused the request. The endpoint credentials for this community need checking.";
+  }
+  if (status === 413) return "CommunityHub refused this as too large, most likely the image.";
+  if (status >= 500) {
+    return `CommunityHub had a server error (${status}) and did not accept this. It is worth trying again shortly. ${body.replace(/<[^>]*>/g, " ").slice(0, 160)}`;
+  }
+  return `CommunityHub rejected this (${status}). ${body.replace(/<[^>]*>/g, " ").slice(0, 200)}`;
+}
+
 const permanentFailure = (status: number) => status === 400 || status === 401 || status === 403 || status === 422;
 
 /**
@@ -183,7 +209,7 @@ export async function publishEvent(
     return {
       ok: false,
       state: permanent ? "failed" : "unknown",
-      message: `CommunityHub rejected this (${res.status}). ${body.slice(0, 200)}`,
+      message: explainPublishFailure(res.status, body),
     };
   }
 

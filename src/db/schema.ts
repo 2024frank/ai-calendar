@@ -519,6 +519,8 @@ export const activityLog = mysqlTable(
  * ------------------------------------------------------------------ */
 const LEARNING_TRIGGER = ["rejection", "edit"] as const;
 const LEARNING_SCOPE = ["source", "community", "global"] as const;
+// A lesson is retired, not deleted, when the judgement behind it is reversed.
+const LEARNING_STATUS = ["active", "retired"] as const;
 
 /**
  * One lesson, written by an agent from something a person actually did.
@@ -545,7 +547,7 @@ export const learnings = mysqlTable(
     lesson: text("lesson").notNull(),
     /** How widely it applies: this source, this community, or everywhere. */
     scope: mysqlEnum("scope", LEARNING_SCOPE).notNull().default("source"),
-    status: mysqlEnum("status", RULE_STATUS).notNull().default("active"),
+    status: mysqlEnum("status", LEARNING_STATUS).notNull().default("active"),
     /** How many runs have been given this lesson, so its worth can be judged. */
     timesServed: int("times_served").notNull().default(0),
     reviewerId: int("reviewer_id"),
