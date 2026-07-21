@@ -68,7 +68,7 @@ FIELDS
 - description: the short description, one factual sentence, 10-200 characters.
 - extendedDescription: optional detail, up to 1000 characters.
 - sessions: non-empty array of { start, end } ISO strings (see DATES).
-- A RECURRING program (the same title at the same venue repeating, like a weekly Storytime) is ONE event with one session per upcoming date, never a separate event per week. Its single image covers all sessions. Separate events are only for genuinely different programs.
+- THE SAME EVENT ON SEVERAL DATES IS ONE EVENT with one { start, end } session per date. This covers every shape of repeat: a weekly program (Storytime every Friday), a performance run (a play staged four nights, an opera on several dates, RENT all weekend), a multi-day tournament, or the same listing appearing on several dates. Group by title + venue: if the title and venue match, it is the same event; add its dates to sessions and move on. NEVER create one event per date. One image covers all sessions. Separate events are only for genuinely different programs.
 - locationType: "ph2" physical, "on" online, "bo" both, "ne" neither. ph2/bo need location; on/bo need urlLink.
 - location, placeName, roomNum: the venue when physical.
 - display: "all".
