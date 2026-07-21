@@ -448,8 +448,6 @@ export function validateEvent(e: ExtractedEvent): string[] {
   }
   if (e.extendedDescription && /https?:\/\//i.test(e.extendedDescription))
     issues.push("long_description_contains_url");
-  if (e.extendedDescription && /\b(here|there)\b/i.test(e.extendedDescription))
-    issues.push("long_description_ambiguous_location");
   return issues;
 }
 
