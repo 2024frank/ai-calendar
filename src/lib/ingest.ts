@@ -231,6 +231,16 @@ export async function ingestEvents(
     let duplicateOf: number | null = existingByKey.get(dedupKey) ?? null;
     let dupReason = duplicateOf ? "identical title and date signature" : "";
 
+    // The agent judged this a duplicate of an event in this calendar. The agent
+    // reads both systems' content and is the authority on semantic matches.
+    const agentDupId = Number((raw as Record<string, unknown>)._agentDuplicateOfId);
+    if (!duplicateOf && Number.isInteger(agentDupId) && agentDupId > 0) {
+      if (existing.some((x) => x.id === agentDupId)) {
+        duplicateOf = agentDupId;
+        dupReason = "the agent matched it to this event";
+      }
+    }
+
     // 2) content match on title + start time + location + short description
     if (!duplicateOf) {
       for (const x of existing) {

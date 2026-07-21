@@ -52,8 +52,12 @@ export async function POST(req: Request) {
       { agentReportedDuplicates: reportedDupes.length },
     );
     for (const d of reportedDupes) {
-      if (d && typeof d === "object" && !("_agentDuplicateOf" in d)) {
-        (d as Record<string, unknown>)._agentDuplicateOf = d.duplicateOfUrl ?? d.calendarSourceUrl ?? true;
+      if (d && typeof d === "object") {
+        const o = d as Record<string, unknown>;
+        if (!("_agentDuplicateOf" in o)) o._agentDuplicateOf = o.duplicateOfUrl ?? o.calendarSourceUrl ?? true;
+        if (!("_agentDuplicateOfId" in o) && o.duplicateOfEventId != null) {
+          o._agentDuplicateOfId = Number(o.duplicateOfEventId);
+        }
       }
     }
   }
