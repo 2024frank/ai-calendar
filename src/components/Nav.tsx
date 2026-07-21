@@ -10,6 +10,7 @@ const items = [
   { href: "/sources", label: "Sources", adminOnly: true },
   { href: "/users", label: "Users", adminOnly: true },
   { href: "/communities", label: "Communities", platformOnly: true },
+  { href: "/metrics", label: "Pilot metrics", platformOnly: true },
 ];
 
 export function Nav({ role, pending = 0 }: { role: string; pending?: number }) {
