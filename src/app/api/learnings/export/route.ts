@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { exportLearnings } from "@/lib/learningAgent";
+import { db } from "@/db";
+import { users } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
 import { currentCommunityId } from "@/lib/data";
 
@@ -27,6 +29,14 @@ export async function GET(req: Request) {
 
   const rows = await exportLearnings(communityId);
 
+  // Who made the correction. A lesson is a human judgement, and training data
+  // that cannot say whose judgement it was is worth less than one that can.
+  const reviewerIds = [...new Set(rows.map((r) => r.reviewerId).filter(Boolean))] as number[];
+  const people = reviewerIds.length
+    ? await db.select({ id: users.id, email: users.email, name: users.name, role: users.role }).from(users)
+    : [];
+  const byId = new Map(people.map((p) => [p.id, p]));
+
   const records = rows.map((r) => ({
     id: r.id,
     learned_at: r.createdAt,
@@ -39,6 +49,9 @@ export async function GET(req: Request) {
     agent_produced: r.beforeValue,
     human_corrected_to: r.afterValue,
     human_reason: r.reason,
+    corrected_by: r.reviewerId ? (byId.get(r.reviewerId)?.email ?? null) : null,
+    corrected_by_name: r.reviewerId ? (byId.get(r.reviewerId)?.name ?? null) : null,
+    corrected_by_role: r.reviewerId ? (byId.get(r.reviewerId)?.role ?? null) : null,
     lesson: r.lesson,
     written_by_model: r.model,
     times_served_to_agents: r.timesServed,
@@ -65,6 +78,9 @@ export async function GET(req: Request) {
         agent_produced: "",
         human_corrected_to: "",
         human_reason: "",
+        corrected_by: "",
+        corrected_by_name: "",
+        corrected_by_role: "",
         lesson: "",
         written_by_model: "",
         times_served_to_agents: 0,

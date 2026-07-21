@@ -39,7 +39,15 @@ export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string)
   };
 
   if (ev.extendedDescription) payload.extendedDescription = ev.extendedDescription;
-  if (ev.locationType === "ph2" || ev.locationType === "bo") payload.location = ev.location ?? "";
+  if (ev.locationType === "ph2" || ev.locationType === "bo") {
+    payload.location = ev.location ?? "";
+    // CommunityHub's Location entity requires a string place id, and its
+    // PostManager passes whatever we send straight into the setter. Sending no
+    // field at all meant it received null and its server threw a 500 on every
+    // event that had an address. Their own published posts carry "" here, so
+    // that is what a post with no Google place lookup is supposed to look like.
+    payload.googlePlaceId = "";
+  }
   if (ev.locationType === "on" || ev.locationType === "bo") payload.urlLink = ev.urlLink ?? "";
   if (ev.placeName) payload.placeName = ev.placeName;
   if (ev.roomNum) payload.roomNum = ev.roomNum;
@@ -68,10 +76,11 @@ export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string)
 function explainPublishFailure(status: number, body: string): string {
   if (/setGooglePlaceId\(\)|googlePlaceId/i.test(body)) {
     return (
-      "CommunityHub could not place this address on the map and its server stopped " +
-      "on that instead of continuing. Editing the address to a plain street address " +
-      "(no suite or unit number) usually gets it through. This is a fault on the " +
-      "CommunityHub side, not with this event."
+      "CommunityHub cannot publish any event that has an address right now. Its " +
+      "address lookup is returning nothing and its server stops on that instead of " +
+      "carrying on, so this fails no matter how the address is written. Events with " +
+      "no address still publish normally. This needs fixing on the CommunityHub side; " +
+      "nothing is wrong with this event."
     );
   }
   if (status === 401 || status === 403) {

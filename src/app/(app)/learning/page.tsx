@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { learnings, sources } from "@/db/schema";
+import { learnings, sources, users } from "@/db/schema";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { currentCommunityId } from "@/lib/data";
 import { Card, EmptyState, PageHeader, StatusBadge, TableShell } from "@/components/ui";
@@ -32,9 +32,12 @@ export default async function LearningPage() {
       timesServed: learnings.timesServed,
       createdAt: learnings.createdAt,
       sourceName: sources.name,
+      reviewerEmail: users.email,
+      reviewerName: users.name,
     })
     .from(learnings)
     .leftJoin(sources, eq(sources.id, learnings.sourceId))
+    .leftJoin(users, eq(users.id, learnings.reviewerId))
     .where(communityId ? eq(learnings.communityId, communityId) : undefined)
     .orderBy(desc(learnings.id))
     .limit(300);
@@ -44,6 +47,7 @@ export default async function LearningPage() {
       total: sql<number>`count(*)`,
       global: sql<number>`sum(case when ${learnings.scope} = 'global' then 1 else 0 end)`,
       fromRejections: sql<number>`sum(case when ${learnings.triggerKind} = 'rejection' then 1 else 0 end)`,
+      people: sql<number>`count(distinct ${learnings.reviewerId})`,
     })
     .from(learnings)
     .where(communityId ? eq(learnings.communityId, communityId) : undefined);
@@ -70,6 +74,10 @@ export default async function LearningPage() {
             <div>
               <div className="label">From rejections</div>
               <div style={{ fontSize: 26, fontWeight: 700 }}>{Number(tally?.fromRejections ?? 0)}</div>
+            </div>
+            <div>
+              <div className="label">People who taught them</div>
+              <div style={{ fontSize: 26, fontWeight: 700 }}>{Number(tally?.people ?? 0)}</div>
             </div>
           </div>
           <ExportButtons
@@ -100,6 +108,7 @@ export default async function LearningPage() {
                   <th>Applies to</th>
                   <th>Learned from</th>
                   <th>Source</th>
+                  <th>Taught by</th>
                   <th>Given to runs</th>
                   <th>When</th>
                 </tr>
@@ -123,6 +132,7 @@ export default async function LearningPage() {
                       {r.triggerKind === "rejection" ? "A rejection" : `An edit to ${r.fieldName ?? "a field"}`}
                     </td>
                     <td className="muted">{r.sourceName ?? "—"}</td>
+                    <td className="muted">{r.reviewerName || r.reviewerEmail || "—"}</td>
                     <td>{r.timesServed}</td>
                     <td className="muted">{fmtDate(r.createdAt)}</td>
                   </tr>
