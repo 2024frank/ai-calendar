@@ -72,6 +72,16 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
           : tab === "published" ? await eventsForTab(session, ["published"], filter)
             : await reviewQueue(session, filter);
   const sourceName = new Map(sources.map((source) => [source.id, source.name]));
+
+  // Carried on every event link, so approving or backing out of an event
+  // returns to this exact view: same tab, same source, same search.
+  const listQuery = new URLSearchParams();
+  if (tab !== "pending") listQuery.set("tab", tab);
+  if (params.source) listQuery.set("source", params.source);
+  if (params.type) listQuery.set("type", params.type);
+  if (params.q) listQuery.set("q", params.q);
+  const eventHref = (id: number) =>
+    `/review/${id}${listQuery.size ? `?back=${encodeURIComponent(listQuery.toString())}` : ""}`;
   const activeTab = TABS.find((item) => item.key === tab);
   const activeLabel = activeTab?.label ?? "Pending";
 
@@ -121,7 +131,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
                   return (
                     <tr key={event.id}>
                       <td style={{ maxWidth: 300 }}>
-                        <Link href={`/review/${event.id}`} className="table-link">{event.title || "Untitled Event"}</Link>
+                        <Link href={eventHref(event.id)} className="table-link">{event.title || "Untitled Event"}</Link>
                         {needs && <div style={{ marginTop: 5 }}><StatusBadge tone="warning">Needs {needs}</StatusBadge></div>}
                       </td>
                       <td className="muted">{sourceName.get(event.sourceId ?? -1) ?? "—"}</td>
@@ -129,7 +139,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
                       <td>{firstSessionDate(event.sessions)}</td>
                       <td className="muted">{(event.location ?? "").slice(0, 36) || (event.locationType === "on" ? "Online" : "—")}</td>
                       <td>{tab === "duplicates" && event.duplicateOfEventId ? <StatusBadge tone="neutral">Duplicate of #{event.duplicateOfEventId}</StatusBadge> : tab === "pending" ? <span className="muted">{fmtDate(event.createdAt)}</span> : <EventStatus status={event.status} />}</td>
-                      <td><ButtonLink href={`/review/${event.id}`} size="sm" icon="arrow-right">Open</ButtonLink></td>
+                      <td><ButtonLink href={eventHref(event.id)} size="sm" icon="arrow-right">Open</ButtonLink></td>
                     </tr>
                   );
                 })}

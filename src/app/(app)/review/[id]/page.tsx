@@ -10,8 +10,18 @@ import { EventReview } from "./EventReview";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReviewDetail({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReviewDetail({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ back?: string }>;
+}) {
   const { id } = await params;
+  // The filters the queue was showing when this event was opened. Everything
+  // that leaves this page goes back to that exact view.
+  const { back } = await searchParams;
+  const backHref = back ? `/review?${back}` : "/review";
   const s = await requireUser();
   const ev = await getEventScoped(s, Number(id));
   if (!ev) notFound();
@@ -37,8 +47,8 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
   return (
     <div className="grid" style={{ gap: 18, maxWidth: 1200 }}>
       <div>
-        <Link href="/review" className="muted" style={{ fontSize: 13 }}>
-          ← Pending events
+        <Link href={backHref} className="muted" style={{ fontSize: 13 }}>
+          ← Back to the queue
         </Link>
         <div className="spread" style={{ marginTop: 4 }}>
           <div className="page-title">{ev.title || "(untitled)"}</div>
@@ -50,6 +60,7 @@ export default async function ReviewDetail({ params }: { params: Promise<{ id: s
       </div>
 
       <EventReview
+        backQuery={back ?? null}
         event={{
           id: ev.id,
           status: ev.status,

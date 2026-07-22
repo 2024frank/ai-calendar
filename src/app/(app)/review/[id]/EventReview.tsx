@@ -176,10 +176,13 @@ export function EventReview({
   sourceName,
   publishEmail,
   timezone,
+  backQuery = null,
 }: {
   event: EventRow;
   sourceName: string;
   publishEmail: string;
+  /** The queue's filters when this event was opened, to return to the same view. */
+  backQuery?: string | null;
   timezone: string;
 }) {
   const communityTimezone = timezone || "America/New_York";
@@ -333,8 +336,9 @@ export function EventReview({
           ? "Approved and sent to CommunityHub. Find it under Approved."
           : "Approved. It is in your calendar (no CommunityHub endpoint, so not sent there).",
       );
-      // Land on the Approved tab so the event you just approved is right there.
-      setTimeout(() => router.push("/review?tab=approved"), 1400);
+      // Return to the queue exactly as it was filtered, so working through one
+      // source's events does not mean re-picking the filter after every one.
+      setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review?tab=approved"), 1400);
     } else {
       setMsg(d.error ? `Could not approve: ${d.error}` : "Could not approve.");
     }
@@ -351,7 +355,7 @@ export function EventReview({
     setBusy(null);
     if (res.ok) {
       setMsg("Rejected. The agent learns from this for next time.");
-      setTimeout(() => router.push("/review"), 1200);
+      setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review"), 1200);
     } else {
       setMsg(d.error ? `Could not reject: ${d.error}` : "Could not reject.");
     }
