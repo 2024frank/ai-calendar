@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { cloneElement, isValidElement, useId, useMemo, useState, type ReactElement } from "react";
+import { cloneElement, isValidElement, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import {
   DISPLAY_TYPES,
   EVENT_TYPES,
@@ -300,13 +300,35 @@ export function EventReview({
     };
   }
 
+  // The form exactly as it loaded, defaults and all. Saving sends only what
+  // differs from this, so the form's own normalization (a defaulted geoScope,
+  // a default button title, JSON key order in sessions) can never be logged as
+  // a reviewer correction. Every approval used to save the whole form, which
+  // manufactured "edits" on every single approved event, drove the
+  // kept-as-written metric to a false 0%, and fired the learning agent over
+  // changes no human made.
+  const initialBody = useRef<Record<string, unknown> | null>(null);
+  if (initialBody.current === null) initialBody.current = body();
+
+  function dirtyBody(): Record<string, unknown> {
+    const now = body() as Record<string, unknown>;
+    const before = initialBody.current ?? {};
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(now)) {
+      if (JSON.stringify(now[key]) !== JSON.stringify((before as Record<string, unknown>)[key])) {
+        out[key] = now[key];
+      }
+    }
+    return out;
+  }
+
   async function save() {
     setBusy("save");
     setMsg(null);
     const res = await fetch(`/api/events/${event.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body()),
+      body: JSON.stringify(dirtyBody()),
     });
     const d = await res.json();
     setBusy(null);
@@ -322,10 +344,11 @@ export function EventReview({
       return;
     }
     setBusy("approve");
+    // Save only what the reviewer actually touched before approving.
     await fetch(`/api/events/${event.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body()),
+      body: JSON.stringify(dirtyBody()),
     });
     const res = await fetch(`/api/events/${event.id}/approve`, { method: "POST" });
     const d = await res.json().catch(() => ({}));
