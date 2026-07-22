@@ -118,7 +118,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         return { startTime, endTime };
       })
       .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0);
-    const prev = (ev.sessions ?? []) as { startTime: number; endTime: number }[];
+    // Rebuild the stored rows in the same key order before comparing. MySQL
+    // returns JSON keys alphabetically (endTime first), so comparing raw
+    // stringifications called every save a change even when nothing moved.
+    const prev = ((ev.sessions ?? []) as { startTime: number; endTime: number }[]).map(
+      (row) => ({ startTime: row.startTime, endTime: row.endTime }),
+    );
     if (JSON.stringify(prev) !== JSON.stringify(next)) {
       patch.sessions = next;
       // Keep the expiry sweep and the queue's "when" column in sync.

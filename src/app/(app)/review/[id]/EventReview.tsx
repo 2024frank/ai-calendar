@@ -333,6 +333,8 @@ export function EventReview({
     const d = await res.json();
     setBusy(null);
     setMsg(res.ok ? (d.changed ? `Saved ${d.changed} change(s). The agent learns from these.` : "No changes.") : d.error);
+    // What was just saved is the new baseline, so saving again reports nothing.
+    if (res.ok) initialBody.current = body();
     if (res.ok) router.refresh();
   }
 

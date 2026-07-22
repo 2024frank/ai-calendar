@@ -7,6 +7,7 @@ import { currentCommunityId } from "@/lib/data";
 import { Card, EmptyState, PageHeader, StatusBadge, TableShell } from "@/components/ui";
 import { fmtDate } from "@/components/bits";
 import { ExportButtons } from "./ExportButtons";
+import { LessonActions } from "./LessonActions";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function LearningPage() {
       triggerKind: learnings.triggerKind,
       fieldName: learnings.fieldName,
       timesServed: learnings.timesServed,
+      status: learnings.status,
       createdAt: learnings.createdAt,
       sourceName: sources.name,
       reviewerEmail: users.email,
@@ -44,7 +46,7 @@ export default async function LearningPage() {
 
   const [tally] = await db
     .select({
-      total: sql<number>`count(*)`,
+      total: sql<number>`sum(case when ${learnings.status} = 'active' then 1 else 0 end)`,
       global: sql<number>`sum(case when ${learnings.scope} = 'global' then 1 else 0 end)`,
       fromRejections: sql<number>`sum(case when ${learnings.triggerKind} = 'rejection' then 1 else 0 end)`,
       people: sql<number>`count(distinct ${learnings.reviewerId})`,
@@ -111,12 +113,18 @@ export default async function LearningPage() {
                   <th>Taught by</th>
                   <th>Given to runs</th>
                   <th>When</th>
+                  <th><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id}>
-                    <td style={{ maxWidth: 420 }}>{r.lesson}</td>
+                  <tr key={r.id} style={r.status === "retired" ? { opacity: 0.5 } : undefined}>
+                    <td style={{ maxWidth: 420 }}>
+                      {r.lesson}
+                      {r.status === "retired" && (
+                        <span className="badge neutral" style={{ marginLeft: 8 }}>retired</span>
+                      )}
+                    </td>
                     <td>
                       <span title={SCOPE_MEANS[r.scope]}>
                         <StatusBadge tone={SCOPE_TONE[r.scope]}>
@@ -135,6 +143,7 @@ export default async function LearningPage() {
                     <td className="muted">{r.reviewerName || r.reviewerEmail || "—"}</td>
                     <td>{r.timesServed}</td>
                     <td className="muted">{fmtDate(r.createdAt)}</td>
+                    <td><LessonActions id={r.id} status={r.status} /></td>
                   </tr>
                 ))}
               </tbody>
