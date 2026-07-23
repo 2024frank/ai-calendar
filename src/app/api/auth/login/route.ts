@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "");
-  if (!email || !password) {
+  if (!email || !password || password.length > 128) {
     return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
   }
   // Per-IP and per-account throttles: the account bucket blunts a distributed

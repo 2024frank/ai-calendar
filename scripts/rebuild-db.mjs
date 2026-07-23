@@ -1,10 +1,11 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import { readFileSync } from "fs";
 
 config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 
-const ssl = { rejectUnauthorized: false };
+const ssl = databaseSsl();
 const DB = process.env.DATABASE_NAME;
 
 // Hard safety guard: this script may ONLY ever run against the app DB.

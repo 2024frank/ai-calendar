@@ -1,5 +1,5 @@
 import "server-only";
-import { desc, eq, and, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { activityLog, users } from "@/db/schema";
 

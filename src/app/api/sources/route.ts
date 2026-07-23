@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { sources } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { listSources } from "@/lib/data";
+import { isPublicHttpUrl } from "@/lib/publicUrl";
 import { valueToCron } from "@/lib/schedule";
 
 export const runtime = "nodejs";
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
   const name = String(body.name ?? "").trim();
   // One source can publish across several pages (a listing plus its extra
   // pages, or a separate calendar). The first is the primary link.
-  const urls = (Array.isArray(body.urls) ? body.urls : String(body.url ?? "").split(/[\n,]+/))
+  const urls: string[] = (Array.isArray(body.urls) ? body.urls : String(body.url ?? "").split(/[\n,]+/))
     .map((u: unknown) => String(u).trim())
     .filter(Boolean);
   const url = urls[0] ?? "";
@@ -54,6 +55,12 @@ export async function POST(req: Request) {
   if (!communityId) return NextResponse.json({ error: "A community is required." }, { status: 400 });
   if (sourceType === "web" && !url) {
     return NextResponse.json({ error: "A link is required for a web source." }, { status: 400 });
+  }
+  if (sourceType === "web" && urls.some((candidate) => !isPublicHttpUrl(candidate))) {
+    return NextResponse.json(
+      { error: "Source links must use a public http or https address." },
+      { status: 400 },
+    );
   }
 
   // Ensure a unique slug within the community.

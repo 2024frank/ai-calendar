@@ -1,7 +1,10 @@
 import "server-only";
+import { eq } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { db } from "@/db";
+import { users } from "@/db/schema";
 
 const COOKIE = "ac_session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -18,7 +21,7 @@ export type Session = {
 
 function secret() {
   const s = process.env.AUTH_JWT_SECRET;
-  if (!s || s.length < 16) {
+  if (!s || s.length < 32) {
     // Never let a forgeable, source-visible fallback sign real sessions.
     if (process.env.NODE_ENV === "production") {
       throw new Error("AUTH_JWT_SECRET must be set (32+ random chars) in production");
@@ -58,12 +61,41 @@ export async function clearSession() {
 export async function getSession(): Promise<Session | null> {
   const raw = (await cookies()).get(COOKIE)?.value;
   if (!raw) return null;
+  let uid: number;
   try {
     const { payload } = await jwtVerify(raw, secret());
-    return payload as unknown as Session;
+    uid = Number(payload.uid);
+    if (!Number.isInteger(uid) || uid < 1) return null;
   } catch {
     return null;
   }
+
+  // Roles, status, and community access can change after a cookie is issued.
+  // Rehydrate from the source of truth so disabling or demoting an account takes
+  // effect on its next request instead of up to seven days later.
+  const [user] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      communityId: users.communityId,
+      canReviewAllSources: users.canReviewAllSources,
+      status: users.status,
+    })
+    .from(users)
+    .where(eq(users.id, uid))
+    .limit(1);
+  if (!user || user.status !== "active") return null;
+
+  return {
+    uid: user.id,
+    email: user.email,
+    name: user.name ?? null,
+    role: user.role,
+    communityId: user.communityId ?? null,
+    canReviewAllSources: user.canReviewAllSources,
+  };
 }
 
 export async function requireUser(): Promise<Session> {

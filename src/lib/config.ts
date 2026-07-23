@@ -20,6 +20,16 @@ export function productionConfigIssues(env: NodeJS.ProcessEnv = process.env): st
     const value = env[name];
     if (value && value.length < 32) issues.push(`${name} must be at least 32 characters`);
   }
+  if (env.NODE_ENV === "production" && env.DATABASE_SSL?.toLowerCase() === "false") {
+    issues.push("DATABASE_SSL cannot be disabled in production");
+  }
+  if (
+    env.NODE_ENV === "production" &&
+    env.DATABASE_HOST?.endsWith(".ondigitalocean.com") &&
+    !env.DATABASE_CA_CERT?.trim()
+  ) {
+    issues.push("DATABASE_CA_CERT is required for DigitalOcean managed MySQL");
+  }
 
   if (env.APP_URL) {
     try {

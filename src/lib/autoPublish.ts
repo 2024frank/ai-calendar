@@ -67,7 +67,10 @@ export async function publishPendingForSources(
       }),
     );
     processed += batch.length;
-    for (const ok of results) ok ? published++ : failed++;
+    for (const ok of results) {
+      if (ok) published += 1;
+      else failed += 1;
+    }
   }
 
   return { published, failed, remaining: waiting.length - processed };

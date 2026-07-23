@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, destinations } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { assertPublicHttpUrl, isPublicHttpUrl } from "@/lib/publicUrl";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,8 +30,16 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   };
 
   const apiBase = String(body.apiBase ?? "").trim().replace(/\/+$/, "");
-  if (!/^https?:\/\/[^\s/]+/i.test(apiBase)) {
+  if (!isPublicHttpUrl(apiBase)) {
     return NextResponse.json({ error: "Enter the endpoint's base URL, like https://cleveland.communityhub.cloud" }, { status: 400 });
+  }
+  if (process.env.NODE_ENV === "production" && new URL(apiBase).protocol !== "https:") {
+    return NextResponse.json({ error: "Publishing endpoints must use HTTPS." }, { status: 400 });
+  }
+  try {
+    await assertPublicHttpUrl(apiBase);
+  } catch {
+    return NextResponse.json({ error: "The endpoint must resolve to a public address." }, { status: 400 });
   }
   const name = String(body.name ?? "").trim() || `${new URL(apiBase).hostname} endpoint`;
   const active = Boolean(body.active);

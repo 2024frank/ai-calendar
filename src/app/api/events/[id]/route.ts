@@ -8,6 +8,7 @@ import { refreshPendingFlag } from "@/lib/flags";
 import { recordFieldEdits, type FieldChange } from "@/lib/learning";
 import { learnFromCorrection } from "@/lib/learningAgent";
 import { logActivity } from "@/lib/activity";
+import { isPublicHttpUrl } from "@/lib/publicUrl";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,13 @@ const TEXT_FIELDS = [
   "calendarSourceUrl",
   "eventType",
 ] as const;
+const URL_FIELDS = new Set([
+  "urlLink",
+  "website",
+  "registrationUrl",
+  "imageCdnUrl",
+  "calendarSourceUrl",
+]);
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -56,6 +64,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   for (const f of TEXT_FIELDS) {
     if (!(f in body)) continue;
     const next = body[f] === null || body[f] === "" ? null : String(body[f]);
+    if (next && URL_FIELDS.has(f) && !isPublicHttpUrl(next)) {
+      return NextResponse.json(
+        { error: `${f} must use a public http or https address.` },
+        { status: 400 },
+      );
+    }
     const prev = (ev as Record<string, unknown>)[f] as string | null;
     if ((prev ?? "") !== (next ?? "")) {
       patch[f] = next;
@@ -98,9 +112,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (Array.isArray(body.buttons)) {
-    const next = (body.buttons as { title?: unknown; link?: unknown }[])
-      .map((b) => ({ title: String(b.title ?? "").trim(), link: String(b.link ?? "").trim() }))
-      .filter((b) => b.title && b.link);
+    const submitted = (body.buttons as { title?: unknown; link?: unknown }[]).map((b) => ({
+      title: String(b.title ?? "").trim(),
+      link: String(b.link ?? "").trim(),
+    }));
+    if (submitted.some((button) => button.link && !isPublicHttpUrl(button.link))) {
+      return NextResponse.json(
+        { error: "Button links must use a public http or https address." },
+        { status: 400 },
+      );
+    }
+    const next = submitted.filter((b) => b.title && b.link);
     const prev = (ev.buttons ?? []) as { title: string; link: string }[];
     if (JSON.stringify(prev) !== JSON.stringify(next)) {
       patch.buttons = next;

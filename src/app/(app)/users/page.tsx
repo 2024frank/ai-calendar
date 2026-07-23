@@ -3,10 +3,19 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { userCommunities, users } from "@/db/schema";
 import { isAdmin, requireUser } from "@/lib/auth";
-import { listCommunities } from "@/lib/data";
+import { accessibleCommunities } from "@/lib/data";
 import { UsersAdmin } from "./UsersAdmin";
 
 export const dynamic = "force-dynamic";
+
+const userFields = {
+  id: users.id,
+  email: users.email,
+  name: users.name,
+  role: users.role,
+  communityId: users.communityId,
+  status: users.status,
+};
 
 export default async function UsersPage() {
   const s = await requireUser();
@@ -14,14 +23,14 @@ export default async function UsersPage() {
 
   const rows =
     s.role === "platform_admin"
-      ? await db.select().from(users).orderBy(users.id)
+      ? await db.select(userFields).from(users).orderBy(users.id)
       : await db
-          .select()
+          .select(userFields)
           .from(users)
           .where(eq(users.communityId, s.communityId ?? -1))
           .orderBy(users.id);
 
-  const comms = await listCommunities();
+  const comms = await accessibleCommunities(s);
 
   // Each user's extra community memberships, so the editor shows every community
   // they can reach (home community + extras). Belonging to more than one is what

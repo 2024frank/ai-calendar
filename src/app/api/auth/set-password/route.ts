@@ -23,26 +23,39 @@ export async function POST(req: Request) {
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-  const [tok] = await db
-    .select()
-    .from(loginTokens)
-    .where(and(eq(loginTokens.tokenHash, tokenHash), isNull(loginTokens.consumedAt)))
-    .limit(1);
+  const user = await db.transaction(async (tx) => {
+    const [tok] = await tx
+      .select()
+      .from(loginTokens)
+      .where(
+        and(
+          eq(loginTokens.tokenHash, tokenHash),
+          eq(loginTokens.kind, "otp"),
+          isNull(loginTokens.consumedAt),
+        ),
+      )
+      .limit(1);
+    if (!tok || new Date(tok.expiresAt).getTime() < Date.now()) return null;
 
-  if (!tok || new Date(tok.expiresAt).getTime() < Date.now()) {
+    const [account] = await tx.select().from(users).where(eq(users.id, tok.userId)).limit(1);
+    if (!account || account.status !== "active") return null;
+
+    const [consumed] = await tx
+      .update(loginTokens)
+      .set({ consumedAt: new Date() })
+      .where(and(eq(loginTokens.id, tok.id), isNull(loginTokens.consumedAt)));
+    if (Number((consumed as { affectedRows?: number }).affectedRows ?? 0) !== 1) return null;
+
+    await tx
+      .update(users)
+      .set({ passwordHash: hashPassword(password), mustSetPassword: false })
+      .where(eq(users.id, account.id));
+    return account;
+  });
+
+  if (!user) {
     return NextResponse.json({ error: "This link has expired. Ask for a new one." }, { status: 400 });
   }
-
-  const [user] = await db.select().from(users).where(eq(users.id, tok.userId)).limit(1);
-  if (!user || user.status !== "active") {
-    return NextResponse.json({ error: "This account is not active." }, { status: 403 });
-  }
-
-  await db
-    .update(users)
-    .set({ passwordHash: hashPassword(password), mustSetPassword: false })
-    .where(eq(users.id, user.id));
-  await db.update(loginTokens).set({ consumedAt: new Date() }).where(eq(loginTokens.id, tok.id));
 
   await createSession({
     uid: user.id,

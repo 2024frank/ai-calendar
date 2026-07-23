@@ -144,9 +144,6 @@ async function billRun(runId: number, usage: LlmUsage, model: string | null): Pr
   }
 }
 
-/** Upstream hiccups, not our request being wrong. Worth trying again. */
-const TRANSIENT = new Set([500, 502, 503, 504, 429]);
-
 export async function llmComplete(call: LlmCall): Promise<LlmResult> {
   // The provider intermittently answers a long agent call with a 500 "Stream
   // error from backend". One of those used to fail the whole job and, in the

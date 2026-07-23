@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { events, runs } from "@/db/schema";
 import { correctNextEvent } from "@/lib/correction";
 import { getSession, isAdmin } from "@/lib/auth";
+import { currentCommunityId, getSource } from "@/lib/data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,12 @@ export async function GET(req: Request) {
 
   const raw = new URL(req.url).searchParams.get("sourceId");
   const sourceId = raw && Number.isInteger(Number(raw)) ? Number(raw) : null;
+  if (sourceId && !(await getSource(s, sourceId))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  const communityId = await currentCommunityId(s);
+  const eventScope = communityId ? eq(events.communityId, communityId) : undefined;
+  const runScope = communityId ? eq(runs.communityId, communityId) : undefined;
   const untried = sql`(${events.rejectionReason} is null or ${events.rejectionReason} not like '%[tried]%')`;
 
   const [remainingRow] = await db
@@ -30,8 +37,8 @@ export async function GET(req: Request) {
     .from(events)
     .where(
       sourceId
-        ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
-        : and(eq(events.status, "auto_rejected"), untried),
+        ? and(eventScope, eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
+        : and(eventScope, eq(events.status, "auto_rejected"), untried),
     );
   const [attemptedRow] = await db
     .select({ n: sql<number>`count(*)` })
@@ -39,11 +46,16 @@ export async function GET(req: Request) {
     .where(
       sourceId
         ? and(
+            eventScope,
             eq(events.sourceId, sourceId),
             eq(events.status, "auto_rejected"),
             sql`${events.rejectionReason} like '%[tried]%'`,
           )
-        : and(eq(events.status, "auto_rejected"), sql`${events.rejectionReason} like '%[tried]%'`),
+        : and(
+            eventScope,
+            eq(events.status, "auto_rejected"),
+            sql`${events.rejectionReason} like '%[tried]%'`,
+          ),
     );
 
   const [correctedRow] = await db
@@ -51,8 +63,8 @@ export async function GET(req: Request) {
     .from(events)
     .where(
       sourceId
-        ? and(eq(events.sourceId, sourceId), isNotNull(events.correctedAt))
-        : isNotNull(events.correctedAt),
+        ? and(eventScope, eq(events.sourceId, sourceId), isNotNull(events.correctedAt))
+        : and(eventScope, isNotNull(events.correctedAt)),
     );
   // An unfinished correction run means a pass was interrupted; the client can
   // adopt its id and carry on rather than starting a fresh one.
@@ -68,8 +80,13 @@ export async function GET(req: Request) {
     .from(runs)
     .where(
       sourceId
-        ? and(eq(runs.runKind, "correction"), eq(runs.status, "running"), eq(runs.sourceId, sourceId))
-        : and(eq(runs.runKind, "correction"), eq(runs.status, "running")),
+        ? and(
+            runScope,
+            eq(runs.runKind, "correction"),
+            eq(runs.status, "running"),
+            eq(runs.sourceId, sourceId),
+          )
+        : and(runScope, eq(runs.runKind, "correction"), eq(runs.status, "running")),
     )
     .orderBy(desc(runs.id))
     .limit(1);
@@ -103,6 +120,13 @@ export async function POST(req: Request) {
     retryAttempted?: boolean;
   };
   const sourceId = body.sourceId ? Number(body.sourceId) : null;
+  if (sourceId && !(await getSource(s, sourceId))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  const activeCommunityId = await currentCommunityId(s);
+  const eventScope = activeCommunityId
+    ? eq(events.communityId, activeCommunityId)
+    : undefined;
 
   // An event that could not be completed is parked with a [tried] marker so a
   // pass cannot loop on it forever. Nothing ever cleared those, so once every
@@ -116,8 +140,13 @@ export async function POST(req: Request) {
       .set({ rejectionReason: sql`replace(${events.rejectionReason}, ' [tried]', '')` })
       .where(
         sourceId
-          ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), parked)
-          : and(eq(events.status, "auto_rejected"), parked),
+          ? and(
+              eventScope,
+              eq(events.sourceId, sourceId),
+              eq(events.status, "auto_rejected"),
+              parked,
+            )
+          : and(eventScope, eq(events.status, "auto_rejected"), parked),
       );
   }
 
@@ -129,8 +158,18 @@ export async function POST(req: Request) {
     .from(events)
     .where(
       sourceId
-        ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
-        : and(eq(events.status, "auto_rejected"), isNotNull(events.sourceId), untried),
+        ? and(
+            eventScope,
+            eq(events.sourceId, sourceId),
+            eq(events.status, "auto_rejected"),
+            untried,
+          )
+        : and(
+            eventScope,
+            eq(events.status, "auto_rejected"),
+            isNotNull(events.sourceId),
+            untried,
+          ),
     );
   if (!Number(work?.n ?? 0)) {
     return NextResponse.json({
@@ -149,14 +188,36 @@ export async function POST(req: Request) {
   // Reuse the caller's run so the whole pass shares one timeline and one cost
   // total; start one on the first call.
   let runId = Number(body.runId);
-  if (!Number.isInteger(runId) || runId <= 0) {
+  let correctionCommunityId = activeCommunityId;
+  if (Number.isInteger(runId) && runId > 0) {
+    const [existingRun] = await db
+      .select({
+        sourceId: runs.sourceId,
+        communityId: runs.communityId,
+        runKind: runs.runKind,
+        status: runs.status,
+      })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    const invalidRun =
+      !existingRun ||
+      existingRun.runKind !== "correction" ||
+      existingRun.status !== "running" ||
+      (activeCommunityId !== null && existingRun.communityId !== activeCommunityId) ||
+      (sourceId !== null && existingRun.sourceId !== sourceId);
+    if (invalidRun) {
+      return NextResponse.json({ error: "correction run not found" }, { status: 404 });
+    }
+    correctionCommunityId = existingRun.communityId;
+  } else {
     const [first] = await db
       .select({ sourceId: events.sourceId, communityId: events.communityId })
       .from(events)
       .where(
         sourceId
-          ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"))
-          : and(eq(events.status, "auto_rejected"), isNotNull(events.sourceId)),
+          ? and(eventScope, eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"))
+          : and(eventScope, eq(events.status, "auto_rejected"), isNotNull(events.sourceId)),
       )
       .limit(1);
     if (!first?.sourceId) return NextResponse.json({ done: true, fixed: false, remaining: 0 });
@@ -168,9 +229,10 @@ export async function POST(req: Request) {
       phase: "fetching",
     });
     runId = (res as { insertId: number }).insertId;
+    correctionCommunityId = first.communityId;
   }
 
-  const result = await correctNextEvent(runId, sourceId);
+  const result = await correctNextEvent(runId, sourceId, correctionCommunityId);
 
   // Close the run out when the queue is empty. Leave the counters alone:
   // correctNextEvent already incremented them per event, and overwriting them

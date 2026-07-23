@@ -9,12 +9,12 @@ export const dynamic = "force-dynamic";
 /**
  * Read-only feed of the events this system holds.
  *
- * GET only, and it never exposes anything but event content: no run internals,
- * no source credentials, no reviewer identities. Reading is all it can do.
+ * GET only, and it exposes accepted/published event content: no review queue,
+ * rejected records, run internals, source credentials, or reviewer identities.
  *
  * Query parameters
- *   status     pending | approved | submitted | duplicate | rejected | auto_rejected | all
- *              (default: everything a human has accepted, i.e. approved + submitted)
+ *   status     approved | submitted | published | all
+ *              (default: every accepted or published event)
  *   community  community id or slug
  *   source     source id
  *   from       only events with a session starting at/after this ISO date
@@ -23,15 +23,14 @@ export const dynamic = "force-dynamic";
  *   limit      1-500 (default 100)
  *   offset     for paging
  */
-const STATUSES = [
-  "pending",
-  "approved",
-  "submitted",
-  "duplicate",
-  "rejected",
-  "auto_rejected",
-] as const;
+const STATUSES = ["approved", "submitted", "published"] as const;
 type Status = (typeof STATUSES)[number];
+
+function boundedInt(value: string | null, fallback: number, min: number, max: number) {
+  if (value === null || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? Math.min(Math.max(parsed, min), max) : fallback;
+}
 
 function sessionsOf(row: { sessions: unknown }) {
   return Array.isArray(row.sessions)
@@ -43,8 +42,8 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const p = url.searchParams;
 
-  const limit = Math.min(Math.max(Number(p.get("limit") ?? 100), 1), 500);
-  const offset = Math.max(Number(p.get("offset") ?? 0), 0);
+  const limit = boundedInt(p.get("limit"), 100, 1, 500);
+  const offset = boundedInt(p.get("offset"), 0, 0, 10_000);
 
   const statusParam = (p.get("status") ?? "").trim();
   let statuses: Status[];
@@ -62,8 +61,7 @@ export async function GET(req: Request) {
       );
     }
   } else {
-    // Default to what a person has actually accepted.
-    statuses = ["approved", "submitted"];
+    statuses = [...STATUSES];
   }
 
   const conds = [inArray(events.status, statuses)];
@@ -90,7 +88,7 @@ export async function GET(req: Request) {
 
   const q = (p.get("q") ?? "").trim();
   if (q) {
-    const like = `%${q}%`;
+    const like = `%${q.slice(0, 200)}%`;
     conds.push(sql`(${events.title} like ${like} or ${events.location} like ${like})`);
   }
 

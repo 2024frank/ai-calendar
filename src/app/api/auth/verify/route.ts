@@ -18,7 +18,13 @@ export async function GET(req: Request) {
   const [tok] = await db
     .select()
     .from(loginTokens)
-    .where(and(eq(loginTokens.tokenHash, tokenHash), isNull(loginTokens.consumedAt)))
+    .where(
+      and(
+        eq(loginTokens.tokenHash, tokenHash),
+        eq(loginTokens.kind, "magic"),
+        isNull(loginTokens.consumedAt),
+      ),
+    )
     .limit(1);
 
   if (!tok || new Date(tok.expiresAt).getTime() < Date.now()) {
@@ -34,7 +40,13 @@ export async function GET(req: Request) {
   // The token is a proof of email ownership, so a session is created here and
   // they land where the link points (e.g. an email digest -> /review). Setting a
   // password is optional and lives behind the separate forgot-password flow.
-  await db.update(loginTokens).set({ consumedAt: new Date() }).where(eq(loginTokens.id, tok.id));
+  const [consumed] = await db
+    .update(loginTokens)
+    .set({ consumedAt: new Date() })
+    .where(and(eq(loginTokens.id, tok.id), isNull(loginTokens.consumedAt)));
+  if (Number((consumed as { affectedRows?: number }).affectedRows ?? 0) !== 1) {
+    return NextResponse.redirect(new URL("/login?e=invalid", base));
+  }
 
   await createSession({
     uid: user.id,

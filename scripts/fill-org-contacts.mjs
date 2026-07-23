@@ -1,3 +1,4 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
@@ -38,7 +39,7 @@ function findPhone(html) {
 const c = await mysql.createConnection({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),
   user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false },
+  database: process.env.DATABASE_NAME, ssl: databaseSsl(),
 });
 const [rows] = await c.query("SELECT id,name,url,org_contact_email,org_phone,org_website FROM sources WHERE url IS NOT NULL ORDER BY id");
 

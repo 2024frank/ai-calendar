@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { sources } from "@/db/schema";
+import { destinations, sources } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
 import { getSource } from "@/lib/data";
+import { isPublicHttpUrl } from "@/lib/publicUrl";
 import { valueToCron } from "@/lib/schedule";
 import { flushSourceIfUnrestricted, type FlushResult } from "@/lib/autoPublish";
 import { logActivity } from "@/lib/activity";
@@ -50,13 +51,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // Links: accept a list or a newline/comma string; the first is the primary.
   let linksChanged = false;
   if ("urls" in body || "url" in body) {
-    const urls = (
+    const urls: string[] = (
       Array.isArray(body.urls) ? body.urls : String(body.url ?? "").split(/[\n,]+/)
     )
       .map((u: unknown) => String(u).trim())
       .filter(Boolean)
       .slice(0, 12);
     if (urls.length) {
+      if (urls.some((candidate) => !isPublicHttpUrl(candidate))) {
+        return NextResponse.json(
+          { error: "Source links must use a public http or https address." },
+          { status: 400 },
+        );
+      }
       patch.url = urls[0].slice(0, 2048);
       patch.startUrls = urls;
       linksChanged = true;
@@ -64,7 +71,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if ("destinationId" in body) {
-    patch.destinationId = body.destinationId ? Number(body.destinationId) : null;
+    const destinationId = body.destinationId ? Number(body.destinationId) : null;
+    if (destinationId) {
+      const [destination] = await db
+        .select({ id: destinations.id, communityId: destinations.communityId })
+        .from(destinations)
+        .where(eq(destinations.id, destinationId))
+        .limit(1);
+      if (!destination || destination.communityId !== source.communityId) {
+        return NextResponse.json({ error: "That destination is not available." }, { status: 400 });
+      }
+    }
+    patch.destinationId = destinationId;
   }
 
   if (!Object.keys(patch).length) return NextResponse.json({ ok: true });

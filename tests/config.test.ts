@@ -8,6 +8,7 @@ const valid = {
   DATABASE_USERNAME: "app",
   DATABASE_PASSWORD: "secret",
   DATABASE_NAME: "calendar",
+  DATABASE_CA_CERT: "test-ca",
   PERPLEXITY_API_KEY: "pplx-key",
   AUTH_JWT_SECRET: "a".repeat(32),
   AGENT_INGEST_SECRET: "b".repeat(32),
@@ -33,5 +34,21 @@ describe("productionConfigIssues", () => {
     });
     assert.ok(issues.includes("AUTH_JWT_SECRET must be at least 32 characters"));
     assert.ok(issues.includes("APP_URL must use HTTPS in production"));
+  });
+
+  it("rejects disabling database TLS in production", () => {
+    const issues = productionConfigIssues({ ...valid, DATABASE_SSL: "false" });
+    assert.ok(issues.includes("DATABASE_SSL cannot be disabled in production"));
+  });
+
+  it("requires the managed database CA for DigitalOcean", () => {
+    const issues = productionConfigIssues({
+      ...valid,
+      DATABASE_HOST: "db-mysql-example.b.db.ondigitalocean.com",
+      DATABASE_CA_CERT: "",
+    });
+    assert.ok(
+      issues.includes("DATABASE_CA_CERT is required for DigitalOcean managed MySQL"),
+    );
   });
 });

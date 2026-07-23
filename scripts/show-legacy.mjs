@@ -1,3 +1,4 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import Anthropic from "@anthropic-ai/sdk";
@@ -6,7 +7,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const c = await mysql.createConnection({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),
   user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false },
+  database: process.env.DATABASE_NAME, ssl: databaseSsl(),
 });
 const id = Number(process.argv[2]);
 const [[s]] = await c.query("SELECT name, legacy_agent_id FROM sources WHERE id=?", [id]);

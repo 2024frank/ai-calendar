@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 
 import { POST_TYPES, POST_TYPE_IDS } from "./taxonomy";
 import { toUnixSeconds } from "./time";
+import { isPublicHttpUrl } from "./publicUrl";
 
 export { POST_TYPES, POST_TYPE_IDS };
 
@@ -322,6 +323,11 @@ function clean(s: unknown): string {
     .trim();
 }
 
+function cleanHttpUrl(value: unknown): string | null {
+  const normalized = clean(value);
+  return normalized && isPublicHttpUrl(normalized) ? normalized : null;
+}
+
 /** Deterministic normalization applied before validation. */
 export function normalizeEvent(
   raw: Record<string, unknown>,
@@ -380,17 +386,17 @@ export function normalizeEvent(
       ? raw.locationType
       : "ne") as "ph2" | "on" | "bo" | "ne",
     location: clean(raw.location) || null,
-    urlLink: clean(raw.urlLink) || null,
+    urlLink: cleanHttpUrl(raw.urlLink),
     display: "all",
     postTypeId: postTypeId.length ? Array.from(new Set(postTypeId)) : [89],
     sponsors,
-    website: clean(raw.website) || null,
-    registrationUrl: clean(raw.registrationUrl) || null,
-    imageCdnUrl: clean(raw.imageCdnUrl) || null,
+    website: cleanHttpUrl(raw.website),
+    registrationUrl: cleanHttpUrl(raw.registrationUrl),
+    imageCdnUrl: cleanHttpUrl(raw.imageCdnUrl),
     contactEmail: clean(raw.contactEmail) || null,
     phone: clean(raw.phone) || null,
     cost: clean(raw.cost) || null,
-    calendarSourceUrl: clean(raw.calendarSourceUrl) || null,
+    calendarSourceUrl: cleanHttpUrl(raw.calendarSourceUrl),
     imageData: (() => {
       // imageB64 is the agent-side download for bot-walled hosts. Strip any
       // data: prefix and the newlines the `base64` command emits.
@@ -403,13 +409,13 @@ export function normalizeEvent(
     })(),
     imageUrls: (Array.isArray(raw.imageUrls) ? raw.imageUrls : [])
       .map((u) => String(u).trim())
-      .filter((u) => /^https?:\/\//i.test(u)),
+      .filter(isPublicHttpUrl),
     placeName: clean(raw.placeName) || null,
     roomNum: clean(raw.roomNum) || null,
     buttons: (Array.isArray(raw.buttons) ? raw.buttons : [])
       .map((b) => {
         const o = b as Record<string, unknown>;
-        return { title: clean(o.title), link: clean(o.link) };
+        return { title: clean(o.title), link: cleanHttpUrl(o.link) ?? "" };
       })
       .filter((b) => b.title && b.link),
     fieldNotes: normalizeFieldNotes(raw.fieldNotes),

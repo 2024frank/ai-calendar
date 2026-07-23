@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { destinations } from "@/db/schema";
+import { fetchPublicBytes } from "./fetchPage";
 
 export type InventoryItem = {
   title: string;
@@ -26,16 +27,25 @@ export async function fetchDestinationInventory(communityId: number): Promise<In
     .limit(1);
   if (!dest) return [];
 
-  const cfg = (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) as {
-    inventory_url?: string;
-    api_base?: string;
-  };
+  let cfg: { inventory_url?: string; api_base?: string };
+  try {
+    cfg = (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) as {
+      inventory_url?: string;
+      api_base?: string;
+    };
+  } catch {
+    return [];
+  }
   if (!cfg?.inventory_url) return [];
 
   try {
-    const res = await fetch(cfg.inventory_url, { signal: AbortSignal.timeout(25_000) });
+    const res = await fetchPublicBytes(cfg.inventory_url, {
+      maxBytes: 5 * 1024 * 1024,
+      timeoutMs: 25_000,
+      headers: { accept: "application/json" },
+    });
     if (!res.ok) return [];
-    const body = (await res.json()) as Record<string, unknown>;
+    const body = JSON.parse(new TextDecoder().decode(res.bytes)) as Record<string, unknown>;
     const posts = Array.isArray(body.posts) ? (body.posts as Record<string, unknown>[]) : [];
     return posts.map((p) => {
       const sessions = Array.isArray(p.sessions) ? (p.sessions as Record<string, unknown>[]) : [];

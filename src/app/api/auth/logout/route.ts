@@ -9,7 +9,3 @@ export async function POST(req: Request) {
   const base = process.env.APP_URL || new URL(req.url).origin;
   return NextResponse.redirect(new URL("/login", base), { status: 303 });
 }
-
-export async function GET(req: Request) {
-  return POST(req);
-}

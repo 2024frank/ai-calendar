@@ -16,6 +16,19 @@ import { sendInvite } from "@/lib/email";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const publicUserFields = {
+  id: users.id,
+  communityId: users.communityId,
+  role: users.role,
+  email: users.email,
+  name: users.name,
+  mustSetPassword: users.mustSetPassword,
+  canReviewAllSources: users.canReviewAllSources,
+  status: users.status,
+  createdAt: users.createdAt,
+  updatedAt: users.updatedAt,
+};
+
 export async function GET() {
   const s = await getSession();
   if (!s) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -23,9 +36,9 @@ export async function GET() {
 
   const rows =
     s.role === "platform_admin"
-      ? await db.select().from(users).orderBy(users.id)
+      ? await db.select(publicUserFields).from(users).orderBy(users.id)
       : await db
-          .select()
+          .select(publicUserFields)
           .from(users)
           .where(eq(users.communityId, s.communityId ?? -1))
           .orderBy(users.id);
@@ -145,7 +158,7 @@ export async function POST(req: Request) {
   const rawToken = randomBytes(32).toString("hex");
   await db.insert(loginTokens).values({
     userId,
-    kind: "magic",
+    kind: "otp",
     tokenHash: createHash("sha256").update(rawToken).digest("hex"),
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });

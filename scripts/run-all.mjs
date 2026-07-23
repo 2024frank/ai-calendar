@@ -1,3 +1,4 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import { SignJWT } from "jose";
@@ -7,7 +8,7 @@ const BASE = "http://localhost:3000";
 const c = mysql.createPool({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),
   user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false }, connectionLimit: 2, enableKeepAlive: true, idleTimeout: 0,
+  database: process.env.DATABASE_NAME, ssl: databaseSsl(), connectionLimit: 2, enableKeepAlive: true, idleTimeout: 0,
 });
 
 // admin cookie

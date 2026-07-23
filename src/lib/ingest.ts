@@ -12,7 +12,8 @@ import {
   validateEvent,
   type ExtractedEvent,
 } from "./contract";
-import { fetchPage, hasImageExtension, isGenericImage, isPublicHttpUrl } from "./fetchPage";
+import { fetchPage, fetchPublicBytes, hasImageExtension, isGenericImage } from "./fetchPage";
+import { isPublicHttpUrl } from "./publicUrl";
 import {
   MODE_LABELS,
   normalizeMode,
@@ -68,9 +69,9 @@ async function deadSourceLinks(urls: string[]): Promise<Set<string>> {
     await Promise.all(
       uniq.slice(i, i + BATCH).map(async (u) => {
         try {
-          const r = await fetch(u, {
-            redirect: "follow",
-            signal: AbortSignal.timeout(9000),
+          const r = await fetchPublicBytes(u, {
+            maxBytes: 1024 * 1024,
+            timeoutMs: 9000,
             headers,
           });
           // Only a definite 404/410 means "does not exist". A 403 is a bot wall,
@@ -107,9 +108,9 @@ async function nearestLiveAncestor(url: string, fallback: string | null): Promis
   };
   const alive = async (candidate: string) => {
     try {
-      const r = await fetch(candidate, {
-        redirect: "follow",
-        signal: AbortSignal.timeout(9000),
+      const r = await fetchPublicBytes(candidate, {
+        maxBytes: 1024 * 1024,
+        timeoutMs: 9000,
         headers,
       });
       // Anything that is not a definite "gone" counts: a bot wall still means

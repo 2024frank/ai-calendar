@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { currentCommunityId } from "@/lib/data";
 import { reapStaleRuns } from "@/lib/retention";
 import { RunStatus, fmtDate } from "@/components/bits";
 import { ButtonLink, Card, PageHeader } from "@/components/ui";
@@ -17,7 +18,10 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   await reapStaleRuns().catch(() => undefined);
   const [run] = await db.select().from(runs).where(eq(runs.id, Number(id))).limit(1);
   if (!run) notFound();
-  if (session.role !== "platform_admin" && run.communityId !== session.communityId) notFound();
+  const communityId = await currentCommunityId(session);
+  if (session.role !== "platform_admin" && (!communityId || run.communityId !== communityId)) {
+    notFound();
+  }
   const [source] = run.sourceId ? await db.select().from(sources).where(eq(sources.id, run.sourceId)).limit(1) : [null];
   const backHref = source ? `/sources/${source.id}` : "/dashboard";
 

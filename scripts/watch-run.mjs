@@ -1,3 +1,4 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 
@@ -10,7 +11,7 @@ const conn = await mysql.createConnection({
   user: process.env.DATABASE_USERNAME,
   password: process.env.DATABASE_PASSWORD,
   database: process.env.DATABASE_NAME,
-  ssl: { rejectUnauthorized: false },
+  ssl: databaseSsl(),
 });
 
 let lastId = 0;

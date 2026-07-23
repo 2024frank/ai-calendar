@@ -11,12 +11,19 @@ import * as schema from "./schema";
 const globalForDb = globalThis as unknown as { __aiCalendarPool?: mysql.Pool };
 
 function createPool() {
-  // Verify the managed-DB certificate when a CA is provided (recommended in
-  // production); otherwise fall back to encrypted-but-unverified TLS.
+  // Production must authenticate the database, not merely encrypt traffic.
+  // A managed-DB CA may be supplied explicitly; otherwise Node's trusted roots
+  // are used. Local development keeps the legacy opt-out for private test DBs.
   const ca = process.env.DATABASE_CA_CERT;
-  const ssl = ca
-    ? { ca: ca.replace(/\\n/g, "\n"), rejectUnauthorized: true }
-    : { rejectUnauthorized: false };
+  const sslDisabled = process.env.DATABASE_SSL?.toLowerCase() === "false";
+  if (sslDisabled && process.env.NODE_ENV === "production") {
+    throw new Error("DATABASE_SSL cannot be disabled in production");
+  }
+  const ssl = sslDisabled
+    ? undefined
+    : ca
+      ? { ca: ca.replace(/\\n/g, "\n"), rejectUnauthorized: true }
+      : { rejectUnauthorized: process.env.NODE_ENV === "production" };
   return mysql.createPool({
     host: process.env.DATABASE_HOST,
     port: Number(process.env.DATABASE_PORT || 25060),

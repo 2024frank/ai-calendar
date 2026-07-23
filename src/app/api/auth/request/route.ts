@@ -15,7 +15,10 @@ export async function POST(req: Request) {
   if (!email || !email.includes("@")) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
   }
-  if (!(await rateLimit(`request:${clientKey(req)}`, 6, 10 * 60_000))) {
+  const throttled =
+    !(await rateLimit(`request:${clientKey(req)}`, 6, 10 * 60_000)) ||
+    !(await rateLimit(`request-acct:${email}`, 6, 60 * 60_000));
+  if (throttled) {
     return NextResponse.json({ ok: true });
   }
 

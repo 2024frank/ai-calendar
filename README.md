@@ -83,7 +83,7 @@ npm run dev
 | `APP_URL` | Public base URL, used in sign-in links |
 | `HOSTINGER_EMAIL`, `HOSTINGER_EMAIL_PASSWORD` | The mailbox mail is sent from. `HOSTINGER_SMTP_HOST` and `_PORT` override the defaults |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional fallback if the mailbox is unset or refuses. With neither, links get logged in development instead of emailed |
-| `DATABASE_CA_CERT`, `DB_POOL_SIZE` | Optional. A CA certificate for the database connection, and the pool size |
+| `DATABASE_SSL`, `DATABASE_CA_CERT`, `DB_POOL_SIZE` | Database TLS (required and certificate-verified in production), the required DigitalOcean cluster CA, and the pool size |
 
 ## License
 

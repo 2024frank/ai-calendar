@@ -1,10 +1,11 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import { readdirSync, readFileSync } from "fs";
 
 config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 
-const ssl = { rejectUnauthorized: false };
+const ssl = databaseSsl();
 const SCRATCH =
   "/private/tmp/claude-503/-Users-kwaku/d0f64b71-6074-454c-96e3-db9511cdefa2/scratchpad";
 

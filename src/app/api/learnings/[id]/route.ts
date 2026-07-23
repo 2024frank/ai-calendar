@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { learnings } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
+import { currentCommunityId } from "@/lib/data";
 import { logActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
@@ -26,6 +27,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const [row] = await db.select().from(learnings).where(eq(learnings.id, Number(id))).limit(1);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const communityId = await currentCommunityId(s);
+  if (s.role !== "platform_admin" && (!communityId || row.communityId !== communityId)) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   await db.update(learnings).set({ status }).where(eq(learnings.id, row.id));
   await logActivity({

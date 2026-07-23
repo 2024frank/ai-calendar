@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { communities } from "@/db/schema";
+import { communities, destinations } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { flushCommunityInheritors, type FlushResult } from "@/lib/autoPublish";
 import { logActivity } from "@/lib/activity";
@@ -28,9 +28,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (body.timezone) patch.timezone = String(body.timezone).slice(0, 64);
   if (body.name) patch.name = String(body.name).slice(0, 200);
   if ("defaultDestinationId" in body) {
-    patch.defaultDestinationId = body.defaultDestinationId
-      ? Number(body.defaultDestinationId)
-      : null;
+    const destinationId = body.defaultDestinationId ? Number(body.defaultDestinationId) : null;
+    if (destinationId) {
+      const [destination] = await db
+        .select({ id: destinations.id, communityId: destinations.communityId })
+        .from(destinations)
+        .where(eq(destinations.id, destinationId))
+        .limit(1);
+      if (!destination || destination.communityId !== communityId) {
+        return NextResponse.json({ error: "That destination is not available." }, { status: 400 });
+      }
+    }
+    patch.defaultDestinationId = destinationId;
   }
 
   if (!Object.keys(patch).length) return NextResponse.json({ ok: true });

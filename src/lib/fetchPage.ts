@@ -1,5 +1,5 @@
 import "server-only";
-import { lookup } from "dns/promises";
+import { assertPublicHttpUrl, isPublicHttpUrl } from "./publicUrl";
 
 export type FetchedPage = {
   ok: boolean;
@@ -61,77 +61,91 @@ export function resolveUrlSecrets(url: string): string {
   return out;
 }
 
-/** Fast, synchronous reject of obviously-unsafe URLs (scheme, credentials, obvious private hosts). */
-export function isPublicHttpUrl(raw: string): boolean {
-  let u: URL;
+function redactUrlSecrets(value: string): string {
+  let out = value;
+  for (const key of URL_SECRETS) {
+    const secret = process.env[key];
+    if (secret) out = out.split(secret).join(`{${key}}`);
+  }
+  return out;
+}
+
+export async function readResponseBytesLimited(
+  response: Response,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error("response_too_large");
+  if (!response.body) return new Uint8Array();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   try {
-    u = new URL(raw);
-  } catch {
-    return false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error("response_too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  // Credentials in the URL are a common SSRF/credential-leak vector.
-  if (u.username || u.password) return false;
-  const h = u.hostname.toLowerCase();
-  if (
-    h === "localhost" ||
-    h.endsWith(".local") ||
-    h.endsWith(".internal") ||
-    h === "127.0.0.1" ||
-    h === "::1" ||
-    h === "0.0.0.0" ||
-    /^10\./.test(h) ||
-    /^192\.168\./.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-    /^169\.254\./.test(h) ||
-    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)
-  )
-    return false;
-  return true;
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
 }
 
-function ipv4IsPrivate(ip: string): boolean {
-  const p = ip.split(".").map(Number);
-  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true; // unparseable => treat as unsafe
-  const [a, b] = p;
-  if (a === 0 || a === 127) return true; // this-host, loopback
-  if (a === 10) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 192 && b === 0) return true; // 192.0.0.0/24 (and 192.0.2.0/24 test)
-  if (a === 169 && b === 254) return true; // link-local incl. cloud metadata
-  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
-  if (a >= 224) return true; // multicast + reserved
-  return false;
-}
+export type PublicBytesResponse = {
+  ok: boolean;
+  status: number;
+  contentType: string;
+  finalUrl: string;
+  bytes: Uint8Array;
+};
 
-function isPrivateAddress(address: string, family: number): boolean {
-  if (family === 4) return ipv4IsPrivate(address);
-  const addr = address.toLowerCase();
-  // IPv4-mapped / embedded IPv4 (e.g. ::ffff:169.254.169.254)
-  const embedded = addr.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (embedded) return ipv4IsPrivate(embedded[1]);
-  if (addr === "::" || addr === "::1") return true;
-  if (addr.startsWith("fc") || addr.startsWith("fd")) return true; // unique local
-  if (addr.startsWith("fe8") || addr.startsWith("fe9") || addr.startsWith("fea") || addr.startsWith("feb"))
-    return true; // link-local
-  if (addr.startsWith("ff")) return true; // multicast
-  return false;
-}
-
-/** Resolve the hostname and refuse if it points at any private/loopback/link-local address. */
-async function assertResolvesPublic(hostname: string): Promise<void> {
-  let addrs: { address: string; family: number }[];
-  try {
-    addrs = await lookup(hostname, { all: true });
-  } catch {
-    throw new Error("dns_resolution_failed");
+/** Fetch a bounded public resource while validating every redirect hop. */
+export async function fetchPublicBytes(
+  rawUrl: string,
+  {
+    maxBytes,
+    timeoutMs = 20_000,
+    headers,
+  }: { maxBytes: number; timeoutMs?: number; headers?: Record<string, string> },
+): Promise<PublicBytesResponse> {
+  let current = rawUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicHttpUrl(current);
+    const response = await fetch(current, {
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: "manual",
+      headers,
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error("redirect_without_location");
+      if (hop === MAX_REDIRECTS) throw new Error("too_many_redirects");
+      current = new URL(location, current).toString();
+      continue;
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType: response.headers.get("content-type") ?? "",
+      finalUrl: current,
+      bytes: await readResponseBytesLimited(response, maxBytes),
+    };
   }
-  if (!addrs.length) throw new Error("dns_no_records");
-  for (const a of addrs) {
-    if (isPrivateAddress(a.address, a.family)) throw new Error("blocked_private_ip");
-  }
+  throw new Error("too_many_redirects");
 }
 
 /**
@@ -279,57 +293,38 @@ export async function fetchPage(rawUrl: string, timeoutMs = 20_000): Promise<Fet
   };
   if (!isPublicHttpUrl(url)) return { ...base, error: "blocked_non_public_url" };
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    let current = url;
-    let res: Response | null = null;
-
-    // Follow redirects by hand so every hop is validated against the private-IP guard.
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      const u = new URL(current);
-      if (!isPublicHttpUrl(current)) throw new Error("blocked_redirect");
-      await assertResolvesPublic(u.hostname);
-
-      res = await fetch(current, {
-        signal: ctrl.signal,
-        redirect: "manual",
-        headers: BROWSER_HEADERS,
-      });
-
-      if (res.status >= 300 && res.status < 400) {
-        const loc = res.headers.get("location");
-        if (!loc) break;
-        current = new URL(loc, current).toString();
-        continue;
-      }
-      break;
-    }
-
-    if (!res) throw new Error("no_response");
-    if (res.status >= 300 && res.status < 400) throw new Error("too_many_redirects");
-
-    const contentType = res.headers.get("content-type") ?? "";
-    const body = await res.text();
+    const fetched = await fetchPublicBytes(url, {
+      maxBytes: MAX_TEXT_DATA,
+      timeoutMs,
+      headers: BROWSER_HEADERS,
+    });
+    const current = fetched.finalUrl;
+    const contentType = fetched.contentType;
+    const body = new TextDecoder().decode(fetched.bytes);
+    const safeBody = redactUrlSecrets(body);
     const isHtml = /html/i.test(contentType) || /^\s*<(!doctype|html)/i.test(body);
-    const text = isHtml ? htmlToText(body, current) : body;
+    const text = redactUrlSecrets(isHtml ? htmlToText(body, current) : safeBody);
     return {
-      ok: res.ok,
-      status: res.status,
+      ok: fetched.ok,
+      status: fetched.status,
       url: rawUrl,
-      finalUrl: current,
+      finalUrl: redactUrlSecrets(current),
       contentType,
-      bytes: body.length,
+      bytes: fetched.bytes.byteLength,
       text: text.slice(0, isHtml ? MAX_TEXT_HTML : MAX_TEXT_DATA),
-      html: isHtml ? body : "",
-      jsonLd: isHtml ? extractJsonLd(body) : [],
-      feeds: isHtml ? extractFeeds(body, current) : [],
-      image: isHtml ? extractImage(body, current) : null,
+      html: isHtml ? safeBody : "",
+      jsonLd: isHtml ? extractJsonLd(safeBody) : [],
+      feeds: isHtml
+        ? extractFeeds(safeBody, current).map((feed) => ({
+            ...feed,
+            href: redactUrlSecrets(feed.href),
+          }))
+        : [],
+      image: isHtml ? redactUrlSecrets(extractImage(safeBody, current) ?? "") || null : null,
     };
   } catch (e) {
     const name = (e as Error).name === "AbortError" ? "timeout" : (e as Error).message;
     return { ...base, error: name };
-  } finally {
-    clearTimeout(timer);
   }
 }

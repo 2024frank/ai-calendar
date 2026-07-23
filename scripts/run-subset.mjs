@@ -1,3 +1,4 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import { SignJWT } from "jose";
@@ -7,7 +8,7 @@ const ids = process.argv.slice(2).map(Number);
 const c = mysql.createPool({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),
   user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false }, connectionLimit: 2, enableKeepAlive: true, idleTimeout: 0,
+  database: process.env.DATABASE_NAME, ssl: databaseSsl(), connectionLimit: 2, enableKeepAlive: true, idleTimeout: 0,
 });
 const [[u]] = await c.query("SELECT id,email,name,role,community_id,can_review_all_sources FROM users WHERE email='fkusiapp@oberlin.edu' LIMIT 1");
 const secret = new TextEncoder().encode(process.env.AUTH_JWT_SECRET);

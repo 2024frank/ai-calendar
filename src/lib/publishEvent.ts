@@ -1,8 +1,14 @@
 import "server-only";
 import { createHash } from "crypto";
 import { and, eq } from "drizzle-orm";
+import sharp from "sharp";
 import { db } from "@/db";
 import { destinations, events, publishSubmissions, sources } from "@/db/schema";
+import {
+  fetchPublicBytes,
+  readResponseBytesLimited,
+} from "./fetchPage";
+import { assertPublicHttpUrl } from "./publicUrl";
 import { POST_TYPE_IDS } from "./taxonomy";
 
 type EventRow = typeof events.$inferSelect;
@@ -123,26 +129,35 @@ const permanentFailure = (status: number) => status === 400 || status === 401 ||
  */
 async function rehostImage(eventId: number, url: string, appUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(20_000),
+    const fetched = await fetchPublicBytes(url, {
+      maxBytes: 8 * 1024 * 1024,
+      timeoutMs: 20_000,
       headers: {
         "user-agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
       },
     });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+    if (!fetched.ok) return null;
+    const buf = Buffer.from(fetched.bytes);
     // Sanity-check it really is an image before we serve it as one.
     const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
     const isPng = buf[0] === 0x89 && buf[1] === 0x50;
     const isGif = buf[0] === 0x47 && buf[1] === 0x49;
     const isWebp = buf.subarray(8, 12).toString() === "WEBP";
     if (!buf.length || !(isJpeg || isPng || isGif || isWebp)) return null;
+    const jpeg = await sharp(buf, {
+      failOn: "error",
+      limitInputPixels: 40_000_000,
+      sequentialRead: true,
+    })
+      .rotate()
+      .jpeg({ quality: 88 })
+      .toBuffer();
+    if (!jpeg.length || jpeg.byteLength > 8 * 1024 * 1024) return null;
     await db
       .update(events)
-      .set({ imageData: buf.toString("base64") })
+      .set({ imageData: jpeg.toString("base64") })
       .where(eq(events.id, eventId));
     return `${appUrl}/api/events/${eventId}/image.jpg`;
   } catch {
@@ -176,12 +191,28 @@ export async function publishEvent(
   if (!dest) {
     return { ok: true, state: "skipped", message: "No endpoint configured; kept in the AI calendar." };
   }
+  if (dest.communityId !== ev.communityId) {
+    return { ok: false, state: "failed", message: "The configured destination belongs to another community." };
+  }
 
-  const cfg = (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) as {
-    submit_url?: string;
-  };
+  let cfg: { submit_url?: string };
+  try {
+    cfg = (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) as {
+      submit_url?: string;
+    };
+  } catch {
+    return { ok: false, state: "failed", message: "This destination has invalid configuration." };
+  }
   if (!cfg?.submit_url) {
     return { ok: false, state: "failed", message: "This destination has no submit URL." };
+  }
+  try {
+    if (process.env.NODE_ENV === "production" && new URL(cfg.submit_url).protocol !== "https:") {
+      return { ok: false, state: "failed", message: "Publishing endpoints must use HTTPS." };
+    }
+    await assertPublicHttpUrl(cfg.submit_url);
+  } catch {
+    return { ok: false, state: "failed", message: "The publishing endpoint is not a public address." };
   }
 
   const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
@@ -234,6 +265,7 @@ export async function publishEvent(
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
+      redirect: "manual",
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Request failed";
@@ -250,7 +282,12 @@ export async function publishEvent(
     return { ok: false, state: "unknown", message: `Could not reach CommunityHub: ${message}` };
   }
 
-  const body = await res.text();
+  let body: string;
+  try {
+    body = new TextDecoder().decode(await readResponseBytesLimited(res, 256 * 1024));
+  } catch {
+    body = "Response body exceeded 256 KB.";
+  }
   if (!res.ok) {
     const permanent = permanentFailure(res.status);
     await db

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { isAdmin, requireUser } from "@/lib/auth";
-import { listCommunities } from "@/lib/data";
+import { accessibleCommunities } from "@/lib/data";
 import { NewSourceForm } from "./NewSourceForm";
 
 export const dynamic = "force-dynamic";
@@ -8,10 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function NewSourcePage() {
   const s = await requireUser();
   if (!isAdmin(s)) redirect("/review");
-  const comms =
-    s.role === "platform_admin"
-      ? await listCommunities()
-      : (await listCommunities()).filter((c) => c.id === s.communityId);
+  const comms = await accessibleCommunities(s);
 
   return (
     <div className="grid" style={{ gap: 18, maxWidth: 640 }}>

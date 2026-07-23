@@ -1,6 +1,6 @@
 import "server-only";
 import sharp from "sharp";
-import { isPublicHttpUrl, resolveUrlSecrets } from "./fetchPage";
+import { fetchPublicBytes, resolveUrlSecrets } from "./fetchPage";
 
 export const MAX_POSTER_IMAGES = 4;
 
@@ -10,19 +10,15 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 /** Fetch an image with a hard byte ceiling so a huge file cannot exhaust memory. */
 async function fetchImageBytes(url: string): Promise<Buffer | null> {
-  if (!isPublicHttpUrl(url)) return null;
-  const res = await fetch(resolveUrlSecrets(url), {
+  const fetched = await fetchPublicBytes(resolveUrlSecrets(url), {
+    maxBytes: MAX_IMAGE_BYTES,
+    timeoutMs: 15_000,
     headers: {
       "user-agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     },
-    signal: AbortSignal.timeout(15_000),
   });
-  if (!res.ok) return null;
-  const declared = Number(res.headers.get("content-length") ?? 0);
-  if (declared > MAX_IMAGE_BYTES) return null;
-  const buf = Buffer.from(await res.arrayBuffer());
-  return buf.byteLength > MAX_IMAGE_BYTES ? null : buf;
+  return fetched.ok ? Buffer.from(fetched.bytes) : null;
 }
 
 /**

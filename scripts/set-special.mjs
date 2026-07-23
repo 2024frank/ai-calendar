@@ -1,10 +1,11 @@
+import { databaseSsl } from "./db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
 const c = await mysql.createConnection({
   host: process.env.DATABASE_HOST, port: Number(process.env.DATABASE_PORT||25060),
   user: process.env.DATABASE_USERNAME, password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME, ssl: { rejectUnauthorized: false },
+  database: process.env.DATABASE_NAME, ssl: databaseSsl(),
 });
 const fava = `FAVA has two kinds of content, handled differently:
 1. Classes, camps, workshops and drop-ins (favagallery.org/classes) are ANNOUNCEMENTS. Title them with their FAVA label: "Camp: <name>", "Class: <name>", "Workshop: <name>", "Drop-in: <name>". The session is the registration window, not the meeting dates; put the real meeting dates, session count, instructor, member and non-member price, and age or materials rules in the long description.

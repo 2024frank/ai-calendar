@@ -241,13 +241,27 @@ export type NextResult = {
  * event lands in the review queue immediately, so progress is visible as it
  * happens instead of at the end.
  */
-export async function correctNextEvent(runId: number, sourceId: number | null = null): Promise<NextResult> {
+export async function correctNextEvent(
+  runId: number,
+  sourceId: number | null = null,
+  communityId: number | null = null,
+): Promise<NextResult> {
   // Skip ones already attempted, so a page that genuinely lacks the field can
   // never trap the loop on the same event forever.
   const untried = sql`(${events.rejectionReason} is null or ${events.rejectionReason} not like '%[tried]%')`;
   const where = sourceId
-    ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
-    : and(eq(events.status, "auto_rejected"), isNotNull(events.sourceId), untried);
+    ? and(
+        communityId ? eq(events.communityId, communityId) : undefined,
+        eq(events.sourceId, sourceId),
+        eq(events.status, "auto_rejected"),
+        untried,
+      )
+    : and(
+        communityId ? eq(events.communityId, communityId) : undefined,
+        eq(events.status, "auto_rejected"),
+        isNotNull(events.sourceId),
+        untried,
+      );
 
   const [ev] = await db.select().from(events).where(where).limit(1);
   if (!ev) return { done: true, fixed: false, failed: false, title: null, remaining: 0 };
@@ -317,8 +331,17 @@ export async function correctNextEvent(runId: number, sourceId: number | null = 
     .from(events)
     .where(
       sourceId
-        ? and(eq(events.sourceId, sourceId), eq(events.status, "auto_rejected"), untried)
-        : and(eq(events.status, "auto_rejected"), untried),
+        ? and(
+            communityId ? eq(events.communityId, communityId) : undefined,
+            eq(events.sourceId, sourceId),
+            eq(events.status, "auto_rejected"),
+            untried,
+          )
+        : and(
+            communityId ? eq(events.communityId, communityId) : undefined,
+            eq(events.status, "auto_rejected"),
+            untried,
+          ),
     );
   const remaining = Number(row?.n ?? 0);
   return {
