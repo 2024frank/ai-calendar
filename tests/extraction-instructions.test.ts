@@ -29,6 +29,7 @@ describe("shared extraction instructions", () => {
     assert.match(prompt, /21 DAYS AHEAD ONLY/);
     assert.match(prompt, /hard limit for every source/);
     assert.match(prompt, /DEAD-LINK RULE FOR EVERY SOURCE/);
+    assert.match(prompt, /Back up one path level at a time/);
   });
 
   it("gives the detail-page rule to non-Riverdog agents", () => {
@@ -85,6 +86,21 @@ describe("lookahead enforcement", () => {
 });
 
 describe("dead event link fallback", () => {
+  it("backs up to the nearest working path before a configured listing", () => {
+    assert.deepEqual(
+      sourceLinkFallbackCandidates(
+        "https://example.com/events/music/broken-event",
+        ["https://example.com/calendar"],
+      ),
+      [
+        "https://example.com/events/music/",
+        "https://example.com/events/",
+        "https://example.com/calendar",
+        "https://example.com/",
+      ],
+    );
+  });
+
   it("prefers the configured source listing over a generic homepage", () => {
     assert.deepEqual(
       sourceLinkFallbackCandidates(

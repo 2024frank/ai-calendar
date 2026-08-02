@@ -2,8 +2,9 @@ import { isPublicHttpUrl } from "./publicUrl";
 
 /**
  * Ordered working-link candidates for an event URL that no longer exists.
- * The source's configured listing wins because it is more useful than a
- * generic homepage; path ancestors and the origin are last-resort fallbacks.
+ * The nearest path ancestor wins because it is the page immediately before the
+ * broken detail URL. A configured listing handles flat URL schemes where the
+ * only path ancestor would be an unhelpful homepage.
  */
 export function sourceLinkFallbackCandidates(
   url: string,
@@ -15,18 +16,20 @@ export function sourceLinkFallbackCandidates(
     candidates.push(candidate);
   };
 
-  configuredFallbacks.forEach(add);
-
+  let origin: string | null = null;
   try {
     const parsed = new URL(url);
+    origin = `${parsed.origin}/`;
     const segments = parsed.pathname.split("/").filter(Boolean);
     for (let depth = segments.length - 1; depth > 0; depth--) {
       add(`${parsed.origin}/${segments.slice(0, depth).join("/")}/`);
     }
-    add(`${parsed.origin}/`);
   } catch {
-    // The configured fallbacks above are still usable for a malformed URL.
+    // The configured fallbacks below are still usable for a malformed URL.
   }
+
+  configuredFallbacks.forEach(add);
+  add(origin);
 
   return candidates.filter((candidate) => candidate !== url);
 }
