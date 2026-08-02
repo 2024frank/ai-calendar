@@ -39,6 +39,19 @@ export type ExtractedEvent = {
 };
 
 /**
+ * Instructions that are part of the application rather than editable source
+ * data. Keep only source rules that are essential for correct extraction.
+ */
+export function builtInSourceInstructions(sourceName: string): string {
+  if (!/^riverdog(?: music)?$/i.test(sourceName.trim())) return "";
+  return `RIVERDOG DETAIL-PAGE RULE:
+- The Shows listing gives each artist an event-specific link labelled "More info and videos". Open that link for every event before writing anything.
+- Use the detail page's artist biography and event facts to write BOTH description and extendedDescription. Do not write either description from the listing title alone.
+- When the detail page loads, use its URL as both website and calendarSourceUrl. The separate "Reserve seats" link is registrationUrl, not the event's source page.
+- If an event truly has no working "More info and videos" link, use the working Riverdog Shows listing as the event link and only write facts that the listing itself verifies.`;
+}
+
+/**
  * The one normalized-event contract both agents know.
  * Rules carried over verbatim from the July 16 requirements.
  */
@@ -76,11 +89,12 @@ FIELDS
 - postTypeId: one or more ids from this list, nothing else:
 ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
 - sponsors: non-empty, only organizers the source actually names.
-- website: REQUIRED. The event's own page, else the organization's site.
+- website: REQUIRED. The event's own page, else the source's working listing page, else the organization's site. Fetch the chosen URL before posting it; never send a link that leads to a definite error or missing page.
 - registrationUrl: the exact registration link when registration is required. It becomes the button; never put it inside a description.
 - contactEmail, phone: REQUIRED. The event's own, else the source's standing contact. An event with no contact email or no phone after those fallbacks is DROPPED, not posted: the public must have someone to ask.
 - buttons: [{ title, link }] when the page offers one (Register, Buy Tickets).
-- calendarSourceUrl: THIS event's own page on the source, and it must be a REAL link you actually fetched and that returned this event. NEVER build, guess, or pattern-match a URL from a date or a slug; take the href that was on the page. If your link 404s or you could not open it, do NOT ship it and do NOT drop the event: climb one level up the path and give the nearest page that does load, usually the listing the event was sitting on. A reviewer landing on the listing can find the event in a few seconds; a reviewer landing on a 404 can do nothing at all. Say in extendedDescription nothing about this; just give the working link. Only when nothing up the path loads is the event itself in doubt, and then leave it out: never invent an event out of an ongoing program, ensemble, or class with no scheduled date.
+- calendarSourceUrl: THIS event's own page on the source, and it must be a REAL link you actually fetched and that returned this event. NEVER build, guess, or pattern-match a URL from a date or a slug; take the href that was on the page.
+- DEAD-LINK RULE FOR EVERY SOURCE: before POSTing, open both website and calendarSourceUrl with redirects enabled. If an event URL returns 404/410 or still cannot be opened after retries, do not ship that dead URL and do not drop a verified event. Replace both fields with the source's configured listing page if it works; otherwise use the nearest working parent page, then the organization's working site. A 403 bot wall does not prove that a browser link is dead. Never replace a dead link with a guessed URL or a private AI Calendar review/login link. Say nothing about this fallback in either description.
 - imageCdnUrl: REQUIRED (see IMAGES).
 - imageUrls: when ONE item covers several things that each have their own picture (for example an announcement listing several movies), give a list of one picture URL per thing here instead of imageCdnUrl. The server merges them side by side into one image. Use this so an item about two movies shows both posters, not one.
 - imageB64: the image itself, base64-encoded, for images the server cannot download because the host blocks it (see IMAGES). When set it wins over imageCdnUrl.
@@ -103,8 +117,7 @@ WRITING
 
 WHAT TO INCLUDE
 - Only public events that are future or currently ongoing: at least one session must not have ended.
-- ONLY THE NEXT {{LOOKAHEAD}} DAYS: extract events whose first upcoming session starts within {{LOOKAHEAD}} days of today (plus anything already ongoing). Skip everything further out; the source is re-checked on schedule, so later events arrive when their date approaches. A small batch done perfectly beats a year of events done sloppily.
-- SPARSE-SOURCE EXCEPTION: if the source has only a handful of upcoming items in total (about ten or fewer), take ALL of them regardless of the window. The 14-day cap exists to keep huge calendars manageable, never to hide a small organization's lone annual event.
+- ONLY THE NEXT {{LOOKAHEAD}} DAYS: this is a hard limit for every source, even a source with only one upcoming event. Extract an event only when its first upcoming session starts within {{LOOKAHEAD}} days of today, plus anything already ongoing. Do not fetch or return later events. The server enforces this limit and the scheduled run will collect those events when they enter the window.
 - PUBLIC means a member of the general public could attend: concerts, plays, lectures, exhibitions, festivals, open houses, athletics. Skip internal and members-only items: student-only or staff-only programming, residence and orientation meetings, administrative deadlines, department meetings. When the source names its audience, trust it.
 
 WHAT THE SERVER DOES, SO YOU DO NOT
@@ -147,7 +160,10 @@ export type AgentPromptContext = {
 export function buildSystemPrompt(ctx: AgentPromptContext): string {
   const SEP = "=".repeat(60);
   const lookahead = ctx.lookaheadDays && ctx.lookaheadDays > 0 ? ctx.lookaheadDays : 14;
-  const special = (ctx.specialInstructions ?? "").trim();
+  const special = [builtInSourceInstructions(ctx.sourceName), ctx.specialInstructions]
+    .map((value) => (value ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
   const links = ctx.urls.length ? ctx.urls.map((u) => `  ${u}`).join("\n") : "  (none given)";
 
   const chInv = ctx.communityHubInventoryUrl
@@ -420,6 +436,26 @@ export function normalizeEvent(
       .filter((b) => b.title && b.link),
     fieldNotes: normalizeFieldNotes(raw.fieldNotes),
   };
+}
+
+/**
+ * Enforce the source's configured extraction horizon after the agent posts.
+ * Sessionless records continue to validation so they are reported as invalid
+ * rather than silently disappearing. Ongoing events are always allowed.
+ */
+export function eventWithinLookahead(
+  event: ExtractedEvent,
+  requestedDays: number | null | undefined,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): boolean {
+  if (!event.sessions.length) return true;
+  const days = Number.isInteger(requestedDays) && Number(requestedDays) >= 1
+    ? Math.min(Number(requestedDays), 365)
+    : 14;
+  const cutoff = nowSeconds + days * 24 * 60 * 60;
+  return event.sessions.some(
+    (session) => session.endTime >= nowSeconds && session.startTime <= cutoff,
+  );
 }
 
 /** Deterministic validation. Hard failures block publishing (event goes to review). */

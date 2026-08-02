@@ -97,11 +97,16 @@ export async function POST(req: Request) {
     // auto_rejected.
     const counts = await ingestEvents(runId, source, community, [...kept, ...reportedDupes]);
 
-    await emit(runId, "run_finished", `Agent posted ${kept.length} event(s), ${reportedDupes.length} duplicate(s)`, {
-      ...counts,
-      posted: kept.length,
-      reportedDuplicates: reportedDupes.length,
-    });
+    await emit(
+      runId,
+      "run_finished",
+      `Agent posted ${kept.length} event(s), ${reportedDupes.length} duplicate(s), ${counts.outsideLookahead} outside lookahead skipped`,
+      {
+        ...counts,
+        posted: kept.length,
+        reportedDuplicates: reportedDupes.length,
+      },
+    );
 
     // Reflect on the run row so the dashboard shows the outcome.
     await db

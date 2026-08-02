@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, destinations, runs, sources } from "@/db/schema";
-import { buildSystemPrompt } from "./contract";
+import { buildSystemPrompt, builtInSourceInstructions } from "./contract";
 import { runToken } from "./agentToken";
 import { fetchPage } from "./fetchPage";
 import { ingestEvents } from "./ingest";
@@ -392,7 +392,9 @@ export async function runExtraction(runId: number) {
     // blocked or slow site it 403s or stalls for nothing. Skip it and hand the
     // agent the job directly. Only a source with NO instructions needs the
     // server to hand the model page content to work from.
-    const hasPlaybook = Boolean(source.specialInstructions);
+    const hasPlaybook = Boolean(
+      source.specialInstructions || builtInSourceInstructions(source.name),
+    );
     let sourceText = "";
     let jsonLd: unknown[] = [];
 
@@ -605,7 +607,7 @@ Only include events that have a real date. Skip anything already past. If there 
     await emit(
       runId,
       "run_finished",
-      `${counts.inserted} to review · ${counts.duplicate} duplicate · ${counts.invalid} with issues`,
+      `${counts.inserted} to review · ${counts.duplicate} duplicate · ${counts.invalid} with issues · ${counts.outsideLookahead} outside lookahead`,
       { ...counts, elapsedMs: Date.now() - started },
     );
   } catch (e) {

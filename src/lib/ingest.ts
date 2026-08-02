@@ -6,6 +6,7 @@ import { communities, events, loginTokens, sources, users } from "@/db/schema";
 import {
   computeDedupKey,
   contentMatches,
+  eventWithinLookahead,
   maxStartTime,
   normalizeEvent,
   stripDateSentences,
@@ -26,6 +27,7 @@ import { fetchDestinationInventory } from "./inventory";
 import { publishEvent } from "./publishEvent";
 import { sendNewEventsDigest } from "./email";
 import { emit } from "./runEvents";
+import { sourceLinkFallbackCandidates } from "./sourceLinks";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
@@ -100,7 +102,10 @@ async function deadSourceLinks(urls: string[]): Promise<Set<string>> {
  * Returns null when nothing up the path answers, which is the case where the
  * whole thing really was invented.
  */
-async function nearestLiveAncestor(url: string, fallback: string | null): Promise<string | null> {
+async function nearestLiveAncestor(
+  url: string,
+  configuredFallbacks: Array<string | null | undefined>,
+): Promise<string | null> {
   const headers = {
     "user-agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -121,22 +126,10 @@ async function nearestLiveAncestor(url: string, fallback: string | null): Promis
     }
   };
 
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return fallback;
-  }
-
-  const segments = parsed.pathname.split("/").filter(Boolean);
-  // Climb one segment at a time, nearest first, so the reviewer lands as close
-  // to the event as still exists.
-  for (let depth = segments.length - 1; depth > 0; depth--) {
-    const candidate = `${parsed.origin}/${segments.slice(0, depth).join("/")}/`;
+  for (const candidate of sourceLinkFallbackCandidates(url, configuredFallbacks)) {
     if (await alive(candidate)) return candidate;
   }
-  if (await alive(parsed.origin)) return `${parsed.origin}/`;
-  return fallback;
+  return null;
 }
 
 export type IngestCounts = {
@@ -145,6 +138,7 @@ export type IngestCounts = {
   duplicate: number;
   invalid: number;
   autoRejected: number;
+  outsideLookahead: number;
 };
 
 type SourceRow = typeof sources.$inferSelect;
@@ -171,9 +165,29 @@ export async function ingestEvents(
     duplicate: 0,
     invalid: 0,
     autoRejected: 0,
+    outsideLookahead: 0,
   };
   const mode = effectiveMode(source, community);
   const newlyPending: { title: string; when: string }[] = [];
+  const lookaheadDays = source.lookaheadDays ?? 14;
+  const horizonNowMs = Date.now();
+  const horizonNowSeconds = Math.floor(horizonNowMs / 1000);
+  const candidateEvents = rawEvents.filter((raw) =>
+    eventWithinLookahead(
+      normalizeEvent(raw, community.timezone, horizonNowMs),
+      lookaheadDays,
+      horizonNowSeconds,
+    ),
+  );
+  counts.outsideLookahead = rawEvents.length - candidateEvents.length;
+  if (counts.outsideLookahead) {
+    await emit(
+      runId,
+      "candidate_skipped",
+      `Skipped ${counts.outsideLookahead} event(s) outside the ${lookaheadDays}-day lookahead`,
+      { outsideLookahead: counts.outsideLookahead, lookaheadDays },
+    );
+  }
 
   // Existing events in this community used for content-based duplicate checking.
   const existing = await db
@@ -219,7 +233,14 @@ export async function ingestEvents(
   // Ground-truth link check: an event's source page must actually exist. A
   // fabricated event usually gives itself away with a link that 404s.
   const deadLinks = await deadSourceLinks(
-    rawEvents.flatMap((r) => [r.calendarSourceUrl, r.website].filter((u): u is string => typeof u === "string")),
+    [
+      ...candidateEvents.flatMap((r) =>
+        [r.calendarSourceUrl, r.website].filter((u): u is string => typeof u === "string"),
+      ),
+      source.url,
+      source.calendarSourceUrl,
+      source.orgWebsite,
+    ].filter((u): u is string => typeof u === "string"),
   );
   if (deadLinks.size) {
     await emit(runId, "fetch_result", `Source links checked; ${deadLinks.size} did not exist (repointed upward)`, {
@@ -231,7 +252,7 @@ export async function ingestEvents(
   // picture gets its own page fetched (concurrently) and the page's share
   // image (og:image) used. This covers an agent that shipped events without
   // their photos even though the pages have them.
-  const needingImage = rawEvents.filter((r) => {
+  const needingImage = candidateEvents.filter((r) => {
     const has =
       (typeof r.imageCdnUrl === "string" && r.imageCdnUrl) ||
       (typeof r.imageB64 === "string" && r.imageB64) ||
@@ -269,7 +290,7 @@ export async function ingestEvents(
     );
   }
 
-  for (const raw of rawEvents) {
+  for (const raw of candidateEvents) {
     const e: ExtractedEvent = normalizeEvent(raw, community.timezone);
 
     // Drop site furniture the agent may still have picked up.
@@ -365,6 +386,9 @@ export async function ingestEvents(
     if (!e.contactEmail && source.orgContactEmail) e.contactEmail = source.orgContactEmail;
     if (!e.phone && source.orgPhone) e.phone = source.orgPhone;
     if (!e.website) e.website = source.orgWebsite ?? source.calendarSourceUrl ?? source.url;
+    if (!e.calendarSourceUrl) {
+      e.calendarSourceUrl = source.calendarSourceUrl ?? source.url ?? source.orgWebsite;
+    }
     if (!e.sponsors.length && (source.orgName ?? source.name)) {
       e.sponsors = [source.orgName ?? source.name];
     }
@@ -380,7 +404,11 @@ export async function ingestEvents(
     // so the reviewer gets somewhere they can find the event rather than a 404.
     // Only an event with nowhere at all to point is treated as fabricated.
     if (e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) {
-      const rescued = await nearestLiveAncestor(e.calendarSourceUrl, source.url ?? null);
+      const rescued = await nearestLiveAncestor(e.calendarSourceUrl, [
+        source.url,
+        source.calendarSourceUrl,
+        source.orgWebsite,
+      ]);
       if (rescued) {
         await emit(runId, "fetch_result", `Dead link repointed at ${rescued}: ${e.title}`, {
           was: e.calendarSourceUrl,
@@ -390,7 +418,12 @@ export async function ingestEvents(
       }
     }
     if (e.website && deadLinks.has(e.website)) {
-      e.website = (await nearestLiveAncestor(e.website, source.orgWebsite ?? source.url ?? null)) ?? e.website;
+      e.website =
+        (await nearestLiveAncestor(e.website, [
+          source.url,
+          source.calendarSourceUrl,
+          source.orgWebsite,
+        ])) ?? e.website;
     }
 
     const issues = validateEvent(e);
