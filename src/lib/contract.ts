@@ -44,11 +44,7 @@ export type ExtractedEvent = {
  */
 export function builtInSourceInstructions(sourceName: string): string {
   if (!/^riverdog(?: music)?$/i.test(sourceName.trim())) return "";
-  return `RIVERDOG DETAIL-PAGE RULE:
-- The Shows listing gives each artist an event-specific link labelled "More info and videos". Open that link for every event before writing anything.
-- Use the detail page's artist biography and event facts to write BOTH description and extendedDescription. Do not write either description from the listing title alone.
-- When the detail page loads, use its URL as both website and calendarSourceUrl. The separate "Reserve seats" link is registrationUrl, not the event's source page.
-- If an event truly has no working "More info and videos" link, use the working Riverdog Shows listing as the event link and only write facts that the listing itself verifies.`;
+  return `On Riverdog's Shows listing, the event-specific detail-page button is labelled "More info and videos". Follow that button for every event.`;
 }
 
 /**
@@ -77,6 +73,7 @@ IMAGES (required, the second most common mistake)
 - Only if an event truly has no picture anywhere, leave imageCdnUrl empty and add a fieldNotes entry saying so.
 
 FIELDS
+- DETAIL-PAGE RULE FOR EVERY SOURCE: a calendar or listing page is only an index. Whenever an event has its own detail-page link, open that real link before extracting the event. Use the full detail page as the factual source for BOTH description and extendedDescription and for event-specific images, contacts, location, cost and registration details. Use that working detail-page URL as website and calendarSourceUrl. Never write descriptions from only a listing title or teaser. If no event detail page exists, use only facts the listing itself verifies and use the working listing URL.
 - eventType: "ot", "an", or "jp". Never a category code here.
 - title: 1-60 characters.
 - description: the short description, one factual sentence, 10-200 characters.

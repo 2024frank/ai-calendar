@@ -12,7 +12,7 @@ describe("shared extraction instructions", () => {
   it("requires Riverdog detail pages for both descriptions", () => {
     const rule = builtInSourceInstructions("Riverdog Music");
     assert.match(rule, /More info and videos/);
-    assert.match(rule, /BOTH description and extendedDescription/);
+    assert.doesNotMatch(rule, /description|calendarSourceUrl|registrationUrl/);
 
     const prompt = buildSystemPrompt({
       sourceName: "Riverdog Music",
@@ -24,9 +24,25 @@ describe("shared extraction instructions", () => {
       lookaheadDays: 21,
     });
     assert.match(prompt, /More info and videos/);
+    assert.match(prompt, /DETAIL-PAGE RULE FOR EVERY SOURCE/);
+    assert.match(prompt, /BOTH description and extendedDescription/);
     assert.match(prompt, /21 DAYS AHEAD ONLY/);
     assert.match(prompt, /hard limit for every source/);
     assert.match(prompt, /DEAD-LINK RULE FOR EVERY SOURCE/);
+  });
+
+  it("gives the detail-page rule to non-Riverdog agents", () => {
+    const prompt = buildSystemPrompt({
+      sourceName: "Example Museum",
+      urls: ["https://example.com/events"],
+      calendarSourceName: "Example Museum",
+      ingestUrl: "https://calendar.example.com/api/agent/ingest",
+      runId: 2,
+      runToken: "test-token",
+    });
+    assert.match(prompt, /DETAIL-PAGE RULE FOR EVERY SOURCE/);
+    assert.match(prompt, /BOTH description and extendedDescription/);
+    assert.doesNotMatch(prompt, /More info and videos/);
   });
 });
 
