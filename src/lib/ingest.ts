@@ -31,6 +31,10 @@ import { emit } from "./runEvents";
 import { sourceLinkFallbackCandidates } from "./sourceLinks";
 import { normalizeImageBase64 } from "./imageData";
 import { optionalIngestBudget } from "./extractionPolicy";
+import {
+  canonicalCommunityHubPostUrl,
+  trustedAgentDuplicate,
+} from "./duplicatePolicy";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
@@ -251,6 +255,14 @@ export async function ingestEvents(
       inventory: remoteInventory.length,
     });
   }
+  const knownEventIds = new Set(existing.map((event) => event.id));
+  const knownRemoteUrls = new Set(
+    remoteInventory
+      .map((event) => canonicalCommunityHubPostUrl(event.url))
+      .filter((url): url is string => Boolean(url)),
+  );
+  const trustedDuplicateFor = (raw: Record<string, unknown>) =>
+    trustedAgentDuplicate(raw, knownEventIds, knownRemoteUrls);
 
   let imageFetches = 0;
   // Each event needs its OWN picture. One URL reused across events is site
@@ -290,6 +302,8 @@ export async function ingestEvents(
   // their photos even though the pages have them.
   const needingImage = candidateEvents
     .filter((r) => {
+      const duplicate = trustedDuplicateFor(r);
+      if (duplicate.eventId || duplicate.url) return false;
       const has =
         (typeof r.imageCdnUrl === "string" && r.imageCdnUrl) ||
         (typeof r.imageB64 === "string" && r.imageB64) ||
@@ -349,6 +363,7 @@ export async function ingestEvents(
   for (const raw of candidateEvents) {
     let publishedAutomatically = false;
     const e: ExtractedEvent = normalizeEvent(raw, community.timezone);
+    const reportedDuplicate = trustedDuplicateFor(raw);
 
     // Drop site furniture the agent may still have picked up.
     if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;
@@ -491,7 +506,14 @@ export async function ingestEvents(
         ], fallbackDeadlineAt)) ?? knownWorkingFallback ?? e.website;
     }
 
-    const issues = validateEvent(e);
+    // The structured duplicates array deliberately carries only a title and a
+    // reference. Do not validate those markers as if they were event payloads;
+    // their referenced record is the complete event. Unverified markers still
+    // pass through normal validation and cannot suppress required fields.
+    const isTrustedReportedDuplicate = Boolean(
+      reportedDuplicate.eventId || reportedDuplicate.url,
+    );
+    const issues = isTrustedReportedDuplicate ? [] : validateEvent(e);
     const stillDead =
       (e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) ||
       (e.website && deadLinks.has(e.website));
@@ -502,8 +524,19 @@ export async function ingestEvents(
     await emit(
       runId,
       "candidate_validated",
-      `${e.title || "(untitled)"} — ${issues.length ? `${issues.length} issue(s)` : "valid"}`,
-      { title: e.title, valid: issues.length === 0, issues },
+      `${e.title || "(untitled)"} — ${
+        isTrustedReportedDuplicate
+          ? "reported duplicate"
+          : issues.length
+            ? `${issues.length} issue(s)`
+            : "valid"
+      }`,
+      {
+        title: e.title,
+        valid: issues.length === 0,
+        issues,
+        reportedDuplicate: isTrustedReportedDuplicate || undefined,
+      },
     );
 
     // 1) exact same-source signature
@@ -512,12 +545,9 @@ export async function ingestEvents(
 
     // The agent judged this a duplicate of an event in this calendar. The agent
     // reads both systems' content and is the authority on semantic matches.
-    const agentDupId = Number((raw as Record<string, unknown>)._agentDuplicateOfId);
-    if (!duplicateOf && Number.isInteger(agentDupId) && agentDupId > 0) {
-      if (existing.some((x) => x.id === agentDupId)) {
-        duplicateOf = agentDupId;
-        dupReason = "the agent matched it to this event";
-      }
+    if (!duplicateOf && reportedDuplicate.eventId) {
+      duplicateOf = reportedDuplicate.eventId;
+      dupReason = "the agent matched it to this event";
     }
 
     // 2) content match on title + start time + location + short description
@@ -539,17 +569,11 @@ export async function ingestEvents(
     }
 
     // 3) already published on the community's endpoint
-    let remoteDup = false;
-    let duplicateOfUrl: string | null = null;
+    let remoteDup = Boolean(reportedDuplicate.url);
+    let duplicateOfUrl: string | null = reportedDuplicate.url;
     // The agent may have already matched this to a CommunityHub post and told
     // us its URL; keep it so the reviewer can open what it duplicates.
-    const agentDup = (raw as Record<string, unknown>)._agentDuplicateOf;
-    if (typeof agentDup === "string" && /^https?:\/\//i.test(agentDup)) {
-      // Post pages are /calendar/post/<numeric id>; a hash there is a dead
-      // link (the agent grabbed the token), so drop it rather than store it.
-      const tail = agentDup.split("/calendar/post/")[1]?.replace(/\/+$/, "");
-      duplicateOfUrl = tail !== undefined && !/^\d+$/.test(tail) ? null : agentDup;
-      remoteDup = true;
+    if (remoteDup) {
       dupReason = "the agent matched it to this CommunityHub post";
     }
     if (!duplicateOf) {
