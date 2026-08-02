@@ -1,22 +1,23 @@
 import "server-only";
 
 import { randomUUID } from "crypto";
-import { and, asc, eq, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { jobs, runs } from "@/db/schema";
 import { runExtraction } from "./agent";
-
-const STALE_LOCK_MS = 15 * 60_000;
+import { hasDatabaseErrorCode } from "./dbError";
+import {
+  drainBatchSize,
+  QUEUED_JOB_MAX_WAIT_MS,
+  QUEUED_RUN_DEADLINE_MS,
+  STALE_JOB_LEASE_MS,
+  terminalJobStatus,
+} from "./jobPolicy";
 
 type EnqueuedRun = { jobId: number; runId: number; deduplicated: boolean };
 
 function isDuplicateKey(error: unknown) {
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      "code" in error &&
-      (error as { code?: string }).code === "ER_DUP_ENTRY",
-  );
+  return hasDatabaseErrorCode(error, "ER_DUP_ENTRY");
 }
 
 function affectedRows(result: unknown) {
@@ -43,7 +44,7 @@ export async function enqueueExtraction(
         runKind: "extraction",
         status: "running",
         phase: "queued",
-        deadlineAt: new Date(Date.now() + 60 * 60_000),
+        deadlineAt: new Date(Date.now() + QUEUED_RUN_DEADLINE_MS),
       });
       const runId = (runResult as { insertId: number }).insertId;
 
@@ -97,6 +98,28 @@ export async function processJob(jobId: number, workerId = randomUUID()): Promis
 
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
   if (!job) return false;
+
+  // A run can be closed by stale-run recovery between the queue claim and this
+  // read. Never revive or execute a terminal run just because its old job row
+  // was still queued.
+  const [activeRun] = await db
+    .select({ status: runs.status })
+    .from(runs)
+    .where(eq(runs.id, job.runId))
+    .limit(1);
+  if (activeRun?.status !== "running") {
+    await db
+      .update(jobs)
+      .set({
+        status: "failed",
+        dedupeKey: null,
+        lockedAt: null,
+        lockedBy: null,
+        lastError: "Run is no longer active.",
+      })
+      .where(and(eq(jobs.id, job.id), eq(jobs.lockedBy, workerId)));
+    return false;
+  }
 
   await db
     .update(runs)
@@ -163,15 +186,82 @@ export async function processJob(jobId: number, workerId = randomUUID()): Promis
  * The same run id is reused, keeping its timeline and publish idempotency keys.
  */
 export async function requeueStaleJobs(now = new Date()) {
-  const stale = await db
-    .select()
+  // A queued job is allowed to wait, but not forever. If no worker has claimed
+  // it within six hours, close both records and clear the active dedupe key so
+  // an admin or the next scheduler tick can start a fresh run.
+  const expiredQueued = await db
+    .select({ id: jobs.id, runId: jobs.runId })
     .from(jobs)
-    .where(and(eq(jobs.status, "running"), lt(jobs.lockedAt, new Date(now.getTime() - STALE_LOCK_MS))));
+    .where(
+      and(
+        eq(jobs.status, "queued"),
+        lt(jobs.availableAt, new Date(now.getTime() - QUEUED_JOB_MAX_WAIT_MS)),
+      ),
+    );
+  let expired = 0;
+  for (const job of expiredQueued) {
+    await db.transaction(async (tx) => {
+      const [result] = await tx
+        .update(jobs)
+        .set({
+          status: "failed",
+          dedupeKey: null,
+          lockedAt: null,
+          lockedBy: null,
+          lastError: "No worker claimed this job within six hours.",
+        })
+        .where(and(eq(jobs.id, job.id), eq(jobs.status, "queued")));
+      if (!affectedRows(result)) return;
+      expired += 1;
+      await tx
+        .update(runs)
+        .set({
+          status: "failed",
+          phase: "done",
+          finishedAt: now,
+          errorLog: { reason: "No worker claimed this run within six hours." },
+        })
+        .where(and(eq(runs.id, job.runId), eq(runs.status, "running")));
+    });
+  }
+
+  const stale = await db
+    .select({
+      job: jobs,
+      runStatus: runs.status,
+    })
+    .from(jobs)
+    .innerJoin(runs, eq(runs.id, jobs.runId))
+    .where(
+      and(
+        eq(jobs.status, "running"),
+        or(
+          isNull(jobs.lockedAt),
+          lt(jobs.lockedAt, new Date(now.getTime() - STALE_JOB_LEASE_MS)),
+        ),
+      ),
+    );
 
   let requeued = 0;
   let failed = 0;
-  for (const job of stale) {
-    if (job.attempts >= job.maxAttempts) {
+  let orphaned = 0;
+  for (const row of stale) {
+    const job = row.job;
+    const terminal = terminalJobStatus(row.runStatus);
+    if (terminal) {
+      const [result] = await db
+        .update(jobs)
+        .set({
+          status: terminal,
+          dedupeKey: null,
+          lockedAt: null,
+          lockedBy: null,
+          lastError:
+            terminal === "succeeded" ? null : "Run ended while its worker lease was active.",
+        })
+        .where(and(eq(jobs.id, job.id), eq(jobs.status, "running")));
+      orphaned += affectedRows(result);
+    } else if (job.attempts >= job.maxAttempts) {
       await db.transaction(async (tx) => {
         await tx
           .update(jobs)
@@ -195,19 +285,31 @@ export async function requeueStaleJobs(now = new Date()) {
       });
       failed += 1;
     } else {
-      const [result] = await db
-        .update(jobs)
-        .set({ status: "queued", lockedAt: null, lockedBy: null, availableAt: now })
-        .where(and(eq(jobs.id, job.id), eq(jobs.status, "running")));
-      requeued += affectedRows(result);
+      await db.transaction(async (tx) => {
+        const [result] = await tx
+          .update(jobs)
+          .set({ status: "queued", lockedAt: null, lockedBy: null, availableAt: now })
+          .where(and(eq(jobs.id, job.id), eq(jobs.status, "running")));
+        const recovered = affectedRows(result);
+        if (recovered) {
+          await tx
+            .update(runs)
+            .set({
+              phase: "queued",
+              deadlineAt: new Date(now.getTime() + QUEUED_RUN_DEADLINE_MS),
+            })
+            .where(and(eq(runs.id, job.runId), eq(runs.status, "running")));
+        }
+        requeued += recovered;
+      });
     }
   }
-  return { requeued, failed };
+  return { requeued, failed, orphaned, expired };
 }
 
 /** Drain a small bounded batch; horizontal workers may call this concurrently. */
 export async function drainJobs(limit = 2) {
-  const batchSize = Math.min(Math.max(Math.floor(limit), 1), 5);
+  const batchSize = drainBatchSize(limit);
   const candidates = await db
     .select({ id: jobs.id })
     .from(jobs)

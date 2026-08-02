@@ -3,6 +3,10 @@ import { requireUser } from "@/lib/auth";
 import { activityActors, recentActivity } from "@/lib/activity";
 import { fmtDate } from "@/components/bits";
 import { ActivityFilters } from "./ActivityFilters";
+import { currentCommunityId } from "@/lib/data";
+import { db } from "@/db";
+import { communities } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +39,11 @@ export default async function ActivityPage({
   const s = await requireUser();
   if (s.role !== "platform_admin") redirect("/dashboard");
   const sp = await searchParams;
+  const communityId = await currentCommunityId(s);
+  const [community] = communityId
+    ? await db.select({ name: communities.name, timezone: communities.timezone }).from(communities).where(eq(communities.id, communityId)).limit(1)
+    : [undefined];
+  const timeZone = community?.timezone ?? "America/New_York";
 
   const [rows, actors] = await Promise.all([
     recentActivity({
@@ -49,7 +58,7 @@ export default async function ActivityPage({
     <div className="grid" style={{ gap: 18, maxWidth: 1000 }}>
       <div>
         <div className="page-title">Activity log</div>
-        <div className="muted">Who signed in and what they did, newest first. Times are Oberlin time.</div>
+        <div className="muted">Who signed in and what they did, newest first. Times use {community?.name ?? "the selected community"}&apos;s timezone.</div>
       </div>
 
       <ActivityFilters
@@ -78,7 +87,7 @@ export default async function ActivityPage({
             )}
             {rows.map((r) => (
               <tr key={r.id}>
-                <td className="muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(r.createdAt)}</td>
+                <td className="muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(r.createdAt, timeZone)}</td>
                 <td style={{ fontWeight: 600 }}>{r.actorName || r.actorEmail || "system"}</td>
                 <td>
                   <span className={`badge ${ACTION_TONE[r.action] ?? "neutral"}`}>

@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { getSession, isAdmin } from "@/lib/auth";
 import { getSource } from "@/lib/data";
-import { enqueueExtraction, processJob } from "@/lib/jobs";
+import { enqueueExtraction, processJob, requeueStaleJobs } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +29,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     );
   }
 
+  // Recover an abandoned lease before deduplication. Otherwise a manual click
+  // can correctly find the old job but then fail to claim it because it still
+  // says `running` even though its worker disappeared.
+  await requeueStaleJobs();
   const { jobId, runId, deduplicated } = await enqueueExtraction(source.id, source.communityId);
   after(async () => {
     await processJob(jobId);

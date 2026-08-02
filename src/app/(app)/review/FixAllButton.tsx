@@ -44,6 +44,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
   // minutes, and setting a flag only took effect once that request came back,
   // so the button looked dead and the work carried on.
   const inFlight = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
 
   /** Read the true totals from the database. Used on load and after a failure. */
   const refreshProgress = useCallback(async () => {
@@ -52,6 +53,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
       const res = await fetch(`/api/corrections/next${qs}`, { cache: "no-store" });
       if (!res.ok) return null;
       const data = (await res.json()) as Progress & { openRunId: number | null };
+      if (!mounted.current) return null;
       setP({
         checked: data.checked,
         corrected: data.corrected,
@@ -150,6 +152,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
       }
 
       inFlight.current = null;
+      if (!mounted.current) return;
       setRunning(false);
       setCurrent(null);
       if (stop.current) setMsg("Stopped.");
@@ -163,6 +166,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
   // Progress lives in the database, not in this tab. On load, read the true
   // totals and pick up any pass that was interrupted by leaving.
   useEffect(() => {
+    mounted.current = true;
     let alive = true;
     (async () => {
       const data = await refreshProgress();
@@ -174,6 +178,10 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
     })();
     return () => {
       alive = false;
+      mounted.current = false;
+      stop.current = true;
+      inFlight.current?.abort();
+      inFlight.current = null;
     };
   }, [go, refreshProgress]);
 
@@ -222,7 +230,7 @@ export function FixAllButton({ initialCount, sourceId }: { initialCount: number;
               : "Opens each event\u2019s page, fills what is missing, and sends it back to review one by one."}
           </span>
         )}
-        {msg && <span className={`badge ${msg === "Finished." ? "good" : "bad"}`}>{msg}</span>}
+        {msg && <span role="status" className={`badge ${msg === "Finished." ? "good" : "bad"}`}>{msg}</span>}
       </div>
 
       {showBar && (

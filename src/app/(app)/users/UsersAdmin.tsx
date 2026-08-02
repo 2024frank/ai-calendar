@@ -53,23 +53,29 @@ export function UsersAdmin({
     setBusy(true);
     setError(null);
     setInviteLink(null);
-    const res = await fetch("/api/users", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      // Reviewers are community-scoped; no per-source list to send.
-      body: JSON.stringify({ email, name, role, communityIds, sourceIds: [] }),
-    });
-    const d = await res.json();
-    setBusy(false);
-    if (!res.ok) {
-      setError(d.error || "Could not invite.");
-      return;
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        // Reviewers are community-scoped; no per-source list to send.
+        body: JSON.stringify({ email, name, role, communityIds, sourceIds: [] }),
+      });
+      const d = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        emailed?: boolean;
+        inviteLink?: string;
+      };
+      if (!res.ok) throw new Error(d.error || "Could not invite.");
+      setEmailed(Boolean(d.emailed));
+      if (d.inviteLink) setInviteLink(d.inviteLink);
+      setEmail("");
+      setName("");
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not invite.");
+    } finally {
+      setBusy(false);
     }
-    setEmailed(Boolean(d.emailed));
-    if (d.inviteLink) setInviteLink(d.inviteLink);
-    setEmail("");
-    setName("");
-    router.refresh();
   }
 
   return (
@@ -237,34 +243,45 @@ function UserCard({
     }
     setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/users/${user.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      // Reviewers are community-scoped: whole community, no per-source list.
-      body: JSON.stringify({
-        role,
-        status,
-        canReviewAllSources: true,
-        sourceIds: [],
-        ...(canAssignCommunities ? { communityIds } : {}),
-      }),
-    });
-    const d = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) return setMsg(d.error || "Could not save.");
-    setMsg("Saved.");
-    router.refresh();
-    setTimeout(() => setMsg(null), 2000);
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        // Reviewers are community-scoped: whole community, no per-source list.
+        body: JSON.stringify({
+          role,
+          status,
+          canReviewAllSources: true,
+          sourceIds: [],
+          ...(canAssignCommunities ? { communityIds } : {}),
+        }),
+      });
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(d.error || "Could not save.");
+      setMsg("Saved.");
+      router.refresh();
+      setTimeout(() => setMsg(null), 2000);
+    } catch (cause) {
+      setMsg(cause instanceof Error ? cause.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function remove() {
     if (!confirm(`Delete ${user.email}? This cannot be undone.`)) return;
     setBusy(true);
-    const res = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
-    const d = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) return setMsg(d.error || "Could not delete.");
-    router.refresh();
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(d.error || "Could not delete.");
+      router.refresh();
+    } catch (cause) {
+      setMsg(cause instanceof Error ? cause.message : "Could not delete.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -307,7 +324,13 @@ function UserCard({
             </div>
             <div>
               <label className="label">Status</label>
-              <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <select
+                className="input"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                disabled={isSelf}
+                title={isSelf ? "You cannot disable your own account." : undefined}
+              >
                 <option value="active">Active</option>
                 <option value="disabled">Disabled</option>
               </select>

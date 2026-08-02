@@ -6,6 +6,7 @@ import { getSession } from "@/lib/auth";
 import { flushCommunityInheritors, type FlushResult } from "@/lib/autoPublish";
 import { logActivity } from "@/lib/activity";
 import { MODE_LABELS, normalizeMode, type ReviewMode } from "@/lib/modeLabels";
+import { isValidTimeZone } from "@/lib/time";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const patch: Record<string, unknown> = {};
   const nextMode = normalizeMode(body.defaultMode);
   if (nextMode) patch.defaultMode = nextMode;
-  if (body.timezone) patch.timezone = String(body.timezone).slice(0, 64);
+  if (body.timezone) {
+    const timezone = String(body.timezone).trim();
+    if (!isValidTimeZone(timezone)) {
+      return NextResponse.json({ error: "Timezone must be a valid IANA timezone." }, { status: 400 });
+    }
+    patch.timezone = timezone;
+  }
   if (body.name) patch.name = String(body.name).slice(0, 200);
   if ("defaultDestinationId" in body) {
     const destinationId = body.defaultDestinationId ? Number(body.defaultDestinationId) : null;

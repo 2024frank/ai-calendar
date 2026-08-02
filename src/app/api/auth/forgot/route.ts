@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { loginTokens, users } from "@/db/schema";
 import { sendPasswordSetup } from "@/lib/email";
@@ -35,11 +35,25 @@ export async function POST(req: Request) {
   }
 
   const rawToken = randomBytes(32).toString("hex");
-  await db.insert(loginTokens).values({
-    userId: user.id,
-    kind: "otp",
-    tokenHash: createHash("sha256").update(rawToken).digest("hex"),
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  await db.transaction(async (tx) => {
+    // Only the newest reset link is valid. This closes the window where an old
+    // email can reset the account after the owner requested a replacement.
+    await tx
+      .update(loginTokens)
+      .set({ consumedAt: new Date() })
+      .where(
+        and(
+          eq(loginTokens.userId, user.id),
+          eq(loginTokens.kind, "otp"),
+          isNull(loginTokens.consumedAt),
+        ),
+      );
+    await tx.insert(loginTokens).values({
+      userId: user.id,
+      kind: "otp",
+      tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
   });
   const base = process.env.APP_URL || new URL(req.url).origin;
   const link = `${base}/set-password?token=${rawToken}`;

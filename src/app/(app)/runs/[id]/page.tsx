@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { runs, sources } from "@/db/schema";
+import { communities, runs, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { currentCommunityId } from "@/lib/data";
 import { reapStaleRuns } from "@/lib/retention";
+import { requeueStaleJobs } from "@/lib/jobs";
 import { RunStatus, fmtDate } from "@/components/bits";
 import { ButtonLink, Card, PageHeader } from "@/components/ui";
 import { LiveTimeline } from "./LiveTimeline";
@@ -15,6 +16,7 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await requireUser();
+  await requeueStaleJobs().catch(() => undefined);
   await reapStaleRuns().catch(() => undefined);
   const [run] = await db.select().from(runs).where(eq(runs.id, Number(id))).limit(1);
   if (!run) notFound();
@@ -23,6 +25,10 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
     notFound();
   }
   const [source] = run.sourceId ? await db.select().from(sources).where(eq(sources.id, run.sourceId)).limit(1) : [null];
+  const [community] = run.communityId
+    ? await db.select({ timezone: communities.timezone }).from(communities).where(eq(communities.id, run.communityId)).limit(1)
+    : [undefined];
+  const timeZone = community?.timezone ?? "America/New_York";
   const backHref = source ? `/sources/${source.id}` : "/dashboard";
 
   return (
@@ -30,8 +36,8 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       <PageHeader
         eyebrow={run.runKind}
         title={`Run #${run.id}`}
-        description={<>Started {fmtDate(run.startedAt)}{run.finishedAt ? <> · Finished {fmtDate(run.finishedAt)}</> : <> · Updates live</>}</>}
-        actions={<><RunStatus status={run.status} /><ButtonLink href={backHref} icon="arrow-left">{source?.name || "Dashboard"}</ButtonLink></>}
+        description={<>Started {fmtDate(run.startedAt, timeZone)}{run.finishedAt ? <> · Finished {fmtDate(run.finishedAt, timeZone)}</> : <> · Updates live</>}</>}
+        actions={<><RunStatus status={run.status} phase={run.phase} /><ButtonLink href={backHref} icon="arrow-left">{source?.name || "Dashboard"}</ButtonLink></>}
       />
       <section className="kpi-grid" aria-label="Run metrics">
         {[
@@ -48,7 +54,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           </Card>
         ))}
       </section>
-      <Card><LiveTimeline runId={run.id} /></Card>
+      <Card><LiveTimeline runId={run.id} timeZone={timeZone} /></Card>
     </div>
   );
 }

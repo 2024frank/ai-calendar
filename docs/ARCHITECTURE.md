@@ -60,7 +60,7 @@ src/
       auth/                 identity endpoints
       sources/              source control plane
       events/               review commands
-      agent/ingest/          signed agent callback
+      agent/ingest/          legacy signed external-worker callback
       public/events/         legacy public feed
       v1/events/             stable public API alias
       internal/jobs/         private worker entrypoint
@@ -100,8 +100,8 @@ sequenceDiagram
   W-->>A: 202 runId + jobId
   K->>D: Conditional queued-to-running claim
   K->>P: Fetch and extract using source recipe
-  P->>W: Signed run callback with candidates
-  W->>D: Validate, dedupe and persist events
+  P-->>K: Structured candidate output
+  K->>D: Validate, dedupe and persist candidates server-side
   K->>D: Mark run and job terminal
 ```
 
@@ -111,7 +111,7 @@ Important invariants:
 2. `jobs.dedupe_key` is unique while active and cleared only at a terminal state.
 3. A worker owns a job only after a conditional status update succeeds.
 4. A terminated worker leaves a recoverable lease, not lost work.
-5. Agent callbacks are authenticated with a per-run HMAC.
+5. The model receives no ingest credential; the optional legacy external-worker callback requires a per-run HMAC.
 6. Publishing is protected by `(event_id, destination_id, payload_hash)`.
 
 ### Review and publish
@@ -151,7 +151,7 @@ For the next reliability increment, approval and outbox creation should be one t
 | POST | `/api/sources/:id/run` | Enqueue extraction; returns `runId`, `jobId` | Admin session |
 | GET | `/api/runs/:id/events?after=` | Incremental run timeline | Tenant session |
 | POST | `/api/events/:id/approve` | Review and publish | Tenant session |
-| POST | `/api/agent/ingest` | Candidate callback | Per-run HMAC |
+| POST | `/api/agent/ingest` | Legacy external-worker candidate callback | Per-run HMAC |
 | POST | `/api/internal/jobs?limit=2` | Recover and drain jobs | Worker bearer secret |
 | GET | `/api/health/live` | Process liveness | Platform |
 | GET | `/api/health/ready` | Config + database readiness | Platform |
@@ -264,10 +264,9 @@ Alert on readiness failures, queue age, stale leases, extraction failure ratio, 
 
 Before release:
 
-1. Apply the generated migration in staging and confirm existing schema drift has been reconciled.
+1. Confirm the release has no schema diff. If it does, review and apply the generated migration in staging before production.
 2. Run `npm test`, `npm run typecheck`, and `npm run build`.
 3. Enqueue the same source concurrently and verify both requests return one active `runId`.
 4. Terminate a worker mid-run, age its lease in staging, and confirm it is recovered.
 5. Load-test `/api/v1/events` through the CDN and confirm origin request collapse.
 6. Verify readiness returns 503 for a missing secret and 200 for the complete deployment configuration.
-

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { MODELS } from "@/lib/modelList";
+import { TableShell } from "@/components/ui";
 
 /** Change the model used for every source's extraction, platform-wide. */
 export function ModelPicker({ current }: { current: string }) {
@@ -13,32 +14,45 @@ export function ModelPicker({ current }: { current: string }) {
   const chosen = MODELS.find((m) => m.id === model);
 
   async function save(id: string) {
+    const previous = model;
     setModel(id);
     setBusy(true);
     setMsg(null);
-    const res = await fetch("/api/settings/model", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: id }),
-    });
-    setBusy(false);
-    if (!res.ok) return setMsg("Could not switch.");
-    setMsg("Switched. New runs use this model.");
-    router.refresh();
-    setTimeout(() => setMsg(null), 2500);
+    try {
+      const res = await fetch("/api/settings/model", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: id }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Could not switch models.");
+      }
+      setMsg("Switched. New runs use this model.");
+      router.refresh();
+      setTimeout(() => setMsg(null), 2500);
+    } catch (cause) {
+      setModel(previous);
+      setMsg(cause instanceof Error ? cause.message : "Could not switch models.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <div className="card">
       <div className="spread" style={{ marginBottom: 6 }}>
         <h3 style={{ margin: 0 }}>Model</h3>
-        {msg && <span className="badge good">{msg}</span>}
+        {msg && <span role={msg.startsWith("Switched") ? "status" : "alert"} className={`badge ${msg.startsWith("Switched") ? "good" : "bad"}`}>{msg}</span>}
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
         Which AI model runs extraction for every source. Change it here and all future runs use it. The
         prices are per million tokens, for comparison; the real per-run cost is measured below.
       </div>
+      <label className="sr-only" htmlFor="extraction-model">Extraction model</label>
       <select
+        id="extraction-model"
+        name="model"
         className="input"
         value={model}
         disabled={busy}
@@ -59,6 +73,7 @@ export function ModelPicker({ current }: { current: string }) {
 
       <div style={{ marginTop: 14 }}>
         <div className="label">Price reference (per million tokens)</div>
+        <TableShell label="Model price reference">
         <table className="tbl" style={{ marginTop: 4 }}>
           <thead>
             <tr>
@@ -77,6 +92,7 @@ export function ModelPicker({ current }: { current: string }) {
             ))}
           </tbody>
         </table>
+        </TableShell>
       </div>
     </div>
   );

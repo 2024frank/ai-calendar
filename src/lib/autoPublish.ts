@@ -60,7 +60,10 @@ export async function publishPendingForSources(
       batch.map(async (row) => {
         try {
           const res = await publishEvent(row.id, finalStatus);
-          return res.state === "succeeded";
+          // With no external endpoint, publishEvent still finalizes the event
+          // in the AI calendar and returns ok/skipped. That is a completed
+          // automatic outcome, not a failure that stayed in review.
+          return res.ok;
         } catch {
           return false;
         }
@@ -89,9 +92,20 @@ export async function flushSourceIfUnrestricted(sourceId: number): Promise<Flush
  * because someone chose that setting deliberately.
  */
 export async function flushCommunityInheritors(communityId: number): Promise<FlushResult> {
+  const [community] = await db
+    .select({ defaultMode: communities.defaultMode })
+    .from(communities)
+    .where(eq(communities.id, communityId))
+    .limit(1);
+  const mode = normalizeMode(community?.defaultMode) ?? "needs_approval";
+  if (!skipsOurReview(mode)) return { published: 0, failed: 0, remaining: 0 };
+
   const inheriting = await db
     .select({ id: sources.id })
     .from(sources)
     .where(and(eq(sources.communityId, communityId), isNull(sources.mode)));
-  return publishPendingForSources(inheriting.map((row) => row.id));
+  return publishPendingForSources(
+    inheriting.map((row) => row.id),
+    publishedStatus(mode) as "submitted" | "published",
+  );
 }

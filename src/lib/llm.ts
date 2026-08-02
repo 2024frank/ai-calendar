@@ -118,6 +118,8 @@ export type LlmCall = {
    * the run's true cost is recorded; nothing else needs to track spend.
    */
   runId?: number;
+  /** Overall budget for this call including transient retries. */
+  timeoutMs?: number;
 };
 
 /**
@@ -150,22 +152,27 @@ export async function llmComplete(call: LlmCall): Promise<LlmResult> {
   // correction agent, park the event as unfixable. Give it a few goes with a
   // widening gap before believing it.
   let lastError: Error | null = null;
+  // Every serverless route that calls the provider has a 300-second ceiling.
+  // Leave enough time for parsing, persistence, and lease cleanup.
+  const deadlineAt = Date.now() + Math.min(Math.max(call.timeoutMs ?? 240_000, 1_000), 240_000);
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await llmCompleteOnce(call);
+      return await llmCompleteOnce(call, deadlineAt);
     } catch (e) {
       lastError = e as Error;
       const transient =
         /Perplexity (5\d\d|429)/.test(lastError.message) ||
         /stream error|timeout|fetch failed|network/i.test(lastError.message);
       if (!transient || attempt === 2) throw lastError;
-      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      const backoff = 2000 * (attempt + 1);
+      if (Date.now() + backoff + 1_000 >= deadlineAt) throw lastError;
+      await new Promise((r) => setTimeout(r, backoff));
     }
   }
   throw lastError ?? new Error("llmComplete failed");
 }
 
-async function llmCompleteOnce(call: LlmCall): Promise<LlmResult> {
+async function llmCompleteOnce(call: LlmCall, deadlineAt: number): Promise<LlmResult> {
   const body: Record<string, unknown> = {
     input: call.prompt,
     models: call.models?.length ? call.models : MODEL_CHAIN,
@@ -190,6 +197,7 @@ async function llmCompleteOnce(call: LlmCall): Promise<LlmResult> {
     };
   }
 
+  const requestTimeout = () => Math.max(1, deadlineAt - Date.now());
   const res = await fetch(AGENT_URL, {
     method: "POST",
     headers: {
@@ -197,9 +205,7 @@ async function llmCompleteOnce(call: LlmCall): Promise<LlmResult> {
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
-    // A first request with a new schema can take 10-30s just to compile it, and
-    // a fetch_url run walks real pages. Nothing here is cut short.
-    signal: AbortSignal.timeout(600_000),
+    signal: AbortSignal.timeout(requestTimeout()),
   });
 
   let raw = await res.text();
@@ -216,7 +222,7 @@ async function llmCompleteOnce(call: LlmCall): Promise<LlmResult> {
           "content-type": "application/json",
         },
         body: JSON.stringify({ ...rest, preset: FALLBACK_PRESET }),
-        signal: AbortSignal.timeout(600_000),
+        signal: AbortSignal.timeout(requestTimeout()),
       });
       const retryRaw = await retry.text();
       if (!retry.ok) {

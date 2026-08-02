@@ -1,7 +1,6 @@
 /** Human-facing schedule choices. Cron never reaches the UI. */
 export const SCHEDULE_OPTIONS = [
   { value: "manual", label: "Manual only", cron: null as string | null },
-  { value: "twice_daily", label: "Twice a day", cron: "0 6,18 * * *" },
   { value: "daily", label: "Every day", cron: "0 6 * * *" },
   { value: "every_3_days", label: "Every 3 days", cron: "0 6 */3 * *" },
   { value: "weekdays", label: "Every weekday", cron: "0 6 * * 1-5" },
@@ -10,12 +9,23 @@ export const SCHEDULE_OPTIONS = [
 
 export type ScheduleValue = (typeof SCHEDULE_OPTIONS)[number]["value"];
 
+const MIN_INTERVAL_SECS: Record<string, number> = {
+  daily: 22 * 3600,
+  weekdays: 22 * 3600,
+  every_3_days: 65 * 3600,
+  weekly: 160 * 3600,
+};
+
 export function valueToCron(value: string): string | null {
   return SCHEDULE_OPTIONS.find((o) => o.value === value)?.cron ?? null;
 }
 
 export function cronToValue(cron: string | null | undefined): ScheduleValue {
   if (!cron) return "manual";
+  // The current Vercel Hobby scheduler can invoke this project only once per
+  // day. Treat old twice-daily rows honestly as daily rather than continuing to
+  // promise a cadence the host cannot execute.
+  if (cron === "0 6,18 * * *") return "daily";
   const hit = SCHEDULE_OPTIONS.find((o) => o.cron === cron);
   return (hit?.value ?? "custom") as ScheduleValue;
 }
@@ -23,6 +33,7 @@ export function cronToValue(cron: string | null | undefined): ScheduleValue {
 /** Friendly description for any cron, including ones we didn't generate. */
 export function cronToLabel(cron: string | null | undefined): string {
   if (!cron) return "Manual only";
+  if (cron === "0 6,18 * * *") return "Every day";
   const known = SCHEDULE_OPTIONS.find((o) => o.cron === cron);
   if (known) return known.label;
 
@@ -45,6 +56,28 @@ export function cronToLabel(cron: string | null | undefined): string {
   if (dom.startsWith("*/")) return `Every ${dom.slice(2)} days${at}`;
   if (dom === "*" && dow === "*") return `Every day${at}`;
   return "Custom schedule";
+}
+
+/** Evaluate the supported calendar choices from the last successful extraction. */
+export function scheduledSourceIsDue(
+  cron: string | null | undefined,
+  lastCompletedAt: Date | string | null | undefined,
+  nowMs = Date.now(),
+  timeZone = "America/New_York",
+): boolean {
+  if (!cron) return false;
+  const schedule = cronToValue(cron);
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(
+    new Date(nowMs),
+  );
+  if (schedule === "weekdays" && (weekday === "Sat" || weekday === "Sun")) return false;
+  if (schedule === "weekly" && weekday !== "Mon") return false;
+
+  if (!lastCompletedAt) return true;
+  const lastMs = new Date(lastCompletedAt).getTime();
+  if (!Number.isFinite(lastMs)) return true;
+  const interval = MIN_INTERVAL_SECS[schedule] ?? 22 * 3600;
+  return nowMs - lastMs >= interval * 1000;
 }
 
 /** How far ahead the agent looks for events, per source. */

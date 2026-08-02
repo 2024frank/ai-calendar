@@ -64,7 +64,11 @@ export async function GET(req: Request) {
     statuses = [...STATUSES];
   }
 
-  const conds = [inArray(events.status, statuses)];
+  const activeCommunityIds = db
+    .select({ id: communities.id })
+    .from(communities)
+    .where(eq(communities.status, "active"));
+  const conds = [inArray(events.status, statuses), inArray(events.communityId, activeCommunityIds)];
 
   const communityParam = (p.get("community") ?? "").trim();
   if (communityParam) {
@@ -73,8 +77,8 @@ export async function GET(req: Request) {
       .from(communities)
       .where(
         /^\d+$/.test(communityParam)
-          ? eq(communities.id, Number(communityParam))
-          : eq(communities.slug, communityParam),
+          ? and(eq(communities.id, Number(communityParam)), eq(communities.status, "active"))
+          : and(eq(communities.slug, communityParam), eq(communities.status, "active")),
       )
       .limit(1);
     if (!row) return NextResponse.json({ error: "Unknown community." }, { status: 404 });

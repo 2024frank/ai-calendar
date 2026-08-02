@@ -10,6 +10,8 @@ import { llmComplete } from "./llm";
 import { modelChain } from "./models";
 import { emit } from "./runEvents";
 import { fetchPage, hasImageExtension, isGenericImage } from "./fetchPage";
+import { isPublicHttpUrl } from "./publicUrl";
+import { normalizeImageBase64 } from "./imageData";
 
 /** Fields the correction agent may supply, all optional. */
 const CORRECTION_SCHEMA = {
@@ -130,10 +132,13 @@ Return only the missing fields from that page. For a missing image use THIS even
   // Resolve the image: agent URL, agent base64, or a server-side page rescue.
   let imageCdnUrl = ev.imageCdnUrl;
   let imageData = ev.imageData;
-  const agentImg = typeof patch.imageCdnUrl === "string" ? patch.imageCdnUrl : null;
-  const agentB64 = typeof patch.imageB64 === "string" ? patch.imageB64 : null;
-  if (!imageCdnUrl && !imageData && agentB64 && agentB64.length > 100) {
-    imageData = agentB64.replace(/\s+/g, "");
+  const agentImg =
+    typeof patch.imageCdnUrl === "string" && isPublicHttpUrl(patch.imageCdnUrl)
+      ? patch.imageCdnUrl
+      : null;
+  const agentB64 = normalizeImageBase64(patch.imageB64);
+  if (!imageCdnUrl && !imageData && agentB64) {
+    imageData = agentB64;
     imageCdnUrl = null;
   } else if (
     !imageCdnUrl &&
@@ -166,14 +171,22 @@ Return only the missing fields from that page. For a missing image use THIS even
     ...ev,
     // Same scrub the ingest path runs: a stray "tickets go on sale September 8"
     // must not be what keeps an otherwise finished event out of the queue.
-    description: stripDateSentences((patch.description as string) || ev.description) ?? ev.description,
+    description:
+      stripDateSentences(
+        (typeof patch.description === "string" && patch.description) || ev.description,
+      ) ?? ev.description,
     extendedDescription: stripDateSentences(
-      (patch.extendedDescription as string) ?? ev.extendedDescription,
+      (typeof patch.extendedDescription === "string" ? patch.extendedDescription : null) ??
+        ev.extendedDescription,
     ),
-    contactEmail: (patch.contactEmail as string) || ev.contactEmail,
-    phone: (patch.phone as string) || ev.phone,
-    location: (patch.location as string) || ev.location,
-    website: (patch.website as string) || ev.website,
+    contactEmail:
+      (typeof patch.contactEmail === "string" && patch.contactEmail) || ev.contactEmail,
+    phone: (typeof patch.phone === "string" && patch.phone) || ev.phone,
+    location: (typeof patch.location === "string" && patch.location) || ev.location,
+    website:
+      (typeof patch.website === "string" && isPublicHttpUrl(patch.website)
+        ? patch.website
+        : null) || ev.website,
     imageCdnUrl,
     imageData,
     sessions: ev.sessions ?? [],

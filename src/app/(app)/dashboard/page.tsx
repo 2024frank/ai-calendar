@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isAdmin, requireUser } from "@/lib/auth";
-import { dashboardStats, listCommunities } from "@/lib/data";
+import { accessibleCommunities, currentCommunityId, dashboardStats, listCommunities } from "@/lib/data";
 import { reapStaleRuns } from "@/lib/retention";
+import { requeueStaleJobs } from "@/lib/jobs";
 import { fmtDate, RunStatus } from "@/components/bits";
 import { ButtonLink, Card, EmptyState, Icon, type IconName, PageHeader, TableShell } from "@/components/ui";
 
@@ -23,9 +24,13 @@ function Kpi({ label, value, href, icon, hint }: { label: string; value: number;
 export default async function DashboardPage() {
   const session = await requireUser();
   const admin = isAdmin(session);
+  await requeueStaleJobs().catch(() => undefined);
   await reapStaleRuns().catch(() => undefined);
   const stats = await dashboardStats(session);
   const communities = session.role === "platform_admin" ? await listCommunities() : [];
+  const activeId = await currentCommunityId(session);
+  const activeCommunities = communities.length ? communities : await accessibleCommunities(session);
+  const timeZone = activeCommunities.find((community) => community.id === activeId)?.timezone ?? "America/New_York";
 
   return (
     <div className="grid" style={{ gap: 24 }}>
@@ -84,10 +89,10 @@ export default async function DashboardPage() {
                     <tr key={run.id}>
                       <td><Link href={`/runs/${run.id}`} className="table-link">#{run.id}</Link></td>
                       <td>{run.runKind}</td>
-                      <td><RunStatus status={run.status} /></td>
+                      <td><RunStatus status={run.status} phase={run.phase} /></td>
                       <td className="numeric">{numberFormatter.format(run.eventsFound)}</td>
                       <td className="numeric">{numberFormatter.format(run.eventsPublished)}</td>
-                      <td className="muted">{fmtDate(run.startedAt)}</td>
+                      <td className="muted">{fmtDate(run.startedAt, timeZone)}</td>
                       <td><ButtonLink href={`/runs/${run.id}`} size="sm" icon="arrow-right">Open</ButtonLink></td>
                     </tr>
                   ))}

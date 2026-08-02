@@ -9,6 +9,7 @@ import { recordFieldEdits, type FieldChange } from "@/lib/learning";
 import { learnFromCorrection } from "@/lib/learningAgent";
 import { logActivity } from "@/lib/activity";
 import { isPublicHttpUrl } from "@/lib/publicUrl";
+import { DISPLAY_TYPES, EVENT_TYPES, GEO_SCOPES, LOCATION_TYPES, POST_TYPE_IDS } from "@/lib/taxonomy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,32 @@ const URL_FIELDS = new Set([
   "imageCdnUrl",
   "calendarSourceUrl",
 ]);
+const TEXT_LIMITS: Record<(typeof TEXT_FIELDS)[number], number> = {
+  title: 60,
+  description: 200,
+  extendedDescription: 1000,
+  location: 1000,
+  locationType: 8,
+  placeName: 200,
+  roomNum: 120,
+  geoScope: 20,
+  urlLink: 2048,
+  displayType: 8,
+  website: 2048,
+  registrationUrl: 2048,
+  imageCdnUrl: 2048,
+  contactEmail: 320,
+  phone: 64,
+  calendarSourceName: 200,
+  calendarSourceUrl: 2048,
+  eventType: 2,
+};
+const ENUM_FIELDS: Partial<Record<(typeof TEXT_FIELDS)[number], ReadonlySet<string>>> = {
+  eventType: new Set(EVENT_TYPES.map((item) => item.value)),
+  locationType: new Set(LOCATION_TYPES.map((item) => item.value)),
+  displayType: new Set(DISPLAY_TYPES.map((item) => item.value)),
+  geoScope: new Set(GEO_SCOPES.map((item) => item.value)),
+};
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -64,6 +91,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   for (const f of TEXT_FIELDS) {
     if (!(f in body)) continue;
     const next = body[f] === null || body[f] === "" ? null : String(body[f]);
+    if (next && next.length > TEXT_LIMITS[f]) {
+      return NextResponse.json({ error: `${f} is too long.` }, { status: 400 });
+    }
+    if (next && ENUM_FIELDS[f] && !ENUM_FIELDS[f]!.has(next)) {
+      return NextResponse.json({ error: `${f} is not a supported value.` }, { status: 400 });
+    }
     if (next && URL_FIELDS.has(f) && !isPublicHttpUrl(next)) {
       return NextResponse.json(
         { error: `${f} must use a public http or https address.` },
@@ -78,7 +111,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (Array.isArray(body.postTypeIds)) {
-    const next = (body.postTypeIds as unknown[]).map(Number).filter(Number.isFinite);
+    const next = [...new Set((body.postTypeIds as unknown[]).map(Number))].filter((id) =>
+      POST_TYPE_IDS.includes(id),
+    );
+    if (next.length !== body.postTypeIds.length || next.length > POST_TYPE_IDS.length) {
+      return NextResponse.json({ error: "One or more categories are not supported." }, { status: 400 });
+    }
     const prev = (ev.postTypeIds ?? []) as number[];
     if (JSON.stringify(prev) !== JSON.stringify(next)) {
       patch.postTypeIds = next;
@@ -91,6 +129,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   if (Array.isArray(body.sponsors)) {
     const next = (body.sponsors as unknown[]).map((x) => String(x).trim()).filter(Boolean);
+    if (next.length > 25 || next.some((sponsor) => sponsor.length > 200)) {
+      return NextResponse.json({ error: "Sponsors are too long or too numerous." }, { status: 400 });
+    }
     const prev = (ev.sponsors ?? []) as string[];
     if (JSON.stringify(prev) !== JSON.stringify(next)) {
       patch.sponsors = next;
@@ -104,6 +145,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (Array.isArray(body.screensIds)) {
     const next = (body.screensIds as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    if (next.length !== body.screensIds.length || next.length > 100) {
+      return NextResponse.json({ error: "Screen IDs must be positive integers." }, { status: 400 });
+    }
     const prev = (ev.screensIds ?? []) as number[];
     if (JSON.stringify(prev) !== JSON.stringify(next)) {
       patch.screensIds = next;
@@ -112,10 +156,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (Array.isArray(body.buttons)) {
+    if (body.buttons.length > 20) {
+      return NextResponse.json({ error: "Too many buttons." }, { status: 400 });
+    }
     const submitted = (body.buttons as { title?: unknown; link?: unknown }[]).map((b) => ({
       title: String(b.title ?? "").trim(),
       link: String(b.link ?? "").trim(),
     }));
+    if (submitted.some((button) => button.title.length > 100 || button.link.length > 2048)) {
+      return NextResponse.json({ error: "A button title or link is too long." }, { status: 400 });
+    }
     if (submitted.some((button) => button.link && !isPublicHttpUrl(button.link))) {
       return NextResponse.json(
         { error: "Button links must use a public http or https address." },
@@ -131,6 +181,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (Array.isArray(body.sessions)) {
+    if (body.sessions.length > 500) {
+      return NextResponse.json({ error: "Too many event sessions." }, { status: 400 });
+    }
     const next = (body.sessions as { startTime?: unknown; endTime?: unknown }[])
       .map((s) => {
         const startTime = Number(s.startTime);
@@ -149,7 +202,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (JSON.stringify(prev) !== JSON.stringify(next)) {
       patch.sessions = next;
       // Keep the expiry sweep and the queue's "when" column in sync.
-      patch.startTimeMax = next.length ? Math.max(...next.map((s) => s.startTime)) : null;
+      patch.startTimeMax = next.length ? Math.max(...next.map((s) => s.endTime)) : null;
       changes.push({ field: "sessions", oldValue: JSON.stringify(prev), newValue: JSON.stringify(next) });
     }
   }

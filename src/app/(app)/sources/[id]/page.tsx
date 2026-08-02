@@ -7,6 +7,7 @@ import { CorrectButton } from "./CorrectButton";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { getSource } from "@/lib/data";
 import { reapStaleRuns } from "@/lib/retention";
+import { requeueStaleJobs } from "@/lib/jobs";
 import { normalizeMode, MODE_LABELS } from "@/lib/modeLabels";
 import { cronToLabel, cronToValue } from "@/lib/schedule";
 import { DiscoveryStatus, RunStatus, fmtDate, Badge } from "@/components/bits";
@@ -31,6 +32,7 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
   const s = await requireUser();
   if (!isAdmin(s)) redirect("/review");
   // Self-heal stuck runs before reading, so "discovering" can't stick forever.
+  await requeueStaleJobs().catch(() => undefined);
   await reapStaleRuns().catch(() => undefined);
   const source = await getSource(s, Number(id));
   if (!source) notFound();
@@ -126,14 +128,13 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
               ? [source.url]
               : []
         }
-        special={source.specialInstructions ?? ""}
       />
 
       <SourcePrompt sourceId={source.id} initial={source.specialInstructions ?? ""} />
 
       {recipe?.instruction_block && (
         <div className="card">
-          <div className="label">Extraction recipe</div>
+          <div className="label">Discovery notes (display only)</div>
           <pre
             style={{
               whiteSpace: "pre-wrap",
@@ -175,12 +176,12 @@ export default async function SourceDetail({ params }: { params: Promise<{ id: s
                   </td>
                   <td>{r.runKind}</td>
                   <td>
-                    <RunStatus status={r.status} />
+                    <RunStatus status={r.status} phase={r.phase} />
                   </td>
                   <td>{r.eventsFound}</td>
                   <td>{r.eventsDuplicate}</td>
                   <td>{r.eventsPublished}</td>
-                  <td className="muted">{fmtDate(r.startedAt)}</td>
+                  <td className="muted">{fmtDate(r.startedAt, community?.timezone)}</td>
                 </tr>
               ))}
             </tbody>

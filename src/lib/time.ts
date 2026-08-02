@@ -10,6 +10,30 @@
 
 type Wall = { y: number; mo: number; d: number; h: number; mi: number };
 
+export function isValidTimeZone(value: string): boolean {
+  if (!value || value.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validWall(wall: Wall): boolean {
+  if (wall.y < 1970 || wall.y > 9999 || wall.h < 0 || wall.h > 23 || wall.mi < 0 || wall.mi > 59) {
+    return false;
+  }
+  const exact = new Date(Date.UTC(wall.y, wall.mo, wall.d, wall.h, wall.mi));
+  return (
+    exact.getUTCFullYear() === wall.y &&
+    exact.getUTCMonth() === wall.mo &&
+    exact.getUTCDate() === wall.d &&
+    exact.getUTCHours() === wall.h &&
+    exact.getUTCMinutes() === wall.mi
+  );
+}
+
 /**
  * Offset in minutes of a named zone at a given instant, DST included. Uses the
  * engine's IANA database via Intl, so it stays correct without a library.
@@ -36,15 +60,16 @@ export function parseWall(input: string): Wall | null {
   if (!s) return null;
 
   // ISO-ish: 2026-07-27, 2026-07-27T12:30, 2026/07/27 12:30, with optional seconds.
-  const iso = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?/.exec(s);
+  const iso = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?)?$/.exec(s);
   if (iso) {
-    return {
+    const wall = {
       y: +iso[1],
       mo: +iso[2] - 1,
       d: +iso[3],
       h: iso[4] ? +iso[4] : 0,
       mi: iso[5] ? +iso[5] : 0,
     };
+    return validWall(wall) ? wall : null;
   }
 
   // A bare number is a Unix timestamp (seconds or milliseconds), for anything

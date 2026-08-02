@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { learnings, sources, users } from "@/db/schema";
+import { communities, learnings, sources, users } from "@/db/schema";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { currentCommunityId } from "@/lib/data";
 import { Card, EmptyState, PageHeader, StatusBadge, TableShell } from "@/components/ui";
@@ -15,13 +15,17 @@ const SCOPE_TONE = { global: "success", community: "warning", source: "neutral" 
 const SCOPE_MEANS = {
   source: "Applies to this one website",
   community: "Applies across this community",
-  global: "Applies to every source everywhere",
+  global: "Legacy lesson, now limited to this community",
 } as const;
 
 export default async function LearningPage() {
   const s = await requireUser();
   if (!isAdmin(s)) redirect("/dashboard");
   const communityId = await currentCommunityId(s);
+  const [community] = communityId
+    ? await db.select({ timezone: communities.timezone }).from(communities).where(eq(communities.id, communityId)).limit(1)
+    : [undefined];
+  const timeZone = community?.timezone ?? "America/New_York";
 
   const rows = await db
     .select({
@@ -70,7 +74,7 @@ export default async function LearningPage() {
               <div style={{ fontSize: 26, fontWeight: 700 }}>{Number(tally?.total ?? 0)}</div>
             </div>
             <div>
-              <div className="label">Apply everywhere</div>
+              <div className="label">Legacy broad lessons</div>
               <div style={{ fontSize: 26, fontWeight: 700 }}>{Number(tally?.global ?? 0)}</div>
             </div>
             <div>
@@ -129,7 +133,7 @@ export default async function LearningPage() {
                       <span title={SCOPE_MEANS[r.scope]}>
                         <StatusBadge tone={SCOPE_TONE[r.scope]}>
                           {r.scope === "global"
-                            ? "Everywhere"
+                            ? "Community (legacy)"
                             : r.scope === "community"
                               ? "Community"
                               : "This source"}
@@ -142,7 +146,7 @@ export default async function LearningPage() {
                     <td className="muted">{r.sourceName ?? "—"}</td>
                     <td className="muted">{r.reviewerName || r.reviewerEmail || "—"}</td>
                     <td>{r.timesServed}</td>
-                    <td className="muted">{fmtDate(r.createdAt)}</td>
+                    <td className="muted">{fmtDate(r.createdAt, timeZone)}</td>
                     <td><LessonActions id={r.id} status={r.status} /></td>
                   </tr>
                 ))}

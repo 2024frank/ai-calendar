@@ -1,14 +1,15 @@
 import "server-only";
 import { createHash, randomBytes } from "crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, loginTokens, sources, users } from "@/db/schema";
+import { communities, events, loginTokens, runs, sources, users } from "@/db/schema";
 import {
   computeDedupKey,
   contentMatches,
   eventWithinLookahead,
-  maxStartTime,
+  maxEndTime,
   normalizeEvent,
+  sessionsWithinLookahead,
   stripDateSentences,
   validateEvent,
   type ExtractedEvent,
@@ -28,10 +29,15 @@ import { publishEvent } from "./publishEvent";
 import { sendNewEventsDigest } from "./email";
 import { emit } from "./runEvents";
 import { sourceLinkFallbackCandidates } from "./sourceLinks";
+import { normalizeImageBase64 } from "./imageData";
+import { optionalIngestBudget } from "./extractionPolicy";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
 const MAX_IMAGE_FETCHES = 24;
+const MAX_SOURCE_LINK_CHECKS = 80;
+const SOURCE_LINK_CHECK_BUDGET_MS = 45_000;
+const SOURCE_LINK_FALLBACK_BUDGET_MS = 45_000;
 
 // Structural minimums. An event missing any of these is not a real, publishable
 // event, so it is auto-rejected at ingest instead of entering the review queue.
@@ -58,27 +64,38 @@ export const HARD_ISSUES = new Set([
 ]);
 
 /** Which of these source links definitely do not exist (a real 404). */
-async function deadSourceLinks(urls: string[]): Promise<Set<string>> {
+async function deadSourceLinks(
+  urls: string[],
+  budgetMs = SOURCE_LINK_CHECK_BUDGET_MS,
+): Promise<Set<string>> {
   const dead = new Set<string>();
-  const uniq = [...new Set(urls.filter((u) => /^https?:\/\//i.test(u)))];
+  if (budgetMs < 250) return dead;
+  const uniq = [...new Set(urls.filter((u) => /^https?:\/\//i.test(u)))].slice(
+    0,
+    MAX_SOURCE_LINK_CHECKS,
+  );
   const headers = {
     "user-agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     accept: "text/html,application/xhtml+xml,*/*;q=0.8",
   };
+  const deadlineAt = Date.now() + Math.min(budgetMs, SOURCE_LINK_CHECK_BUDGET_MS);
   const BATCH = 8;
   for (let i = 0; i < uniq.length; i += BATCH) {
+    if (Date.now() >= deadlineAt) break;
     await Promise.all(
       uniq.slice(i, i + BATCH).map(async (u) => {
         try {
+          const remaining = deadlineAt - Date.now();
+          if (remaining < 250) return;
           const r = await fetchPublicBytes(u, {
             maxBytes: 1024 * 1024,
-            timeoutMs: 9000,
+            timeoutMs: Math.min(5000, remaining),
             headers,
           });
-          // Only a definite 404/410 means "does not exist". A 403 is a bot wall,
-          // a timeout is the network, and neither proves the link is fake.
-          if (r.status === 404 || r.status === 410) dead.add(u);
+          // A 403 is a bot wall, not proof of a dead browser link. Definite
+          // missing pages and repeatable server error pages are unusable.
+          if (r.status === 404 || r.status === 410 || r.status >= 500) dead.add(u);
         } catch {
           /* network error or timeout: give the link the benefit of the doubt */
         }
@@ -105,6 +122,7 @@ async function deadSourceLinks(urls: string[]): Promise<Set<string>> {
 async function nearestLiveAncestor(
   url: string,
   configuredFallbacks: Array<string | null | undefined>,
+  deadlineAt: number,
 ): Promise<string | null> {
   const headers = {
     "user-agent":
@@ -113,20 +131,23 @@ async function nearestLiveAncestor(
   };
   const alive = async (candidate: string) => {
     try {
+      const remaining = deadlineAt - Date.now();
+      if (remaining < 250) return false;
       const r = await fetchPublicBytes(candidate, {
         maxBytes: 1024 * 1024,
-        timeoutMs: 9000,
+        timeoutMs: Math.min(5000, remaining),
         headers,
       });
-      // Anything that is not a definite "gone" counts: a bot wall still means
-      // the page is there for a person with a browser.
-      return r.status !== 404 && r.status !== 410;
+      // A bot wall still means the page is there for a person with a browser;
+      // a missing page or a server error is a dead end.
+      return r.status !== 404 && r.status !== 410 && r.status < 500;
     } catch {
       return false;
     }
   };
 
   for (const candidate of sourceLinkFallbackCandidates(url, configuredFallbacks)) {
+    if (Date.now() >= deadlineAt) break;
     if (await alive(candidate)) return candidate;
   }
   return null;
@@ -158,6 +179,7 @@ export async function ingestEvents(
   source: SourceRow,
   community: CommunityRow,
   rawEvents: Record<string, unknown>[],
+  options: { deadlineAt?: number } = {},
 ): Promise<IngestCounts> {
   const counts: IngestCounts = {
     found: rawEvents.length,
@@ -172,13 +194,21 @@ export async function ingestEvents(
   const lookaheadDays = source.lookaheadDays ?? 14;
   const horizonNowMs = Date.now();
   const horizonNowSeconds = Math.floor(horizonNowMs / 1000);
-  const candidateEvents = rawEvents.filter((raw) =>
-    eventWithinLookahead(
-      normalizeEvent(raw, community.timezone, horizonNowMs),
-      lookaheadDays,
-      horizonNowSeconds,
-    ),
-  );
+  const candidateEvents = rawEvents.flatMap((raw) => {
+    const normalized = normalizeEvent(raw, community.timezone, horizonNowMs);
+    if (!eventWithinLookahead(normalized, lookaheadDays, horizonNowSeconds)) return [];
+    if (!normalized.sessions.length) return [raw];
+    return [
+      {
+        ...raw,
+        sessions: sessionsWithinLookahead(
+          normalized.sessions,
+          lookaheadDays,
+          horizonNowSeconds,
+        ),
+      },
+    ];
+  });
   counts.outsideLookahead = rawEvents.length - candidateEvents.length;
   if (counts.outsideLookahead) {
     await emit(
@@ -212,7 +242,10 @@ export async function ingestEvents(
   const existingByKey = new Map(existing.filter((e) => e.dedupKey).map((e) => [e.dedupKey!, e.id]));
 
   // What the endpoint already published, so we never repost it.
-  const remoteInventory = await fetchDestinationInventory(source.communityId);
+  const inventoryBudget = optionalIngestBudget(options.deadlineAt, 25_000);
+  const remoteInventory = inventoryBudget >= 250
+    ? await fetchDestinationInventory(source.communityId, source.id, inventoryBudget)
+    : [];
   if (remoteInventory.length) {
     await emit(runId, "dedup_outcome", `Checked against ${remoteInventory.length} live post(s) on the endpoint`, {
       inventory: remoteInventory.length,
@@ -234,13 +267,16 @@ export async function ingestEvents(
   // fabricated event usually gives itself away with a link that 404s.
   const deadLinks = await deadSourceLinks(
     [
-      ...candidateEvents.flatMap((r) =>
-        [r.calendarSourceUrl, r.website].filter((u): u is string => typeof u === "string"),
-      ),
+      // Check configured fallbacks first. If the per-run budget is exhausted
+      // later, these are the safe pages we can still use without guessing.
       source.url,
       source.calendarSourceUrl,
       source.orgWebsite,
+      ...candidateEvents.flatMap((r) =>
+        [r.calendarSourceUrl, r.website].filter((u): u is string => typeof u === "string"),
+      ),
     ].filter((u): u is string => typeof u === "string"),
+    optionalIngestBudget(options.deadlineAt, SOURCE_LINK_CHECK_BUDGET_MS),
   );
   if (deadLinks.size) {
     await emit(runId, "fetch_result", `Source links checked; ${deadLinks.size} did not exist (repointed upward)`, {
@@ -252,26 +288,38 @@ export async function ingestEvents(
   // picture gets its own page fetched (concurrently) and the page's share
   // image (og:image) used. This covers an agent that shipped events without
   // their photos even though the pages have them.
-  const needingImage = candidateEvents.filter((r) => {
-    const has =
-      (typeof r.imageCdnUrl === "string" && r.imageCdnUrl) ||
-      (typeof r.imageB64 === "string" && r.imageB64) ||
-      (typeof r.imageData === "string" && r.imageData) ||
-      (Array.isArray(r.imageUrls) && r.imageUrls.length);
-    return !has;
-  });
-  if (needingImage.length) {
+  const needingImage = candidateEvents
+    .filter((r) => {
+      const has =
+        (typeof r.imageCdnUrl === "string" && r.imageCdnUrl) ||
+        (typeof r.imageB64 === "string" && r.imageB64) ||
+        (typeof r.imageData === "string" && r.imageData) ||
+        (Array.isArray(r.imageUrls) && r.imageUrls.length);
+      return !has;
+    })
+    .slice(0, MAX_IMAGE_FETCHES);
+  if (needingImage.length && optionalIngestBudget(options.deadlineAt, 10_000) >= 250) {
+    // This bulk pass consumes the run-wide image-fetch allowance. Without this
+    // accounting the sequential loop below could perform 24 more 12-second
+    // fetches and push an otherwise complete ingest beyond the 300-second host
+    // limit.
     let rescued = 0;
+    let attempted = 0;
     const BATCH = 8;
     for (let i = 0; i < needingImage.length; i += BATCH) {
+      const batchBudget = optionalIngestBudget(options.deadlineAt, 10_000);
+      if (batchBudget < 250) break;
+      const batch = needingImage.slice(i, i + BATCH);
+      attempted += batch.length;
+      imageFetches += batch.length;
       await Promise.all(
-        needingImage.slice(i, i + BATCH).map(async (r) => {
+        batch.map(async (r) => {
           const detail = [r.calendarSourceUrl, r.website, r.registrationUrl, r.urlLink].find(
             (u): u is string => typeof u === "string" && isPublicHttpUrl(u) && !isListing(u),
           );
           if (!detail) return;
           try {
-            const page = await fetchPage(detail, 10_000);
+            const page = await fetchPage(detail, batchBudget);
             if (page.image && !isGenericImage(page.image)) {
               r.imageCdnUrl = page.image;
               rescued++;
@@ -282,35 +330,40 @@ export async function ingestEvents(
         }),
       );
     }
-    await emit(
-      runId,
-      "image_enriched",
-      `Fetched ${needingImage.length} event page(s) for missing pictures; found ${rescued}`,
-      { missing: needingImage.length, rescued },
-    );
+    if (attempted) {
+      await emit(
+        runId,
+        "image_enriched",
+        `Fetched ${attempted} event page(s) for missing pictures; found ${rescued}`,
+        { missing: needingImage.length, attempted, rescued },
+      );
+    }
   }
 
+  const fallbackDeadlineAt =
+    Date.now() + optionalIngestBudget(options.deadlineAt, SOURCE_LINK_FALLBACK_BUDGET_MS);
+  const knownWorkingFallback = [source.url, source.calendarSourceUrl, source.orgWebsite].find(
+    (url): url is string => Boolean(url && isPublicHttpUrl(url) && !deadLinks.has(url)),
+  );
+
   for (const raw of candidateEvents) {
+    let publishedAutomatically = false;
     const e: ExtractedEvent = normalizeEvent(raw, community.timezone);
 
     // Drop site furniture the agent may still have picked up.
     if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;
     // Agent-supplied image bytes (imageB64, for bot-walled hosts): keep only a
     // real image, checked by magic bytes, capped at 4 MB.
-    if (e.imageData) {
-      const head = Buffer.from(e.imageData.slice(0, 16), "base64");
-      const realImage =
-        (head[0] === 0xff && head[1] === 0xd8) || // JPEG
-        (head[0] === 0x89 && head[1] === 0x50) || // PNG
-        (head[0] === 0x52 && head[1] === 0x49) || // WebP (RIFF)
-        (head[0] === 0x47 && head[1] === 0x49); // GIF
-      if (!realImage || e.imageData.length > 5_600_000) e.imageData = null;
-    }
+    if (e.imageData) e.imageData = normalizeImageBase64(e.imageData);
     if (e.imageData) e.imageCdnUrl = e.imageCdnUrl ?? null;
 
     // Several pictures for one item (e.g. two movie posters) -> merge into one.
     const pics = (e.imageUrls ?? []).filter((u) => !isGenericImage(u));
-    if (!e.imageData && pics.length > 1) {
+    if (
+      !e.imageData &&
+      pics.length > 1 &&
+      optionalIngestBudget(options.deadlineAt, 65_000) >= 65_000
+    ) {
       try {
         const buf = await mergePosterImages(pics);
         if (buf) {
@@ -331,7 +384,12 @@ export async function ingestEvents(
     // CommunityHub needs the image URL to end in a real extension. If our chosen
     // image is a query-based or extension-less URL (e.g. a Veezi poster), pull it
     // into imageData so it serves from our own /image.jpg endpoint.
-    if (!e.imageData && e.imageCdnUrl && !hasImageExtension(e.imageCdnUrl)) {
+    if (
+      !e.imageData &&
+      e.imageCdnUrl &&
+      !hasImageExtension(e.imageCdnUrl) &&
+      optionalIngestBudget(options.deadlineAt, 15_000) >= 15_000
+    ) {
       try {
         const buf = await mergePosterImages([e.imageCdnUrl]);
         if (buf) {
@@ -345,14 +403,21 @@ export async function ingestEvents(
 
     // Only enrich from a page belonging to THIS event. The source's own listing
     // page is shared by every event, so its og:image is not a per-event photo.
-    if (!e.imageCdnUrl && imageFetches < MAX_IMAGE_FETCHES) {
+    if (
+      !e.imageCdnUrl &&
+      imageFetches < MAX_IMAGE_FETCHES &&
+      optionalIngestBudget(options.deadlineAt, 12_000) >= 250
+    ) {
       const detailUrl = [e.calendarSourceUrl, e.registrationUrl, e.urlLink, e.website].find(
         (u): u is string => !!u && isPublicHttpUrl(u) && !isListing(u),
       );
       if (detailUrl) {
         imageFetches++;
         try {
-          const page = await fetchPage(detailUrl, 12_000);
+          const page = await fetchPage(
+            detailUrl,
+            optionalIngestBudget(options.deadlineAt, 12_000),
+          );
           if (page.image && !isGenericImage(page.image)) {
             e.imageCdnUrl = page.image;
             await emit(runId, "image_enriched", `Image found for ${e.title}`, {
@@ -408,7 +473,7 @@ export async function ingestEvents(
         source.url,
         source.calendarSourceUrl,
         source.orgWebsite,
-      ]);
+      ], fallbackDeadlineAt) ?? knownWorkingFallback ?? null;
       if (rescued) {
         await emit(runId, "fetch_result", `Dead link repointed at ${rescued}: ${e.title}`, {
           was: e.calendarSourceUrl,
@@ -423,7 +488,7 @@ export async function ingestEvents(
           source.url,
           source.calendarSourceUrl,
           source.orgWebsite,
-        ])) ?? e.website;
+        ], fallbackDeadlineAt)) ?? knownWorkingFallback ?? e.website;
     }
 
     const issues = validateEvent(e);
@@ -544,7 +609,7 @@ export async function ingestEvents(
       description: e.description,
       extendedDescription: e.extendedDescription,
       sessions: e.sessions,
-      startTimeMax: maxStartTime(e),
+      startTimeMax: maxEndTime(e),
       locationType: e.locationType,
       location: e.location,
       urlLink: e.urlLink,
@@ -594,18 +659,29 @@ export async function ingestEvents(
       counts.inserted++;
       existingByKey.set(dedupKey, newId);
 
-      if (skipsOurReview(mode)) {
+      if (
+        skipsOurReview(mode) &&
+        issues.length === 0 &&
+        optionalIngestBudget(options.deadlineAt, 90_000) >= 90_000
+      ) {
         // Nobody here reads it: send it straight to CommunityHub. The status it
         // lands on records how it got there, so "waiting on CommunityHub" and
         // "live with nobody checking" stay tellable apart afterwards. A failure
         // leaves it pending for a person, which is the safe direction.
         try {
           const pub = await publishEvent(newId, publishedStatus(mode));
+          if (pub.ok) {
+            publishedAutomatically = true;
+            await db
+              .update(runs)
+              .set({ eventsPublished: sql`${runs.eventsPublished} + 1` })
+              .where(eq(runs.id, runId));
+          }
           await emit(
             runId,
             "queue_outcome",
-            pub.state === "succeeded"
-              ? `${MODE_LABELS[mode].name}: sent to CommunityHub (#${newId})`
+            pub.ok
+              ? `${MODE_LABELS[mode].name}: ${pub.message} (#${newId})`
               : `${MODE_LABELS[mode].name} ${pub.state}, left for review (#${newId}): ${pub.message}`,
             { eventId: newId, publish: pub.state, mode },
           );
@@ -615,7 +691,8 @@ export async function ingestEvents(
           });
         }
       } else {
-        // Restricted: it waits for a reviewer. Collect for the digest email.
+        // Restricted, or automatic mode with unresolved validation issues: it
+        // waits for a reviewer. Collect it for the digest email.
         const first = e.sessions[0]?.startTime;
         newlyPending.push({
           title: e.title,
@@ -632,21 +709,26 @@ export async function ingestEvents(
       }
     }
 
-    await emit(
-      runId,
-      "queue_outcome",
-      duplicateOf || remoteDup
-        ? `Kept as duplicate (#${newId})`
-        : status === "auto_rejected"
-          ? `Auto-rejected as incomplete (#${newId}): ${hardIssues.join(", ")}`
-          : issues.length
-            ? `Sent to review, needs fields before publish (#${newId})`
-            : `Sent to review (#${newId})`,
-      { eventId: newId, status, mode, issues },
-    );
+    if (!publishedAutomatically) {
+      await emit(
+        runId,
+        "queue_outcome",
+        duplicateOf || remoteDup
+          ? `Kept as duplicate (#${newId})`
+          : status === "auto_rejected"
+            ? `Auto-rejected as incomplete (#${newId}): ${hardIssues.join(", ")}`
+            : issues.length
+              ? `Sent to review, needs fields before publish (#${newId})`
+              : `Sent to review (#${newId})`,
+        { eventId: newId, status, mode, issues },
+      );
+    }
   }
 
-  if (newlyPending.length) {
+  if (
+    newlyPending.length &&
+    optionalIngestBudget(options.deadlineAt, 30_000) >= 30_000
+  ) {
     await notifyReviewers(source, community, newlyPending);
   }
 

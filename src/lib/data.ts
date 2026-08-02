@@ -21,26 +21,31 @@ export async function accessibleCommunities(s: Session) {
   const extra = await db
     .select({ id: userCommunities.communityId })
     .from(userCommunities)
-    .where(eq(userCommunities.userId, s.uid));
+    .innerJoin(communities, eq(communities.id, userCommunities.communityId))
+    .where(and(eq(userCommunities.userId, s.uid), eq(communities.status, "active")));
   const ids = [...new Set([s.communityId, ...extra.map((r) => r.id)].filter(Boolean))] as number[];
   if (!ids.length) return [];
-  return db.select().from(communities).where(inArray(communities.id, ids)).orderBy(communities.name);
+  return db
+    .select()
+    .from(communities)
+    .where(and(inArray(communities.id, ids), eq(communities.status, "active")))
+    .orderBy(communities.name);
 }
 
 /** The community the user is currently working in, honouring their choice. */
 export async function activeCommunityId(s: Session, chosen?: number | null) {
   const allowed = await accessibleCommunities(s);
   if (chosen && allowed.some((c) => c.id === chosen)) return chosen;
-  return s.communityId ?? allowed[0]?.id ?? null;
+  return allowed.find((c) => c.id === s.communityId)?.id ?? allowed[0]?.id ?? null;
 }
 
 /** The community currently selected in the sidebar, validated against access. */
 export async function currentCommunityId(s: Session): Promise<number | null> {
   const raw = (await cookies()).get("ac_community")?.value;
   const id = Number(raw);
-  if (!Number.isInteger(id)) return s.communityId ?? null;
   const allowed = await accessibleCommunities(s);
-  return allowed.some((c) => c.id === id) ? id : (s.communityId ?? null);
+  if (Number.isInteger(id) && allowed.some((c) => c.id === id)) return id;
+  return allowed.find((c) => c.id === s.communityId)?.id ?? allowed[0]?.id ?? null;
 }
 
 /** Source ids this session may see. null => every community (platform admin). */

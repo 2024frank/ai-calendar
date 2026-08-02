@@ -1,5 +1,5 @@
 import "server-only";
-import { assertPublicHttpUrl, isPublicHttpUrl } from "./publicUrl";
+import { fetchPinnedPublicUrl, isPublicHttpUrl } from "./publicUrl";
 
 export type FetchedPage = {
   ok: boolean;
@@ -51,12 +51,22 @@ const MAX_REDIRECTS = 4;
  * so an admin cannot craft a source URL that exfiltrates arbitrary env vars.
  */
 const URL_SECRETS = ["APOLLO_VEEZI_SITE_TOKEN"] as const;
+const URL_SECRET_HOSTS: Record<(typeof URL_SECRETS)[number], ReadonlySet<string>> = {
+  APOLLO_VEEZI_SITE_TOKEN: new Set(["ticketing.uswest.veezi.com"]),
+};
 
 export function resolveUrlSecrets(url: string): string {
   let out = url;
   for (const key of URL_SECRETS) {
     const value = process.env[key];
-    if (value) out = out.split(`{${key}}`).join(value);
+    if (!value || !out.includes(`{${key}}`)) continue;
+    let hostname = "";
+    try {
+      hostname = new URL(out).hostname.toLowerCase();
+    } catch {
+      continue;
+    }
+    if (URL_SECRET_HOSTS[key].has(hostname)) out = out.split(`{${key}}`).join(value);
   }
   return out;
 }
@@ -123,27 +133,34 @@ export async function fetchPublicBytes(
   }: { maxBytes: number; timeoutMs?: number; headers?: Record<string, string> },
 ): Promise<PublicBytesResponse> {
   let current = rawUrl;
+  const deadlineAt = Date.now() + Math.max(1, timeoutMs);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    await assertPublicHttpUrl(current);
-    const response = await fetch(current, {
-      signal: AbortSignal.timeout(timeoutMs),
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) throw new Error("timeout");
+    const { response, close } = await fetchPinnedPublicUrl(current, {
+      signal: AbortSignal.timeout(remaining),
       redirect: "manual",
       headers,
     });
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location) throw new Error("redirect_without_location");
-      if (hop === MAX_REDIRECTS) throw new Error("too_many_redirects");
-      current = new URL(location, current).toString();
-      continue;
+    try {
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location) throw new Error("redirect_without_location");
+        if (hop === MAX_REDIRECTS) throw new Error("too_many_redirects");
+        current = new URL(location, current).toString();
+        continue;
+      }
+      return {
+        ok: response.ok,
+        status: response.status,
+        contentType: response.headers.get("content-type") ?? "",
+        finalUrl: current,
+        bytes: await readResponseBytesLimited(response, maxBytes),
+      };
+    } finally {
+      if (response.body && !response.bodyUsed) await response.body.cancel().catch(() => undefined);
+      await close();
     }
-    return {
-      ok: response.ok,
-      status: response.status,
-      contentType: response.headers.get("content-type") ?? "",
-      finalUrl: current,
-      bytes: await readResponseBytesLimited(response, maxBytes),
-    };
   }
   throw new Error("too_many_redirects");
 }

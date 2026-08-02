@@ -5,31 +5,37 @@ import { communities, runs, sources } from "@/db/schema";
 import { verifyRunToken } from "@/lib/agentToken";
 import { ingestEvents } from "@/lib/ingest";
 import { emit } from "@/lib/runEvents";
+import { readJsonBodyLimited, RequestBodyTooLargeError } from "@/lib/requestBody";
+import { FINALIZATION_DEADLINE_MS } from "@/lib/extractionPolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Where the extraction agent hands back its work.
+ * Legacy authenticated callback for an already-running external worker.
  *
- * The agent, running in its sandbox, POSTs the events it kept and any duplicates
- * it found. Authenticated by the per-run token embedded in the agent's own
- * prompt, so only the agent for this run can post to it. The server then does
- * what it always does: convert the ISO dates, run its own duplicate safety net,
- * and store everything for review.
+ * The normal extraction path now receives structured model output and ingests
+ * it in-process, so model prompts never contain this endpoint or a run token.
+ * This endpoint remains fail-closed behind a per-run HMAC for compatibility;
+ * callers still pass through the same validation and persistence pipeline.
  */
 export async function POST(req: Request) {
-  const contentLength = Number(req.headers.get("content-length") ?? 0);
-  if (Number.isFinite(contentLength) && contentLength > 2 * 1024 * 1024) {
-    return NextResponse.json({ error: "payload too large" }, { status: 413 });
-  }
-  const body = (await req.json().catch(() => ({}))) as {
+  const deadlineAt = Date.now() + FINALIZATION_DEADLINE_MS;
+  let body: {
     runId?: number;
     token?: string;
     events?: Record<string, unknown>[];
     duplicates?: Record<string, unknown>[];
   };
+  try {
+    body = await readJsonBodyLimited(req, 2 * 1024 * 1024);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "payload too large" : "invalid JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
 
   const runId = Number(body.runId);
   if (!Number.isInteger(runId) || !verifyRunToken(runId, String(body.token ?? ""))) {
@@ -95,7 +101,9 @@ export async function POST(req: Request) {
     // One list through the normal pipeline: ISO dates become timestamps, the
     // server's own dedup runs, and each event lands as pending, duplicate, or
     // auto_rejected.
-    const counts = await ingestEvents(runId, source, community, [...kept, ...reportedDupes]);
+    const counts = await ingestEvents(runId, source, community, [...kept, ...reportedDupes], {
+      deadlineAt,
+    });
 
     await emit(
       runId,

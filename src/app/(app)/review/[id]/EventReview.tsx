@@ -12,6 +12,7 @@ import {
   REJECT_REASONS,
   humanizeIssues,
 } from "@/lib/taxonomy";
+import { fromLocalInput, toLocalInput } from "./eventTime";
 
 type Session = { startTime: number; endTime: number };
 type Button = { title: string; link: string };
@@ -51,51 +52,12 @@ type EventRow = {
   duplicateOfTitle: string | null;
 };
 
-/*
- * datetime-local <-> unix seconds, always in Oberlin time regardless of the
- * reviewer's own timezone. Showing a browser-local time would silently shift
- * every event for anyone not sitting in Eastern.
- */
-/** Offset (ms) of the zone at a given instant, DST included. */
-function tzOffsetMs(utcMs: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(utcMs));
-  const g = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-  const asUtc = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second"));
-  return asUtc - utcMs;
-}
-
-function toLocalInput(sec: number, timeZone: string): string {
-  if (!sec) return "";
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(sec * 1000));
-  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
-  return `${g("year")}-${g("month")}-${g("day")}T${(g("hour") === "24" ? "00" : g("hour"))}:${g("minute")}`;
-}
-
-function fromLocalInput(s: string, timeZone: string): number {
-  if (!s) return 0;
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
-  if (!m) return 0;
-  const [, y, mo, d, h, mi] = m.map(Number) as unknown as number[];
-  // Treat the typed wall time as Oberlin time, then convert to a real instant.
-  const guess = Date.UTC(y, mo - 1, d, h, mi);
-  return Math.floor((guess - tzOffsetMs(guess, timeZone)) / 1000);
+function supportedValue(
+  value: string | null,
+  options: readonly { value: string }[],
+  fallback: string,
+): string {
+  return value && options.some((option) => option.value === value) ? value : fallback;
 }
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -176,11 +138,13 @@ export function EventReview({
   sourceName,
   publishEmail,
   timezone,
+  unresolvedPublish = false,
   backQuery = null,
 }: {
   event: EventRow;
   sourceName: string;
   publishEmail: string;
+  unresolvedPublish?: boolean;
   /** The queue's filters when this event was opened, to return to the same view. */
   backQuery?: string | null;
   timezone: string;
@@ -189,17 +153,17 @@ export function EventReview({
   const router = useRouter();
 
   const [f, setF] = useState({
-    eventType: event.eventType ?? "ot",
+    eventType: supportedValue(event.eventType, EVENT_TYPES, "ot"),
     title: event.title ?? "",
     description: event.description ?? "",
     extendedDescription: event.extendedDescription ?? "",
-    locationType: event.locationType ?? "ne",
+    locationType: supportedValue(event.locationType, LOCATION_TYPES, "ne"),
     location: event.location ?? "",
     placeName: event.placeName ?? "",
     roomNum: event.roomNum ?? "",
-    geoScope: event.geoScope ?? "city_wide",
+    geoScope: supportedValue(event.geoScope, GEO_SCOPES, "city_wide"),
     urlLink: event.urlLink ?? "",
-    displayType: event.displayType ?? "all",
+    displayType: supportedValue(event.displayType, DISPLAY_TYPES, "all"),
     website: event.website ?? "",
     registrationUrl: event.registrationUrl ?? "",
     imageCdnUrl: event.imageCdnUrl ?? "",
@@ -223,6 +187,10 @@ export function EventReview({
   const [note, setNote] = useState("");
   const [showErrors, setShowErrors] = useState(false);
   const [showPayload, setShowPayload] = useState(false);
+  const [brokenPreview, setBrokenPreview] = useState<string | null>(null);
+  const [needsPublishReconciliation, setNeedsPublishReconciliation] = useState(
+    unresolvedPublish,
+  );
 
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.value });
@@ -238,12 +206,14 @@ export function EventReview({
   const needsAddress = f.locationType === "ph2" || f.locationType === "bo";
   const needsUrl = f.locationType === "on" || f.locationType === "bo";
 
-  // Everything mandatory before approval EXCEPT the online link and registration link.
+  // Everything mandatory before approval. A registration link is optional,
+  // but an online/both event must have somewhere a person can join.
   const missing = {
     title: !f.title.trim(),
     description: f.description.trim().length < 10,
     sessions: cleanSessions.length === 0,
     location: needsAddress && !f.location.trim(),
+    urlLink: needsUrl && !f.urlLink.trim(),
     website: !f.website.trim(),
     imageCdnUrl: !f.imageCdnUrl.trim() && !event.hasImageData,
     contactEmail: !f.contactEmail.trim(),
@@ -300,15 +270,22 @@ export function EventReview({
     };
   }
 
-  // The form exactly as it loaded, defaults and all. Saving sends only what
-  // differs from this, so the form's own normalization (a defaulted geoScope,
-  // a default button title, JSON key order in sessions) can never be logged as
-  // a reviewer correction. Every approval used to save the whole form, which
-  // manufactured "edits" on every single approved event, drove the
-  // kept-as-written metric to a false 0%, and fired the learning agent over
-  // changes no human made.
+  // Saving sends only what differs from the persisted record, so normalization
+  // such as JSON key order cannot be logged as a reviewer correction. The one
+  // intentional exception is a safe enum default replacing missing/invalid
+  // persisted data: that value must be saved or final publishing rejects it.
   const initialBody = useRef<Record<string, unknown> | null>(null);
-  if (initialBody.current === null) initialBody.current = body();
+  if (initialBody.current === null) {
+    const loaded = body() as Record<string, unknown>;
+    // The controls show safe defaults for missing or legacy-invalid enums. Keep
+    // the persisted values as the baseline so those defaults are included in
+    // the first PATCH instead of looking like untouched data.
+    loaded.eventType = event.eventType;
+    loaded.locationType = event.locationType;
+    loaded.geoScope = event.geoScope;
+    loaded.displayType = event.displayType;
+    initialBody.current = loaded;
+  }
 
   function dirtyBody(): Record<string, unknown> {
     const now = body() as Record<string, unknown>;
@@ -325,17 +302,28 @@ export function EventReview({
   async function save() {
     setBusy("save");
     setMsg(null);
-    const res = await fetch(`/api/events/${event.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(dirtyBody()),
-    });
-    const d = await res.json();
-    setBusy(null);
-    setMsg(res.ok ? (d.changed ? `Saved ${d.changed} change(s). The agent learns from these.` : "No changes.") : d.error);
-    // What was just saved is the new baseline, so saving again reports nothing.
-    if (res.ok) initialBody.current = body();
-    if (res.ok) router.refresh();
+    try {
+      const res = await fetch(`/api/events/${event.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(dirtyBody()),
+      });
+      const d = await res.json().catch(() => ({}));
+      setMsg(
+        res.ok
+          ? d.changed
+            ? `Saved ${d.changed} change(s). The agent learns from these.`
+            : "No changes."
+          : d.error || "Could not save changes.",
+      );
+      // What was just saved is the new baseline, so saving again reports nothing.
+      if (res.ok) initialBody.current = body();
+      if (res.ok) router.refresh();
+    } catch {
+      setMsg("Network error. Your changes were not saved.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function approve() {
@@ -346,43 +334,104 @@ export function EventReview({
       return;
     }
     setBusy("approve");
-    // Save only what the reviewer actually touched before approving.
-    await fetch(`/api/events/${event.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(dirtyBody()),
-    });
-    const res = await fetch(`/api/events/${event.id}/approve`, { method: "POST" });
-    const d = await res.json().catch(() => ({}));
-    setBusy(null);
-    if (res.ok) {
-      setMsg(
-        d.publish === "succeeded"
-          ? "Approved and sent to CommunityHub. Find it under Approved."
-          : "Approved. It is in your calendar (no CommunityHub endpoint, so not sent there).",
-      );
-      // Return to the queue exactly as it was filtered, so working through one
-      // source's events does not mean re-picking the filter after every one.
-      setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review?tab=approved"), 1400);
-    } else {
-      setMsg(d.error ? `Could not approve: ${d.error}` : "Could not approve.");
+    try {
+      // Save only what the reviewer actually touched before approving. Approval
+      // must stop here if persistence fails, otherwise stale database values can
+      // be published while the reviewer sees their unsaved edits on screen.
+      const patchRes = await fetch(`/api/events/${event.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(dirtyBody()),
+      });
+      const patchData = await patchRes.json().catch(() => ({}));
+      if (!patchRes.ok) {
+        setMsg(
+          patchData.error
+            ? `Could not save before approval: ${patchData.error}`
+            : "Could not save before approval. Nothing was published.",
+        );
+        return;
+      }
+      initialBody.current = body();
+
+      const res = await fetch(`/api/events/${event.id}/approve`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setMsg(
+          d.publish === "succeeded"
+            ? "Approved and sent to CommunityHub. Find it under Approved."
+            : "Approved. It is in your calendar (no CommunityHub endpoint, so not sent there).",
+        );
+        // Return to the queue exactly as it was filtered, so working through one
+        // source's events does not mean re-picking the filter after every one.
+        setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review?tab=approved"), 1400);
+      } else {
+        if (d.publish === "unknown") setNeedsPublishReconciliation(true);
+        setMsg(d.error ? `Could not approve: ${d.error}` : "Could not approve.");
+      }
+    } catch {
+      setMsg("Network error. Nothing was approved or published.");
+    } finally {
+      setBusy(null);
     }
   }
 
   async function reject() {
     setBusy("reject");
-    const res = await fetch(`/api/events/${event.id}/reject`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reasonCode: reason, note }),
-    });
-    const d = await res.json().catch(() => ({}));
-    setBusy(null);
-    if (res.ok) {
-      setMsg("Rejected. The agent learns from this for next time.");
-      setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review"), 1200);
-    } else {
-      setMsg(d.error ? `Could not reject: ${d.error}` : "Could not reject.");
+    try {
+      const res = await fetch(`/api/events/${event.id}/reject`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: reason, note }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setMsg("Rejected. The agent learns from this for next time.");
+        setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review"), 1200);
+      } else {
+        setMsg(d.error ? `Could not reject: ${d.error}` : "Could not reject.");
+      }
+    } catch {
+      setMsg("Network error. The event was not rejected.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reconcilePublish(outcome: "published" | "not_published") {
+    const confirmed = window.confirm(
+      outcome === "published"
+        ? "Confirm only if you opened CommunityHub and found this event there. Mark it approved?"
+        : "Confirm only if you checked CommunityHub and this event is not there. This will make a retry safe.",
+    );
+    if (!confirmed) return;
+
+    setBusy("reconcile");
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/events/${event.id}/reconcile-publish`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ outcome }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error || "Could not reconcile this send.");
+
+      setNeedsPublishReconciliation(false);
+      if (outcome === "published") {
+        setMsg("Confirmed in CommunityHub and marked approved.");
+        setTimeout(
+          () => router.push(backQuery ? `/review?${backQuery}` : "/review?tab=approved"),
+          1200,
+        );
+      } else {
+        setMsg("Confirmed absent from CommunityHub. It is now safe to click Approve and retry.");
+        router.refresh();
+      }
+    } catch (cause) {
+      setMsg(cause instanceof Error ? cause.message : "Could not reconcile this send.");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -391,7 +440,13 @@ export function EventReview({
   return (
     <div className="grid review-layout" style={{ gap: 16, gridTemplateColumns: "minmax(0,1fr) 320px", alignItems: "start" }}>
       {/* LEFT: the editor */}
-      <div className="grid" style={{ gap: 16 }}>
+      <fieldset
+        className="grid"
+        disabled={!!busy}
+        aria-busy={!!busy || undefined}
+        style={{ gap: 16, border: 0, padding: 0, margin: 0, minWidth: 0 }}
+      >
+        <legend className="sr-only">Event details</legend>
         {!ready && (
           <div className="card" style={{ borderColor: "var(--warn)" }}>
             <div className="label">Not ready to publish</div>
@@ -549,7 +604,7 @@ export function EventReview({
               </Field>
             )}
             {needsUrl && (
-              <Field label="Online event URL (optional)">
+              <Field label="Online event URL" required missing={m("urlLink")}>
                 <input className="input" value={f.urlLink} onChange={set("urlLink")} placeholder="https://…" />
               </Field>
             )}
@@ -600,15 +655,19 @@ export function EventReview({
         <Section title="Contact and media">
           <Field label="Event image" required missing={m("imageCdnUrl")}>
             <input className="input" value={f.imageCdnUrl} onChange={set("imageCdnUrl")} placeholder="https://…/photo.jpg" />
-            {(f.imageCdnUrl.trim() || event.hasImageData) ? (
+            {(f.imageCdnUrl.trim() || event.hasImageData) &&
+            brokenPreview !== (f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}
+                key={f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}
                 alt={`Preview for ${f.title || "event"}`}
                 width={800}
                 height={450}
                 style={{ marginTop: 8, maxHeight: 220, maxWidth: "100%", borderRadius: 8, border: "1px solid var(--line)", objectFit: "cover" }}
-                onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+                onError={() =>
+                  setBrokenPreview(f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`)
+                }
               />
             ) : (
               <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
@@ -696,6 +755,34 @@ export function EventReview({
 
         {msg && <div className="alert" role="status" aria-live="polite">{msg}</div>}
 
+        {needsPublishReconciliation && (
+          <div className="card" style={{ borderColor: "var(--warn)" }}>
+            <div className="label">Check CommunityHub before continuing</div>
+            <p style={{ fontSize: 13, margin: "6px 0 12px" }}>
+              The last send ended without a trustworthy answer. Open CommunityHub and search for
+              this event, then record what you find so the calendar cannot create a duplicate.
+            </p>
+            <div className="row" style={{ flexWrap: "wrap" }}>
+              <button
+                className="btn primary"
+                type="button"
+                disabled={!!busy}
+                onClick={() => reconcilePublish("published")}
+              >
+                {busy === "reconcile" ? "Saving…" : "I found it - mark approved"}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={!!busy}
+                onClick={() => reconcilePublish("not_published")}
+              >
+                It is not there - enable retry
+              </button>
+            </div>
+          </div>
+        )}
+
         {rejecting ? (
           <div className="card">
             <Field label="Why is this wrong? (this is what the agent learns from)">
@@ -743,20 +830,24 @@ export function EventReview({
             </button>
           </div>
         )}
-      </div>
+      </fieldset>
 
       {/* RIGHT: readiness + payload preview */}
       <div className="grid" style={{ gap: 16, position: "sticky", top: 16 }}>
         <div className="card">
-          {(f.imageCdnUrl.trim() || event.hasImageData) && (
+          {(f.imageCdnUrl.trim() || event.hasImageData) &&
+            brokenPreview !== (f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`) && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}
+              key={`summary-${f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`}`}
               alt={`Preview for ${f.title || "event"}`}
               width={800}
               height={450}
               style={{ width: "100%", maxHeight: 150, objectFit: "cover", borderRadius: 8, marginBottom: 10 }}
-              onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+              onError={() =>
+                setBrokenPreview(f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`)
+              }
             />
           )}
           <div className="spread">
@@ -821,6 +912,7 @@ const LABELS: Record<string, string> = {
   description: "Short description",
   sessions: "Date/time",
   location: "Street address",
+  urlLink: "Online event URL",
   website: "Website",
   imageCdnUrl: "Image",
   contactEmail: "Contact email",
@@ -835,6 +927,7 @@ const READINESS = [
   { key: "description", label: "Short description" },
   { key: "sessions", label: "At least one date" },
   { key: "location", label: "Address (if in person)" },
+  { key: "urlLink", label: "Online link (if online)" },
   { key: "cats", label: "A category" },
   { key: "sponsors", label: "A sponsor" },
   { key: "imageCdnUrl", label: "An image" },

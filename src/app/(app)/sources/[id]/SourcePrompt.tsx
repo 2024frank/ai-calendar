@@ -24,33 +24,41 @@ export function SourcePrompt({
   async function save() {
     setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/sources/${sourceId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ specialInstructions: text }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setMsg(d.error || "Could not save.");
-      return;
+    try {
+      const res = await fetch(`/api/sources/${sourceId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ specialInstructions: text }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setMsg(d.error || "Could not save.");
+        return;
+      }
+      setMsg("Saved.");
+      router.refresh();
+      setTimeout(() => setMsg(null), 2500);
+    } catch {
+      setMsg("Network error. The prompt was not saved.");
+    } finally {
+      setBusy(false);
     }
-    setMsg("Saved.");
-    router.refresh();
-    setTimeout(() => setMsg(null), 2500);
   }
 
   return (
     <div className="card">
       <div className="spread" style={{ marginBottom: 8 }}>
         <h3>Source prompt</h3>
-        {msg && <span className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>}
+        {msg && <span role="status" className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>}
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
         Only what is unusual about this source. The house rules (event types, the
         fields, one image per event, no em dashes) are built in and always apply.
       </div>
       <textarea
+        id="source-prompt"
+        name="specialInstructions"
+        aria-label="Source prompt"
         className="input"
         style={{ minHeight: 220, fontFamily: "ui-monospace, monospace", fontSize: 13, lineHeight: 1.5 }}
         value={text}

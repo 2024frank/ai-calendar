@@ -221,7 +221,7 @@ export const events = mysqlTable(
     description: text("description"),
     extendedDescription: text("extended_description"),
     sessions: json("sessions"), // [{startTime,endTime}] unix seconds
-    startTimeMax: int("start_time_max"), // latest session start (unix secs) for expiry sweeps
+    startTimeMax: int("start_time_max"), // latest session end (unix secs) for expiry sweeps
     locationType: varchar("location_type", { length: 8 }),
     location: text("location"),
     placeName: varchar("place_name", { length: 200 }),
@@ -234,7 +234,8 @@ export const events = mysqlTable(
     sponsors: json("sponsors"),
     buttons: json("buttons"),
     imageCdnUrl: varchar("image_cdn_url", { length: 2048 }),
-    // Base64 JPEG for images we build ourselves, e.g. merged Apollo posters.
+    // Keep inline image bytes below MySQL TEXT's 64 KB ceiling. Image helpers
+    // enforce the limit before writes so deploys need no out-of-band migration.
     imageData: text("image_data"),
     website: varchar("website", { length: 2048 }),
     registrationUrl: varchar("registration_url", { length: 2048 }),

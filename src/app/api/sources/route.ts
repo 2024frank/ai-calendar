@@ -43,7 +43,13 @@ export async function POST(req: Request) {
     .filter(Boolean);
   const url = urls[0] ?? "";
   const specialInstructions = String(body.specialInstructions ?? "").trim() || null;
-  const sourceType = body.sourceType === "email" ? "email" : "web";
+  if (body.sourceType === "email") {
+    return NextResponse.json(
+      { error: "Email sources are not supported yet. Add a website or calendar link." },
+      { status: 400 },
+    );
+  }
+  const sourceType = "web" as const;
   const scheduleCron = "schedule" in body ? valueToCron(String(body.schedule)) : null;
   const lookaheadRaw = Number(body.lookaheadDays);
   const lookaheadDays =
@@ -53,10 +59,10 @@ export async function POST(req: Request) {
 
   if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
   if (!communityId) return NextResponse.json({ error: "A community is required." }, { status: 400 });
-  if (sourceType === "web" && !url) {
+  if (!url) {
     return NextResponse.json({ error: "A link is required for a web source." }, { status: 400 });
   }
-  if (sourceType === "web" && urls.some((candidate) => !isPublicHttpUrl(candidate))) {
+  if (urls.some((candidate) => !isPublicHttpUrl(candidate))) {
     return NextResponse.json(
       { error: "Source links must use a public http or https address." },
       { status: 400 },

@@ -29,9 +29,9 @@ That's the whole loop. Add a source once, and it keeps itself up to date.
 - Images that live behind a bot wall get downloaded by the agent and sent along as data, since the server can't reach them.
 - Duplicates are judged by what the event actually is, not by matching strings, and each one links to the version it matched so a reviewer can check.
 - Events delete themselves once they're over, so the calendar only holds what's coming up.
-- Every event links back to the exact page it came from, and an event whose source link is dead gets dropped, since a fabricated link usually means a fabricated event.
+- Every event links back to the exact page it came from. If that detail URL is dead, the server backs up to the nearest working parent or listing page so reviewers are not sent to an error page.
 - Every run is written down step by step (each fetch, each model call, each decision) and shown on a live timeline, so a run never just hangs with no explanation.
-- Turning a source over to automatic publishing also releases whatever was already waiting behind it, so the setting applies to the backlog and not just to the next run. Because that cannot be undone, the switch says how many events it is about to send before it sends them.
+- Turning a source over to automatic publishing also releases whatever was already waiting behind it, so the setting applies to the backlog and not just to the next run. Because that cannot be undone, the switch warns first and reports how many events were processed afterward.
 
 It is multi-tenant: one install serves several communities, each with its own sources, calendar, and destination. A person can belong to more than one and switch between them.
 
@@ -48,7 +48,7 @@ The app sends four emails: a sign-in link, a password setup or reset, an invite 
 | Community | One tenant. Has its own sources, users, calendar, and destination. |
 | Source | Where events come from. Usually a website. |
 | Destination | Where approved events get pushed, like CommunityHub. Optional. |
-| Mode | `restricted` (a person reviews first) or `unrestricted` (publish on its own, including anything already waiting). Set per source, or inherited from the community. |
+| Mode | `needs_approval` (a person reviews first), `auto_send` (send automatically), or `auto_publish` (publish automatically). Set per source, or inherited from the community. |
 | Run | One execution of the agent against a source, with its full trail saved. |
 
 Three roles: platform admin (everything), community admin (their own community), reviewer (works the queue).
@@ -78,7 +78,7 @@ npm run dev
 | `DATABASE_HOST` / `PORT` / `USERNAME` / `PASSWORD` / `NAME` | The app's MySQL database |
 | `PERPLEXITY_API_KEY` | The extraction agent |
 | `AUTH_JWT_SECRET` | Signing the session cookie |
-| `AGENT_INGEST_SECRET` | Signing the token an agent uses to post results back |
+| `AGENT_INGEST_SECRET` | Signs the optional legacy callback used by an external extraction worker |
 | `CRON_SECRET` | Authorizes the daily cron |
 | `APP_URL` | Public base URL, used in sign-in links |
 | `HOSTINGER_EMAIL`, `HOSTINGER_EMAIL_PASSWORD` | The mailbox mail is sent from. `HOSTINGER_SMTP_HOST` and `_PORT` override the defaults |

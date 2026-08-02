@@ -50,6 +50,11 @@ export async function POST(req: Request) {
       .update(users)
       .set({ passwordHash: hashPassword(password), mustSetPassword: false })
       .where(eq(users.id, account.id));
+    // Password replacement invalidates every outstanding sign-in/reset link.
+    await tx
+      .update(loginTokens)
+      .set({ consumedAt: new Date() })
+      .where(and(eq(loginTokens.userId, account.id), isNull(loginTokens.consumedAt)));
     return account;
   });
 

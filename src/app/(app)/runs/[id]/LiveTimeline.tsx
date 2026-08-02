@@ -12,9 +12,7 @@ const KIND_TONE: Record<string, string> = {
   run_finished: "var(--good)", run_failed: "var(--bad)",
 };
 const numberFormatter = new Intl.NumberFormat("en-US");
-const timeFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-
-export function LiveTimeline({ runId }: { runId: number }) {
+export function LiveTimeline({ runId, timeZone }: { runId: number; timeZone: string }) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [status, setStatus] = useState("running");
   const [tokens, setTokens] = useState({ prompt: 0, completion: 0 });
@@ -60,6 +58,12 @@ export function LiveTimeline({ runId }: { runId: number }) {
 
   const live = status === "running";
   const totalTokens = tokens.prompt + tokens.completion;
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
   return (
     <section aria-labelledby="timeline-title">

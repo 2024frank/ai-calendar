@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { getSession, isAdmin } from "@/lib/auth";
 import { currentCommunityId } from "@/lib/data";
+import { csvCell } from "@/lib/csv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,10 +90,9 @@ export async function GET(req: Request) {
     );
     // Quote everything and double any quote inside, so a lesson containing a
     // comma or a newline cannot break the row apart in a spreadsheet.
-    const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [
       columns.join(","),
-      ...records.map((r) => columns.map((c) => cell((r as Record<string, unknown>)[c])).join(",")),
+      ...records.map((r) => columns.map((c) => csvCell((r as Record<string, unknown>)[c])).join(",")),
     ].join("\n");
     return new Response("\uFEFF" + csv, {
       headers: {

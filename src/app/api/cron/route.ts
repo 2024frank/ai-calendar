@@ -1,8 +1,9 @@
 import { NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
-import { drainJobs, enqueueExtraction, requeueStaleJobs } from "@/lib/jobs";
+import { enqueueExtraction, requeueStaleJobs } from "@/lib/jobs";
 import { sweepRateLimitBuckets } from "@/lib/rateLimit";
 import { dueScheduledSources, reapStaleRuns, sweepExpiredEvents } from "@/lib/retention";
+import { dispatchWorker } from "@/lib/workerDispatch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,21 +15,18 @@ export const maxDuration = 300;
  * It (1) purges past-date unpublished events and (2) starts runs for any
  * scheduled source whose interval has elapsed.
  */
-async function authorize(req: Request): Promise<boolean> {
+function hasCronBearer(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth === `Bearer ${secret}`) return true;
-  }
+  return Boolean(secret && req.headers.get("authorization") === `Bearer ${secret}`);
+}
+
+async function authorizePost(req: Request): Promise<boolean> {
+  if (hasCronBearer(req)) return true;
   const s = await getSession();
   return s?.role === "platform_admin";
 }
 
-export async function GET(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-
+async function runCron(requestOrigin: string) {
   const recoveredJobs = await requeueStaleJobs();
   const reaped = await reapStaleRuns();
   const deleted = await sweepExpiredEvents();
@@ -43,11 +41,11 @@ export async function GET(req: Request) {
     const queued = await enqueueExtraction(s.id, s.communityId);
     started.push({ sourceId: s.id, ...queued });
   }
-  // This keeps the current one-deployment setup responsive. The durable rows
-  // remain safe if the invocation is terminated, and /api/internal/jobs can be
-  // called by dedicated workers as traffic grows.
+  // Start a sequential serverless worker chain. Each extraction gets its own
+  // invocation and the final worker dispatches the next, so all due sources are
+  // serviced without running a dozen model jobs in one function.
   after(async () => {
-    await drainJobs(2);
+    await dispatchWorker(0, requestOrigin);
   });
 
   return NextResponse.json({
@@ -57,9 +55,24 @@ export async function GET(req: Request) {
     expiredDeleted: deleted,
     expiredRateLimitsDeleted,
     scheduledRunsStarted: started.length,
+    workerDispatchScheduled: true,
     started,
   });
 }
 
-// Vercel Cron issues GET; allow POST for manual/admin triggers too.
-export const POST = GET;
+// Vercel Cron issues GET. GET mutates state, so it is bearer-only and can never
+// be triggered by luring a signed-in admin to a cross-site link.
+export async function GET(req: Request) {
+  if (!hasCronBearer(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  return runCron(new URL(req.url).origin);
+}
+
+// Interactive admin runs use POST and therefore pass the proxy's Origin check.
+export async function POST(req: Request) {
+  if (!(await authorizePost(req))) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  return runCron(new URL(req.url).origin);
+}

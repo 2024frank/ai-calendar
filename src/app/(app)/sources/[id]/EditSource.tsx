@@ -3,54 +3,56 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-/** Edit a source's name, its links, and its special instructions. */
+/** Edit a source's name and links. SourcePrompt is the sole prompt owner. */
 export function EditSource({
   sourceId,
   name: initialName,
   urls: initialUrls,
-  special: initialSpecial,
 }: {
   sourceId: number;
   name: string;
   urls: string[];
-  special: string;
 }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [urls, setUrls] = useState(initialUrls.join("\n"));
-  const [special, setSpecial] = useState(initialSpecial);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
-  const dirty =
-    name !== initialName ||
-    urls !== initialUrls.join("\n") ||
-    special !== initialSpecial;
+  const dirty = name !== initialName || urls !== initialUrls.join("\n");
 
   async function save() {
     setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/sources/${sourceId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name,
-        urls: urls.split(/[\n,]+/).map((u) => u.trim()).filter(Boolean),
-        specialInstructions: special,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setBusy(false);
-      setMsg(data.error || "Could not save.");
-      return;
-    }
+    try {
+      const patch: Record<string, unknown> = {};
+      if (name !== initialName) patch.name = name;
+      if (urls !== initialUrls.join("\n")) {
+        patch.urls = urls
+          .split(/[\n,]+/)
+          .map((u) => u.trim())
+          .filter(Boolean);
+      }
+      const res = await fetch(`/api/sources/${sourceId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(data.error || "Could not save.");
+        return;
+      }
 
-    setBusy(false);
-    setMsg("Saved.");
-    router.refresh();
-    setTimeout(() => setMsg(null), 2500);
+      setMsg("Saved.");
+      router.refresh();
+      setTimeout(() => setMsg(null), 2500);
+    } catch {
+      setMsg("Network error. Nothing was saved.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -65,13 +67,15 @@ export function EditSource({
       {open && (
         <div className="grid" style={{ gap: 14 }}>
           <div>
-            <label className="label">Source name</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="label" htmlFor="edit-source-name">Source name</label>
+            <input id="edit-source-name" name="name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
 
           <div>
-            <label className="label">Links</label>
+            <label className="label" htmlFor="edit-source-links">Links</label>
             <textarea
+              id="edit-source-links"
+              name="urls"
               className="input"
               rows={3}
               value={urls}
@@ -83,23 +87,12 @@ export function EditSource({
             </div>
           </div>
 
-          <div>
-            <label className="label">Special instructions</label>
-            <textarea
-              className="input"
-              rows={4}
-              value={special}
-              onChange={(e) => setSpecial(e.target.value)}
-              placeholder="Only what is unusual about this source. You can use {source_name}, {today}, {org_name}, {contact_email}."
-            />
-          </div>
-
           <div className="row" style={{ gap: 8, alignItems: "center" }}>
             <button className="btn primary" type="button" disabled={busy || !dirty} onClick={save}>
               {busy ? "Saving…" : "Save"}
             </button>
             {msg && (
-              <span className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>
+              <span role="status" className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>
             )}
           </div>
         </div>

@@ -7,6 +7,41 @@ export const MAX_POSTER_IMAGES = 4;
 const POSTER_HEIGHT = 900;
 const MAX_POSTER_WIDTH = 1_600;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+// 45 KB becomes at most 60 KB after base64 encoding, safely inside MySQL TEXT.
+export const MAX_INLINE_IMAGE_BYTES = 45_000;
+
+/** Convert arbitrary image bytes to a compact JPEG safe for the inline column. */
+export async function fitInlineImage(input: Buffer): Promise<Buffer | null> {
+  const attempts = [
+    { width: 1_000, quality: 76 },
+    { width: 840, quality: 66 },
+    { width: 680, quality: 56 },
+    { width: 520, quality: 46 },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const output = await sharp(input, {
+        failOn: "error",
+        limitInputPixels: 40_000_000,
+        sequentialRead: true,
+      })
+        .rotate()
+        .resize({
+          width: attempt.width,
+          height: attempt.width,
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: attempt.quality, mozjpeg: true })
+        .toBuffer();
+      if (output.length && output.length <= MAX_INLINE_IMAGE_BYTES) return output;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 /** Fetch an image with a hard byte ceiling so a huge file cannot exhaust memory. */
 async function fetchImageBytes(url: string): Promise<Buffer | null> {
@@ -58,7 +93,7 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
     }
   }
   if (!parts.length) return null;
-  if (parts.length === 1) return parts[0].data;
+  if (parts.length === 1) return fitInlineImage(parts[0].data);
 
   const totalWidth = parts.reduce((sum, p) => sum + p.width, 0);
   if (!Number.isSafeInteger(totalWidth) || totalWidth <= 0) return null;
@@ -74,7 +109,7 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
     return item;
   });
 
-  return sharp({
+  const merged = await sharp({
     create: {
       width: totalWidth,
       height: canvasHeight,
@@ -85,4 +120,5 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
     .composite(overlays)
     .jpeg({ quality: 85 })
     .toBuffer();
+  return fitInlineImage(merged);
 }

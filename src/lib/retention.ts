@@ -1,15 +1,15 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, lt, max, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { events, runs, sources } from "@/db/schema";
-import { cronToValue } from "./schedule";
+import { communities, events, runs, sources } from "@/db/schema";
+import { scheduledSourceIsDue } from "./schedule";
 
 /**
  * Delete events once their date has passed. Every event whose start time is in
  * the past is removed, in every status, approved and submitted included: the
  * calendar shows what is upcoming, not a permanent archive. For an event with
- * more than one date, start_time_max is its last date, so a run stays until it
- * is fully over. Events with no date are left alone.
+ * more than one date, start_time_max stores its latest end, so it stays until
+ * it is fully over. Events with no date are left alone.
  */
 export async function sweepExpiredEvents(nowSecs = Math.floor(Date.now() / 1000)) {
   const [res] = await db
@@ -27,13 +27,20 @@ export async function sweepExpiredEvents(nowSecs = Math.floor(Date.now() / 1000)
  * are the exception, since idleness there just means nobody is clicking.
  */
 export async function reapStaleRuns(nowMs = Date.now()) {
+  // Extraction runs are owned by the durable queue. Its lease recovery is the
+  // only code allowed to retry or terminalize them while a queued/running job
+  // exists; the generic reaper handles orphan runs only.
+  const hasNoActiveJob = sql`not exists (
+    select 1 from jobs j
+    where j.run_id = ${runs.id} and j.status in ('queued', 'running')
+  )`;
   const stale = await db
     .select({ id: runs.id, sourceId: runs.sourceId, kind: runs.runKind })
     .from(runs)
     .where(
       and(
         eq(runs.status, "running"),
-        ne(runs.phase, "queued"),
+        hasNoActiveJob,
         lt(runs.deadlineAt, new Date(nowMs)),
       ),
     );
@@ -44,7 +51,10 @@ export async function reapStaleRuns(nowMs = Date.now()) {
     .where(
       and(
         eq(runs.status, "running"),
-        ne(runs.phase, "queued"),
+        hasNoActiveJob,
+        // Without this guard, a brand-new run with no timeline rows yet is
+        // immediately considered silent and failed on the next page load.
+        lt(runs.startedAt, new Date(nowMs - 15 * 60_000)),
         sql`not exists (select 1 from run_events re where re.run_id = ${runs.id} and re.ts > ${new Date(nowMs - 15 * 60_000)})`,
       ),
     );
@@ -85,22 +95,19 @@ export async function reapStaleRuns(nowMs = Date.now()) {
   return dead.length;
 }
 
-// Minimum spacing per schedule choice, so a frequent cron tick can't double-run
-// a source. Values are ~90% of the nominal interval to allow for tick jitter.
-const MIN_INTERVAL_SECS: Record<string, number> = {
-  twice_daily: 11 * 3600,
-  daily: 22 * 3600,
-  weekdays: 22 * 3600,
-  every_3_days: 65 * 3600,
-  weekly: 160 * 3600,
-};
-
 /** Active, scheduled sources whose interval has elapsed since their last run. */
 export async function dueScheduledSources(nowMs = Date.now()) {
   const rows = await db
-    .select()
+    .select({ source: sources, timeZone: communities.timezone })
     .from(sources)
-    .where(and(eq(sources.active, true), isNotNull(sources.scheduleCron)));
+    .innerJoin(communities, eq(communities.id, sources.communityId))
+    .where(
+      and(
+        eq(sources.active, true),
+        isNotNull(sources.scheduleCron),
+        eq(communities.status, "active"),
+      ),
+    );
 
   if (!rows.length) return [];
 
@@ -108,21 +115,24 @@ export async function dueScheduledSources(nowMs = Date.now()) {
     .select({ sourceId: runs.sourceId, last: max(runs.startedAt) })
     .from(runs)
     .where(
-      inArray(
-        runs.sourceId,
-        rows.map((r) => r.id),
+      and(
+        inArray(
+          runs.sourceId,
+          rows.map((r) => r.source.id),
+        ),
+        eq(runs.runKind, "extraction"),
+        eq(runs.status, "completed"),
       ),
     )
     .groupBy(runs.sourceId);
   const lastBySource = new Map(lastRuns.map((r) => [r.sourceId, r.last]));
 
-  const due: typeof rows = [];
-  for (const s of rows) {
+  const due: (typeof sources.$inferSelect)[] = [];
+  for (const row of rows) {
+    const s = row.source;
     if (s.discoveryStatus !== "ready") continue; // no recipe yet — Discovery runs first
-    const interval = MIN_INTERVAL_SECS[cronToValue(s.scheduleCron)] ?? 22 * 3600;
     const last = lastBySource.get(s.id);
-    const lastMs = last ? new Date(last as unknown as string).getTime() : 0;
-    if (nowMs - lastMs >= interval * 1000) due.push(s);
+    if (scheduledSourceIsDue(s.scheduleCron, last, nowMs, row.timeZone)) due.push(s);
   }
   return due;
 }

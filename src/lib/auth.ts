@@ -4,7 +4,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { communities, users } from "@/db/schema";
 
 const COOKIE = "ac_session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -32,7 +32,14 @@ function secret() {
 }
 
 export async function createSession(s: Session) {
-  const token = await new SignJWT({ ...s })
+  const [account] = await db
+    .select({ updatedAt: users.updatedAt, status: users.status })
+    .from(users)
+    .where(eq(users.id, s.uid))
+    .limit(1);
+  if (!account || account.status !== "active") throw new Error("Cannot create a session for this account.");
+  const userVersion = new Date(account.updatedAt).getTime();
+  const token = await new SignJWT({ ...s, uv: userVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
@@ -62,10 +69,14 @@ export async function getSession(): Promise<Session | null> {
   const raw = (await cookies()).get(COOKIE)?.value;
   if (!raw) return null;
   let uid: number;
+  let userVersion: number;
   try {
     const { payload } = await jwtVerify(raw, secret());
     uid = Number(payload.uid);
+    userVersion = Number(payload.uv);
     if (!Number.isInteger(uid) || uid < 1) return null;
+    // Cookies issued before session-versioning are intentionally revoked.
+    if (!Number.isFinite(userVersion)) return null;
   } catch {
     return null;
   }
@@ -82,11 +93,16 @@ export async function getSession(): Promise<Session | null> {
       communityId: users.communityId,
       canReviewAllSources: users.canReviewAllSources,
       status: users.status,
+      updatedAt: users.updatedAt,
+      communityStatus: communities.status,
     })
     .from(users)
+    .leftJoin(communities, eq(communities.id, users.communityId))
     .where(eq(users.id, uid))
     .limit(1);
   if (!user || user.status !== "active") return null;
+  if (new Date(user.updatedAt).getTime() !== userVersion) return null;
+  if (user.role !== "platform_admin" && user.communityStatus !== "active") return null;
 
   return {
     uid: user.id,

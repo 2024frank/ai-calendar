@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runEvents } from "@/db/schema";
+import { hasDatabaseErrorCode } from "./dbError";
 
 /** Append one step to a run's observable trail. */
 export async function emit(
@@ -10,18 +11,29 @@ export async function emit(
   label: string,
   data?: Record<string, unknown>,
 ) {
-  const [[row]] = (await db.execute(
-    sql`select coalesce(max(seq),0)+1 as next from run_events where run_id = ${runId}`,
-  )) as unknown as [{ next: number }[]];
-  const seq = Number(row?.next ?? 1);
-  await db.insert(runEvents).values({
-    runId,
-    seq,
-    kind,
-    label: label.slice(0, 255),
-    data: data ?? null,
-  });
-  return seq;
+  // The extraction call and its sandbox callback can append concurrently.
+  // The unique (run_id, seq) index is the final arbiter; retry a collision with
+  // the new max instead of failing the whole run over a timeline number.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const [[row]] = (await db.execute(
+      sql`select coalesce(max(seq),0)+1 as next from run_events where run_id = ${runId}`,
+    )) as unknown as [{ next: number }[]];
+    const seq = Number(row?.next ?? 1);
+    try {
+      await db.insert(runEvents).values({
+        runId,
+        seq,
+        kind,
+        label: label.slice(0, 255),
+        data: data ?? null,
+      });
+      return seq;
+    } catch (error) {
+      const duplicate = hasDatabaseErrorCode(error, "ER_DUP_ENTRY");
+      if (!duplicate || attempt === 4) throw error;
+    }
+  }
+  throw new Error("Could not append run event.");
 }
 
 export async function listRunEvents(runId: number, afterId = 0) {

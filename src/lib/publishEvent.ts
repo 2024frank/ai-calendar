@@ -1,17 +1,30 @@
 import "server-only";
 import { createHash } from "crypto";
-import { and, eq } from "drizzle-orm";
-import sharp from "sharp";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { destinations, events, publishSubmissions, sources } from "@/db/schema";
+import { events, publishSubmissions } from "@/db/schema";
 import {
   fetchPublicBytes,
   readResponseBytesLimited,
 } from "./fetchPage";
-import { assertPublicHttpUrl } from "./publicUrl";
+import { assertPublicHttpUrl, fetchPinnedPublicUrl } from "./publicUrl";
 import { POST_TYPE_IDS } from "./taxonomy";
+import { resolveDestination } from "./destination";
+import {
+  buttonsWithRegistration,
+  publishedImageUrl,
+  storedEventIssues,
+  submissionBlocksRetry,
+} from "./publishPolicy";
+import { fitInlineImage } from "./mergePosters";
+import { imagePublishToken } from "./imagePublishToken";
+import { hasDatabaseErrorCode } from "./dbError";
 
 type EventRow = typeof events.$inferSelect;
+
+function affectedRows(result: unknown): number {
+  return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
+}
 
 export type PublishResult = {
   ok: boolean;
@@ -24,11 +37,18 @@ export type PublishResult = {
 export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string) {
   const sessions = (ev.sessions ?? []) as { startTime: number; endTime: number }[];
   const postTypeId = ((ev.postTypeIds ?? []) as number[]).filter((id) => POST_TYPE_IDS.includes(id));
-  const buttons = (ev.buttons ?? []) as { title: string; link: string }[];
+  const buttons = buttonsWithRegistration(
+    (ev.buttons ?? []) as { title: string; link: string }[],
+    ev.registrationUrl,
+  );
   const screensIds = (ev.screensIds ?? []) as number[];
 
-  // An image we generated ourselves is served from this app.
-  const image = ev.imageData ? `${appUrl}/api/events/${ev.id}/image.jpg` : (ev.imageCdnUrl ?? undefined);
+  // Never hand a third-party image URL to CommunityHub. Its server fetches the
+  // URL, so all source images cross our pinned fetch boundary first and are
+  // served from this application.
+  const image = ev.imageData
+    ? publishedImageUrl(ev.id, ev.imageData, appUrl, imagePublishToken(ev.id, ev.imageData))
+    : undefined;
 
   const payload: Record<string, unknown> = {
     eventType: ev.eventType ?? "ot",
@@ -127,7 +147,13 @@ const permanentFailure = (status: number) => status === 400 || status === 401 ||
  * lose the event over it, the bytes are stored on the event and the URL is
  * swapped for one on this app, which CommunityHub can always reach.
  */
-async function rehostImage(eventId: number, url: string, appUrl: string): Promise<string | null> {
+type RehostedImage = { url: string; imageData: string };
+
+async function rehostImage(
+  eventId: number,
+  url: string,
+  appUrl: string,
+): Promise<RehostedImage | null> {
   try {
     const fetched = await fetchPublicBytes(url, {
       maxBytes: 8 * 1024 * 1024,
@@ -146,20 +172,15 @@ async function rehostImage(eventId: number, url: string, appUrl: string): Promis
     const isGif = buf[0] === 0x47 && buf[1] === 0x49;
     const isWebp = buf.subarray(8, 12).toString() === "WEBP";
     if (!buf.length || !(isJpeg || isPng || isGif || isWebp)) return null;
-    const jpeg = await sharp(buf, {
-      failOn: "error",
-      limitInputPixels: 40_000_000,
-      sequentialRead: true,
-    })
-      .rotate()
-      .jpeg({ quality: 88 })
-      .toBuffer();
-    if (!jpeg.length || jpeg.byteLength > 8 * 1024 * 1024) return null;
+    const jpeg = await fitInlineImage(buf);
+    if (!jpeg) return null;
+    const imageData = jpeg.toString("base64");
+    const hostedUrl = `${appUrl.replace(/\/+$/, "")}/api/events/${eventId}/image.jpg`;
     await db
       .update(events)
-      .set({ imageData: jpeg.toString("base64") })
+      .set({ imageData, imageCdnUrl: hostedUrl })
       .where(eq(events.id, eventId));
-    return `${appUrl}/api/events/${eventId}/image.jpg`;
+    return { url: hostedUrl, imageData };
   } catch {
     return null;
   }
@@ -168,33 +189,34 @@ async function rehostImage(eventId: number, url: string, appUrl: string): Promis
 export async function publishEvent(
   eventId: number,
   finalStatus: "approved" | "submitted" | "published" = "submitted",
-  /** Set once we have already swapped the image, so this cannot loop. */
-  imageRehosted = false,
 ): Promise<PublishResult> {
   const [ev] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!ev) return { ok: false, state: "failed", message: "Event not found." };
+  const validationIssues = storedEventIssues(ev);
+  if (validationIssues.length) {
+    return {
+      ok: false,
+      state: "failed",
+      message: `This event is not ready to publish: ${validationIssues.join(", ")}.`,
+    };
+  }
 
-  // Which destination: the source's own, else the community's default.
-  const [src] = ev.sourceId
-    ? await db.select().from(sources).where(eq(sources.id, ev.sourceId)).limit(1)
-    : [undefined];
-  const destId = src?.destinationId ?? null;
-  const [dest] = destId
-    ? await db.select().from(destinations).where(eq(destinations.id, destId)).limit(1)
-    : await db
-        .select()
-        .from(destinations)
-        .where(and(eq(destinations.communityId, ev.communityId), eq(destinations.active, true)))
-        .limit(1);
+  // Source override, then the community's configured default, then a legacy
+  // active fallback. Inventory and extraction prompts use this same resolver.
+  const { destination: dest, error: destinationError } = await resolveDestination(
+    ev.communityId,
+    ev.sourceId,
+  );
+
+  if (destinationError) {
+    return { ok: false, state: "failed", message: destinationError };
+  }
 
   // No endpoint configured: the event simply lives in this community's calendar.
   if (!dest) {
+    await db.update(events).set({ status: finalStatus }).where(eq(events.id, ev.id));
     return { ok: true, state: "skipped", message: "No endpoint configured; kept in the AI calendar." };
   }
-  if (dest.communityId !== ev.communityId) {
-    return { ok: false, state: "failed", message: "The configured destination belongs to another community." };
-  }
-
   let cfg: { submit_url?: string };
   try {
     cfg = (typeof dest.config === "string" ? JSON.parse(dest.config) : dest.config) as {
@@ -216,7 +238,20 @@ export async function publishEvent(
   }
 
   const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
-  const payload = buildPayload(ev, process.env.PUBLISH_EMAIL || "", appUrl);
+  let publishableEvent = ev;
+  if (!ev.imageData && ev.imageCdnUrl) {
+    const hosted = await rehostImage(ev.id, ev.imageCdnUrl, appUrl);
+    if (!hosted) {
+      return {
+        ok: false,
+        state: "failed",
+        message:
+          "The event image could not be securely downloaded and re-hosted. Replace the image before publishing.",
+      };
+    }
+    publishableEvent = { ...ev, imageData: hosted.imageData, imageCdnUrl: hosted.url };
+  }
+  const payload = buildPayload(publishableEvent, process.env.PUBLISH_EMAIL || "", appUrl);
   const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 
   // Already sent this exact payload? Never send it twice.
@@ -235,50 +270,77 @@ export async function publishEvent(
   if (existing?.state === "succeeded") {
     return { ok: true, state: "succeeded", message: "Already published.", remoteId: existing.externalPostId };
   }
-  if (existing?.state === "sending") {
+  if (submissionBlocksRetry(existing?.state)) {
     return {
       ok: false,
       state: "unknown",
-      message: "A previous send is unresolved. Check CommunityHub before retrying.",
+      message: "A previous send is unresolved. Reconcile it in CommunityHub before retrying.",
     };
   }
 
+  let submissionId: number;
   if (existing) {
-    await db
+    const [claimed] = await db
       .update(publishSubmissions)
       .set({ state: "sending", error: null })
-      .where(eq(publishSubmissions.id, existing.id));
+      .where(
+        and(
+          eq(publishSubmissions.id, existing.id),
+          inArray(publishSubmissions.state, ["prepared", "failed"]),
+        ),
+      );
+    if (affectedRows(claimed) !== 1) {
+      return {
+        ok: false,
+        state: "unknown",
+        message: "Another publish attempt claimed this event. Refresh before trying again.",
+      };
+    }
+    submissionId = existing.id;
   } else {
-    await db.insert(publishSubmissions).values({
-      eventId: ev.id,
-      destinationId: dest.id,
-      payloadHash,
-      state: "sending",
-      payload,
-    });
+    try {
+      const [inserted] = await db.insert(publishSubmissions).values({
+        eventId: ev.id,
+        destinationId: dest.id,
+        payloadHash,
+        state: "sending",
+        payload,
+      });
+      submissionId = Number((inserted as { insertId?: number }).insertId);
+      if (!Number.isInteger(submissionId) || submissionId < 1) {
+        throw new Error("Publish claim did not return an id.");
+      }
+    } catch (error) {
+      if (hasDatabaseErrorCode(error, "ER_DUP_ENTRY")) {
+        return {
+          ok: false,
+          state: "unknown",
+          message: "Another publish attempt claimed this event. Refresh before trying again.",
+        };
+      }
+      throw error;
+    }
   }
 
   let res: Response;
+  let closeResponse: (() => Promise<void>) | null = null;
   try {
-    res = await fetch(cfg.submit_url, {
+    const pinned = await fetchPinnedPublicUrl(cfg.submit_url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
       redirect: "manual",
     });
+    res = pinned.response;
+    closeResponse = pinned.close;
   } catch (e) {
     const message = e instanceof Error ? e.message : "Request failed";
     // Ambiguous: keep `sending` so nothing retries on its own.
     await db
       .update(publishSubmissions)
       .set({ error: { message } })
-      .where(
-        and(
-          eq(publishSubmissions.eventId, ev.id),
-          eq(publishSubmissions.payloadHash, payloadHash),
-        ),
-      );
+      .where(eq(publishSubmissions.id, submissionId));
     return { ok: false, state: "unknown", message: `Could not reach CommunityHub: ${message}` };
   }
 
@@ -287,6 +349,9 @@ export async function publishEvent(
     body = new TextDecoder().decode(await readResponseBytesLimited(res, 256 * 1024));
   } catch {
     body = "Response body exceeded 256 KB.";
+  } finally {
+    if (res.body && !res.bodyUsed) await res.body.cancel().catch(() => undefined);
+    await closeResponse?.();
   }
   if (!res.ok) {
     const permanent = permanentFailure(res.status);
@@ -297,20 +362,7 @@ export async function publishEvent(
         state: permanent ? "failed" : "accepted_unreconciled",
         error: { status: res.status, body: body.slice(0, 500) },
       })
-      .where(
-        and(eq(publishSubmissions.eventId, ev.id), eq(publishSubmissions.payloadHash, payloadHash)),
-      );
-    // CommunityHub could not fetch the picture from its original host. Put the
-    // image on our own domain and send it again; this is the whole failure for
-    // an event that is otherwise ready.
-    if (!imageRehosted && /failed to download image/i.test(body) && ev.imageCdnUrl) {
-      const hosted = await rehostImage(ev.id, ev.imageCdnUrl, appUrl);
-      if (hosted) {
-        await db.update(events).set({ imageCdnUrl: hosted }).where(eq(events.id, ev.id));
-        return publishEvent(eventId, finalStatus, true);
-      }
-    }
-
+      .where(eq(publishSubmissions.id, submissionId));
     return {
       ok: false,
       state: permanent ? "failed" : "unknown",
@@ -330,9 +382,7 @@ export async function publishEvent(
   await db
     .update(publishSubmissions)
     .set({ state: "succeeded", externalPostId: remoteId, error: null })
-    .where(
-      and(eq(publishSubmissions.eventId, ev.id), eq(publishSubmissions.payloadHash, payloadHash)),
-    );
+    .where(eq(publishSubmissions.id, submissionId));
   // The status reflects the PATH, not just "reached the hub". "approved" means
   // a person here read it. "submitted" means nobody here did and it is waiting
   // on CommunityHub. "published" means nobody checked it at either end. All

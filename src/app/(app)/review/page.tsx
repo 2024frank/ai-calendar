@@ -6,6 +6,10 @@ import { ButtonLink, Card, EmptyState, PageHeader, StatusBadge, TableShell } fro
 import { EVENT_TYPES } from "@/lib/taxonomy";
 import { ReviewFilters } from "./ReviewFilters";
 import { FixAllButton } from "./FixAllButton";
+import { db } from "@/db";
+import { communities } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { currentCommunityId } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -47,14 +51,17 @@ function needsList(reason: string | null): string | null {
   return names.length > 3 ? `${shown} +${names.length - 3}` : shown;
 }
 
-const sessionFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-});
-
-function firstSessionDate(sessions: unknown): string {
+function firstSessionDate(sessions: unknown, timeZone: string): string {
   if (!Array.isArray(sessions) || sessions.length === 0) return "—";
   const start = (sessions[0] as { startTime?: number })?.startTime;
-  return start ? sessionFormatter.format(new Date(start * 1000)) : "—";
+  if (!start) return "—";
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    }).format(new Date(start * 1000));
+  } catch {
+    return fmtDate(new Date(start * 1000));
+  }
 }
 
 const typeLabel = (value: string | null) => EVENT_TYPES.find((type) => type.value === value)?.label ?? "—";
@@ -62,6 +69,11 @@ const typeLabel = (value: string | null) => EVENT_TYPES.find((type) => type.valu
 export default async function ReviewPage({ searchParams }: { searchParams: Promise<{ tab?: string; source?: string; type?: string; q?: string }> }) {
   const session = await requireUser();
   const params = await searchParams;
+  const communityId = await currentCommunityId(session);
+  const [community] = communityId
+    ? await db.select({ timezone: communities.timezone }).from(communities).where(eq(communities.id, communityId)).limit(1)
+    : [undefined];
+  const timeZone = community?.timezone ?? "America/New_York";
   const tab = TABS.find((item) => item.key === params.tab)?.key ?? "pending";
   const filter = { sourceId: params.source ? Number(params.source) : undefined, eventType: params.type || undefined, q: params.q || undefined };
   const sources = await listSources(session);
@@ -136,9 +148,9 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
                       </td>
                       <td className="muted">{sourceName.get(event.sourceId ?? -1) ?? "—"}</td>
                       <td className="muted">{typeLabel(event.eventType)}</td>
-                      <td>{firstSessionDate(event.sessions)}</td>
+                      <td>{firstSessionDate(event.sessions, timeZone)}</td>
                       <td className="muted">{(event.location ?? "").slice(0, 36) || (event.locationType === "on" ? "Online" : "—")}</td>
-                      <td>{tab === "duplicates" && event.duplicateOfEventId ? <StatusBadge tone="neutral">Duplicate of #{event.duplicateOfEventId}</StatusBadge> : tab === "pending" ? <span className="muted">{fmtDate(event.createdAt)}</span> : <EventStatus status={event.status} />}</td>
+                      <td>{tab === "duplicates" && event.duplicateOfEventId ? <StatusBadge tone="neutral">Duplicate of #{event.duplicateOfEventId}</StatusBadge> : tab === "pending" ? <span className="muted">{fmtDate(event.createdAt, timeZone)}</span> : <EventStatus status={event.status} />}</td>
                       <td><ButtonLink href={eventHref(event.id)} size="sm" icon="arrow-right">Open</ButtonLink></td>
                     </tr>
                   );

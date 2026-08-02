@@ -13,19 +13,30 @@ export function CommunitySwitcher({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Nothing to switch between.
   if (communities.length < 2) return null;
 
   async function change(id: number) {
     setBusy(true);
-    await fetch("/api/communities/switch", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ communityId: id }),
-    });
-    setBusy(false);
-    router.refresh();
+    setError(null);
+    try {
+      const res = await fetch("/api/communities/switch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ communityId: id }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Could not switch communities.");
+      }
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not switch communities.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -48,6 +59,7 @@ export function CommunitySwitcher({
           </option>
         ))}
       </select>
+      {error && <div className="muted" role="alert" style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>{error}</div>}
     </div>
   );
 }

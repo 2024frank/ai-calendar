@@ -31,21 +31,24 @@ export function SourceSettings({
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function save(patch: Record<string, unknown>) {
     setBusy(true);
     setSaved(false);
     setNote(null);
-    const res = await fetch(`/api/sources/${sourceId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      flushed?: { published: number; failed: number; remaining: number } | null;
-    };
-    setBusy(false);
-    if (res.ok) {
+    setError(null);
+    try {
+      const res = await fetch(`/api/sources/${sourceId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        flushed?: { published: number; failed: number; remaining: number } | null;
+      };
+      if (!res.ok) throw new Error(data.error || "Could not save source settings.");
       setSaved(true);
       // Say what the switch actually did to the queue, so publishing a backlog
       // is never a silent surprise.
@@ -58,6 +61,12 @@ export function SourceSettings({
       }
       router.refresh();
       setTimeout(() => setSaved(false), 2000);
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save source settings.");
+      return false;
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -70,12 +79,15 @@ export function SourceSettings({
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
         <div>
-          <label className="label">Review mode</label>
+          <label className="label" htmlFor={`source-mode-${sourceId}`}>Review mode</label>
           <select
+            id={`source-mode-${sourceId}`}
+            name="mode"
             className="input"
             value={m}
             disabled={busy}
-            onChange={(e) => {
+            onChange={async (e) => {
+              const previous = m;
               const next = e.target.value;
               const effective: ReviewMode =
                 next === "inherit" ? communityDefaultMode : (next as ReviewMode);
@@ -88,7 +100,7 @@ export function SourceSettings({
                 if (!ok) return;
               }
               setM(next);
-              save({ mode: next === "inherit" ? null : next });
+              if (!(await save({ mode: next === "inherit" ? null : next }))) setM(previous);
             }}
           >
             <option value="inherit">
@@ -106,14 +118,18 @@ export function SourceSettings({
         </div>
 
         <div>
-          <label className="label">How often to check</label>
+          <label className="label" htmlFor={`source-schedule-${sourceId}`}>How often to check</label>
           <select
+            id={`source-schedule-${sourceId}`}
+            name="schedule"
             className="input"
             value={sch}
             disabled={busy}
-            onChange={(e) => {
-              setSch(e.target.value);
-              save({ schedule: e.target.value });
+            onChange={async (e) => {
+              const previous = sch;
+              const next = e.target.value;
+              setSch(next);
+              if (!(await save({ schedule: next }))) setSch(previous);
             }}
           >
             {SCHEDULE_OPTIONS.map((o) => (
@@ -125,15 +141,18 @@ export function SourceSettings({
         </div>
 
         <div>
-          <label className="label">How far ahead to look</label>
+          <label className="label" htmlFor={`source-lookahead-${sourceId}`}>How far ahead to look</label>
           <select
+            id={`source-lookahead-${sourceId}`}
+            name="lookaheadDays"
             className="input"
             value={ahead}
             disabled={busy}
-            onChange={(e) => {
+            onChange={async (e) => {
+              const previous = ahead;
               const next = Number(e.target.value);
               setAhead(next);
-              save({ lookaheadDays: next });
+              if (!(await save({ lookaheadDays: next }))) setAhead(previous);
             }}
           >
             {LOOKAHEAD_OPTIONS.map((o) => (
@@ -145,15 +164,18 @@ export function SourceSettings({
         </div>
 
         <div>
-          <label className="label">Status</label>
+          <label className="label" htmlFor={`source-status-${sourceId}`}>Status</label>
           <select
+            id={`source-status-${sourceId}`}
+            name="status"
             className="input"
             value={on ? "on" : "off"}
             disabled={busy}
-            onChange={(e) => {
+            onChange={async (e) => {
+              const previous = on;
               const next = e.target.value === "on";
               setOn(next);
-              save({ active: next });
+              if (!(await save({ active: next }))) setOn(previous);
             }}
           >
             <option value="on">Active</option>
@@ -163,10 +185,11 @@ export function SourceSettings({
       </div>
 
       {note && (
-        <p className="muted" style={{ fontSize: 12, margin: "12px 0 0" }}>
+        <p className="muted" role="status" style={{ fontSize: 12, margin: "12px 0 0" }}>
           {note}
         </p>
       )}
+      {error && <p role="alert" style={{ color: "var(--danger)", fontSize: 12, margin: "12px 0 0" }}>{error}</p>}
     </div>
   );
 }

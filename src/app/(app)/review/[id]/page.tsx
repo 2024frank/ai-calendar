@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, sources } from "@/db/schema";
+import { communities, events, publishSubmissions, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
 import { EventStatus } from "@/components/bits";
@@ -33,6 +33,17 @@ export default async function ReviewDetail({
     .select()
     .from(communities)
     .where(eq(communities.id, ev.communityId))
+    .limit(1);
+  const [unresolvedPublish] = await db
+    .select({ state: publishSubmissions.state })
+    .from(publishSubmissions)
+    .where(
+      and(
+        eq(publishSubmissions.eventId, ev.id),
+        inArray(publishSubmissions.state, ["sending", "accepted_unreconciled"]),
+      ),
+    )
+    .orderBy(desc(publishSubmissions.updatedAt), desc(publishSubmissions.id))
     .limit(1);
 
   // For a duplicate, load the event it duplicates so the reviewer can compare.
@@ -98,6 +109,7 @@ export default async function ReviewDetail({
         sourceName={source?.name ?? "Unknown source"}
         publishEmail={process.env.PUBLISH_EMAIL ?? ""}
         timezone={community?.timezone ?? "America/New_York"}
+        unresolvedPublish={Boolean(unresolvedPublish)}
       />
     </div>
   );

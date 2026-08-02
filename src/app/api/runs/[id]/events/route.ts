@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { currentCommunityId } from "@/lib/data";
 import { listRunEvents } from "@/lib/runEvents";
 
 export const runtime = "nodejs";
@@ -16,7 +17,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const runId = Number(id);
   const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (s.role !== "platform_admin" && run.communityId !== s.communityId) {
+  const communityId = await currentCommunityId(s);
+  if (s.role !== "platform_admin" && run.communityId !== communityId) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

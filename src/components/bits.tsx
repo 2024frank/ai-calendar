@@ -4,19 +4,34 @@ import { StatusBadge, type StatusTone } from "@/components/ui";
 /** Product-wide timezone until per-community formatting is available in every query. */
 export const APP_TZ = "America/New_York";
 
-const dateTimeFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: APP_TZ,
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-});
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
 
-export function fmtDate(value: unknown) {
+export function fmtDate(value: unknown, timeZone = APP_TZ) {
   if (!value) return "—";
   const date = new Date(value as string);
   if (Number.isNaN(date.getTime())) return "—";
-  return dateTimeFormatter.format(date);
+  let formatter = dateTimeFormatters.get(timeZone);
+  if (!formatter) {
+    try {
+      formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch {
+      formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: APP_TZ,
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    }
+    dateTimeFormatters.set(timeZone, formatter);
+  }
+  return formatter.format(date);
 }
 
 export function Badge({ kind, children }: { kind?: string; children: ReactNode }) {
@@ -35,8 +50,13 @@ const RUN: Record<string, StatusTone> = {
   failed: "danger",
   stopped: "neutral",
 };
-export function RunStatus({ status }: { status: string }) {
-  return <StatusBadge tone={RUN[status] ?? "neutral"}>{status}</StatusBadge>;
+export function RunStatus({ status, phase }: { status: string; phase?: string | null }) {
+  const queued = status === "running" && phase === "queued";
+  return (
+    <StatusBadge tone={queued ? "neutral" : (RUN[status] ?? "neutral")}>
+      {queued ? "queued" : status}
+    </StatusBadge>
+  );
 }
 
 const DISCOVERY: Record<string, StatusTone> = {

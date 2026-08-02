@@ -18,15 +18,20 @@ export function ExportButtons({
 }) {
   const [everyCommunity, setEveryCommunity] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function download(format: "jsonl" | "csv" | "json") {
     setBusy(format);
+    setError(null);
     try {
       const params = new URLSearchParams();
       if (format !== "jsonl") params.set("format", format);
       if (everyCommunity) params.set("scope", "all");
       const res = await fetch(`/api/learnings/export${params.size ? `?${params}` : ""}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Could not prepare the export.");
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -35,7 +40,9 @@ export function ExportButtons({
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not prepare the export.");
     } finally {
       setBusy(null);
     }
@@ -69,6 +76,8 @@ export function ExportButtons({
           {busy === "json" ? "Preparing…" : "Readable (.json)"}
         </button>
       </div>
+
+      {error && <p role="alert" style={{ color: "var(--danger)", fontSize: 12, margin: 0 }}>{error}</p>}
 
       {isPlatformAdmin && (
         <label className="row" style={{ gap: 6, alignItems: "center", fontSize: 13 }}>

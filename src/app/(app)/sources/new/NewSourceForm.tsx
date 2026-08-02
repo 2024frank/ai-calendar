@@ -40,7 +40,7 @@ export function NewSourceForm({
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [urls, setUrls] = useState("");
-  const [sourceType, setSourceType] = useState<"web" | "email">("web");
+  const sourceType = "web" as const;
   const [special, setSpecial] = useState("");
   const [schedule, setSchedule] = useState("daily");
   const [lookaheadDays, setLookaheadDays] = useState(14);
@@ -55,8 +55,8 @@ export function NewSourceForm({
   );
   const prompt = useMemo(() => researchPrompt(name || "this organization", urlList), [name, urlList]);
 
-  // Steps: 0 name, 1 links (web only), 2 schedule, 3 research + save.
-  const steps = sourceType === "web" ? ["Name", "Link", "Schedule", "Instructions"] : ["Name", "Schedule", "Instructions"];
+  // Email ingestion has no worker yet, so the wizard offers only supported web sources.
+  const steps = ["Name", "Link", "Schedule", "Instructions"];
   const stepKey = steps[step];
 
   function canNext() {
@@ -138,13 +138,6 @@ export function NewSourceForm({
               onChange={(e) => setName(e.target.value)}
               autoFocus
             />
-          </div>
-          <div>
-            <label className="label">Type</label>
-            <select className="input" value={sourceType} onChange={(e) => { setSourceType(e.target.value as "web" | "email"); setStep(0); }}>
-              <option value="web">Website / calendar link</option>
-              <option value="email">Email inbox</option>
-            </select>
           </div>
         </div>
       )}
@@ -245,8 +238,8 @@ export function NewSourceForm({
           <button
             className="btn primary"
             type="button"
-            disabled={busy || (sourceType === "web" && special.trim().length < 40)}
-            title={sourceType === "web" && special.trim().length < 40 ? "Paste the research answer first." : undefined}
+            disabled={busy || special.trim().length < 40}
+            title={special.trim().length < 40 ? "Paste the research answer first." : undefined}
             onClick={submit}
           >
             {busy ? "Saving…" : "Save source"}

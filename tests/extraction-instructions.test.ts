@@ -18,9 +18,6 @@ describe("shared extraction instructions", () => {
       sourceName: "Riverdog Music",
       urls: ["https://riverdogmusic.weebly.com/shows.html"],
       calendarSourceName: "Riverdog Music",
-      ingestUrl: "https://calendar.example.com/api/agent/ingest",
-      runId: 1,
-      runToken: "test-token",
       lookaheadDays: 21,
     });
     assert.match(prompt, /More info and videos/);
@@ -30,6 +27,9 @@ describe("shared extraction instructions", () => {
     assert.match(prompt, /hard limit for every source/);
     assert.match(prompt, /DEAD-LINK RULE FOR EVERY SOURCE/);
     assert.match(prompt, /Back up one path level at a time/);
+    assert.match(prompt, /no callback credential/i);
+    assert.match(prompt, /RETURN the final JSON object/);
+    assert.doesNotMatch(prompt, /api\/agent\/ingest|test-token|urllib\.request|"token"/);
   });
 
   it("gives the detail-page rule to non-Riverdog agents", () => {
@@ -37,9 +37,6 @@ describe("shared extraction instructions", () => {
       sourceName: "Example Museum",
       urls: ["https://example.com/events"],
       calendarSourceName: "Example Museum",
-      ingestUrl: "https://calendar.example.com/api/agent/ingest",
-      runId: 2,
-      runToken: "test-token",
     });
     assert.match(prompt, /DETAIL-PAGE RULE FOR EVERY SOURCE/);
     assert.match(prompt, /BOTH description and extendedDescription/);

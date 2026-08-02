@@ -64,7 +64,12 @@ export async function PATCH(req: Request, { params }: Ctx) {
   if (body.canReviewAllSources !== undefined) {
     patch.canReviewAllSources = Boolean(body.canReviewAllSources);
   }
-  if (body.status === "active" || body.status === "disabled") patch.status = body.status;
+  if (body.status === "active" || body.status === "disabled") {
+    if (uid === s.uid && body.status !== target.status) {
+      return NextResponse.json({ error: "You cannot disable your own account." }, { status: 400 });
+    }
+    patch.status = body.status;
+  }
 
   // Community membership. Only a platform admin can move users across communities.
   // A list of communities is what lets a reviewer switch between them: the first

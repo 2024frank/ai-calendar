@@ -25,17 +25,22 @@ export function EndpointEditor({
   async function save() {
     setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/communities/${communityId}/endpoint`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, apiBase, active }),
-    });
-    const d = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) return setMsg(d.error || "Could not save.");
-    setMsg("Saved.");
-    router.refresh();
-    setTimeout(() => setMsg(null), 2000);
+    try {
+      const res = await fetch(`/api/communities/${communityId}/endpoint`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, apiBase, active }),
+      });
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) return setMsg(d.error || "Could not save.");
+      setMsg("Saved.");
+      router.refresh();
+      setTimeout(() => setMsg(null), 2000);
+    } catch {
+      setMsg("Could not save. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -43,8 +48,11 @@ export function EndpointEditor({
       <div className="label">Publishing endpoint</div>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div>
-          <label className="label" style={{ fontWeight: 400 }}>Endpoint base URL</label>
+          <label className="label" htmlFor={`endpoint-url-${communityId}`} style={{ fontWeight: 400 }}>Endpoint base URL</label>
           <input
+            id={`endpoint-url-${communityId}`}
+            name="endpointUrl"
+            type="url"
             className="input"
             placeholder="https://cleveland.communityhub.cloud"
             value={apiBase}
@@ -53,8 +61,8 @@ export function EndpointEditor({
           />
         </div>
         <div>
-          <label className="label" style={{ fontWeight: 400 }}>Name</label>
-          <input className="input" placeholder="Cleveland CommunityHub" value={name} onChange={(e) => setName(e.target.value)} />
+          <label className="label" htmlFor={`endpoint-name-${communityId}`} style={{ fontWeight: 400 }}>Name</label>
+          <input id={`endpoint-name-${communityId}`} name="endpointName" className="input" placeholder="Cleveland CommunityHub" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
       </div>
       <label className="row" style={{ gap: 8, alignItems: "center", cursor: "pointer" }}>
@@ -70,7 +78,7 @@ export function EndpointEditor({
         <button className="btn primary" type="button" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save endpoint"}
         </button>
-        {msg && <span className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>}
+        {msg && <span role={msg === "Saved." ? "status" : "alert"} className={`badge ${msg === "Saved." ? "good" : "bad"}`}>{msg}</span>}
       </div>
     </div>
   );

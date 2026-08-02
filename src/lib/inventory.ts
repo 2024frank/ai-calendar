@@ -1,8 +1,6 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { destinations } from "@/db/schema";
 import { fetchPublicBytes } from "./fetchPage";
+import { resolveDestination } from "./destination";
 
 export type InventoryItem = {
   title: string;
@@ -19,12 +17,12 @@ export type InventoryItem = {
  * Without this an event already live on CommunityHub is re-collected as new,
  * because our own database has never seen it.
  */
-export async function fetchDestinationInventory(communityId: number): Promise<InventoryItem[]> {
-  const [dest] = await db
-    .select()
-    .from(destinations)
-    .where(and(eq(destinations.communityId, communityId), eq(destinations.active, true)))
-    .limit(1);
+export async function fetchDestinationInventory(
+  communityId: number,
+  sourceId?: number | null,
+  timeoutMs = 25_000,
+): Promise<InventoryItem[]> {
+  const { destination: dest } = await resolveDestination(communityId, sourceId);
   if (!dest) return [];
 
   let cfg: { inventory_url?: string; api_base?: string };
@@ -41,7 +39,7 @@ export async function fetchDestinationInventory(communityId: number): Promise<In
   try {
     const res = await fetchPublicBytes(cfg.inventory_url, {
       maxBytes: 5 * 1024 * 1024,
-      timeoutMs: 25_000,
+      timeoutMs: Math.max(1, Math.min(timeoutMs, 25_000)),
       headers: { accept: "application/json" },
     });
     if (!res.ok) return [];

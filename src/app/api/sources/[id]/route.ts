@@ -64,9 +64,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           { status: 400 },
         );
       }
-      patch.url = urls[0].slice(0, 2048);
-      patch.startUrls = urls;
-      linksChanged = true;
+      const currentUrls =
+        Array.isArray(source.startUrls) && (source.startUrls as string[]).length
+          ? (source.startUrls as string[])
+          : source.url
+            ? [source.url]
+            : [];
+      if (JSON.stringify(urls) !== JSON.stringify(currentUrls)) {
+        patch.url = urls[0].slice(0, 2048);
+        patch.startUrls = urls;
+        linksChanged = true;
+      }
     }
   }
 
@@ -89,7 +97,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   // If the links changed, the saved extraction recipe may no longer fit, so mark
   // discovery pending. The caller can re-run discovery to rebuild it.
-  if (linksChanged) patch.discoveryStatus = "pending";
+  if (linksChanged && !patch.specialInstructions) patch.discoveryStatus = "pending";
 
   await db.update(sources).set(patch).where(eq(sources.id, source.id));
 
