@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { events, publishSubmissions } from "@/db/schema";
+import { communities, events, publishSubmissions, sources } from "@/db/schema";
 import {
   fetchPublicBytes,
   readResponseBytesLimited,
@@ -19,6 +19,7 @@ import {
 import { fitInlineImage } from "./mergePosters";
 import { imagePublishToken } from "./imagePublishToken";
 import { hasDatabaseErrorCode } from "./dbError";
+import { validationOptionsForSource } from "./sourcePolicy";
 
 type EventRow = typeof events.$inferSelect;
 
@@ -192,7 +193,18 @@ export async function publishEvent(
 ): Promise<PublishResult> {
   const [ev] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!ev) return { ok: false, state: "failed", message: "Event not found." };
-  const validationIssues = storedEventIssues(ev);
+  const [source] = ev.sourceId
+    ? await db
+        .select({ slug: sources.slug, communitySlug: communities.slug })
+        .from(sources)
+        .leftJoin(communities, eq(communities.id, sources.communityId))
+        .where(and(eq(sources.id, ev.sourceId), eq(sources.communityId, ev.communityId)))
+        .limit(1)
+    : [null];
+  const validationIssues = storedEventIssues(
+    ev,
+    validationOptionsForSource(source, { slug: source?.communitySlug }, ev.eventType),
+  );
   if (validationIssues.length) {
     return {
       ok: false,

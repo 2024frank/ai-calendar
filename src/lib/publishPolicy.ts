@@ -1,4 +1,8 @@
-import { validateEvent, type ExtractedEvent } from "./contract";
+import {
+  validateEvent,
+  type EventValidationOptions,
+  type ExtractedEvent,
+} from "./contract";
 
 type StoredEvent = {
   eventType?: string | null;
@@ -18,11 +22,16 @@ type StoredEvent = {
   imageData?: string | null;
   contactEmail?: string | null;
   phone?: string | null;
+  // Reviewer-editable provenance, intentionally ignored by source policy.
+  calendarSourceName?: string | null;
   calendarSourceUrl?: string | null;
 };
 
 /** Revalidate persisted data at the final trust boundary before publishing. */
-export function storedEventIssues(ev: StoredEvent): string[] {
+export function storedEventIssues(
+  ev: StoredEvent,
+  options: EventValidationOptions = {},
+): string[] {
   const eventTypes = ["ot", "an", "jp"];
   const locationTypes = ["ph2", "on", "bo", "ne"];
   const displayTypes = ["all", "ps", "sps", "ss"];
@@ -55,7 +64,7 @@ export function storedEventIssues(ev: StoredEvent): string[] {
     phone: ev.phone ?? null,
     calendarSourceUrl: ev.calendarSourceUrl ?? null,
   };
-  const issues = validateEvent(candidate);
+  const issues = validateEvent(candidate, options);
   if (!eventTypes.includes(ev.eventType ?? "")) issues.push("event_type_invalid");
   if (!locationTypes.includes(ev.locationType ?? "")) issues.push("location_type_invalid");
   if (!displayTypes.includes(ev.displayType ?? "")) issues.push("display_type_invalid");

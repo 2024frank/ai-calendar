@@ -8,8 +8,27 @@ import {
   storedEventIssues,
   submissionBlocksRetry,
 } from "../src/lib/publishPolicy";
+import { validationOptionsForSource } from "../src/lib/sourcePolicy";
 
 describe("stored event publish validation", () => {
+  const dateBearingAnnouncement = {
+    eventType: "an",
+    title: "Coming Soon at the Apollo",
+    description: "The Fantastic Four: opens August 7.",
+    extendedDescription: "See the newest releases on the Apollo screen.",
+    sessions: [{ startTime: 2_000_000_000, endTime: 2_000_007_200 }],
+    locationType: "ph2",
+    location: "Apollo Theatre",
+    displayType: "all",
+    postTypeIds: [5],
+    sponsors: ["Apollo Theater"],
+    website: "https://apollooberlin.com",
+    imageCdnUrl: "https://example.com/apollo.jpg",
+    contactEmail: "apollo@example.com",
+    phone: "440-555-0100",
+    calendarSourceUrl: "https://example.com/apollo/showtimes",
+  };
+
   it("accepts a complete persisted event at the final publish boundary", () => {
     assert.deepEqual(
       storedEventIssues({
@@ -78,6 +97,95 @@ describe("stored event publish validation", () => {
     assert.ok(issues.includes("event_type_invalid"));
     assert.ok(issues.includes("location_type_invalid"));
     assert.ok(issues.includes("display_type_invalid"));
+  });
+
+  it("allows an inline date only in Apollo announcement short descriptions", () => {
+    assert.deepEqual(
+      storedEventIssues(
+        dateBearingAnnouncement,
+        validationOptionsForSource(
+          { slug: "apollo-theater" },
+          { slug: "oberlin" },
+          "an",
+        ),
+      ),
+      [],
+    );
+  });
+
+  it("keeps the date rule for non-Apollo sources and non-announcement Apollo events", () => {
+    assert.ok(storedEventIssues(dateBearingAnnouncement).includes("description_contains_date"));
+    assert.ok(
+      storedEventIssues(
+        dateBearingAnnouncement,
+        validationOptionsForSource(
+          { slug: "another-theater" },
+          { slug: "oberlin" },
+          "an",
+        ),
+      ).includes("description_contains_date"),
+    );
+    assert.ok(
+      storedEventIssues(
+        { ...dateBearingAnnouncement, eventType: "ot" },
+        validationOptionsForSource(
+          { slug: "apollo-theater" },
+          { slug: "oberlin" },
+          "ot",
+        ),
+      ).includes("description_contains_date"),
+    );
+  });
+
+  it("still blocks dates in Apollo long descriptions and cannot be bypassed by display name", () => {
+    const options = validationOptionsForSource(
+      { slug: "apollo-theater" },
+      { slug: "oberlin" },
+      "an",
+    );
+    const issues = storedEventIssues(
+      {
+        ...dateBearingAnnouncement,
+        extendedDescription: "Tickets go on sale August 7.",
+        calendarSourceName: "Apollo Theater",
+      },
+      options,
+    );
+    assert.deepEqual(issues, ["long_description_contains_date"]);
+    assert.ok(
+      storedEventIssues({ ...dateBearingAnnouncement, calendarSourceName: "Apollo Theater" })
+        .includes("description_contains_date"),
+    );
+    assert.ok(
+      storedEventIssues(
+        {
+          ...dateBearingAnnouncement,
+          description: "The Fantastic Four opens August 7; visit https://example.com.",
+        },
+        options,
+      ).includes("description_contains_url"),
+    );
+  });
+
+  it("does not grant the exception to another community or a similar source slug", () => {
+    for (const options of [
+      validationOptionsForSource(
+        { slug: "apollo-theater" },
+        { slug: "cleveland" },
+        "an",
+      ),
+      validationOptionsForSource(
+        { slug: "apollo-theater-copy" },
+        { slug: "oberlin" },
+        "an",
+      ),
+    ]) {
+      assert.ok(
+        storedEventIssues(dateBearingAnnouncement, options).includes(
+          "description_contains_date",
+        ),
+      );
+    }
   });
 });
 

@@ -464,8 +464,16 @@ export function sessionsWithinLookahead(
   );
 }
 
+export type EventValidationOptions = {
+  /** Allow a date in the short description while keeping the long-description rule. */
+  allowDateInDescription?: boolean;
+};
+
 /** Deterministic validation. Hard failures block publishing (event goes to review). */
-export function validateEvent(e: ExtractedEvent): string[] {
+export function validateEvent(
+  e: ExtractedEvent,
+  options: EventValidationOptions = {},
+): string[] {
   const issues: string[] = [];
   if (!e.title || e.title.length < 1) issues.push("title_missing");
   if (e.title.length > 60) issues.push("title_too_long");
@@ -503,7 +511,8 @@ export function validateEvent(e: ExtractedEvent): string[] {
   // so ordinary sentences do not trip it).
   const hasDateish = (s: string | null | undefined): boolean =>
     Boolean(s) && DATEISH.some((re) => re.test(s as string));
-  if (hasDateish(e.description)) issues.push("description_contains_date");
+  if (!options.allowDateInDescription && hasDateish(e.description))
+    issues.push("description_contains_date");
   if (hasDateish(e.extendedDescription)) issues.push("long_description_contains_date");
   return issues;
 }

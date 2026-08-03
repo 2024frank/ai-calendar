@@ -12,6 +12,7 @@ import { emit } from "./runEvents";
 import { fetchPage, hasImageExtension, isGenericImage } from "./fetchPage";
 import { isPublicHttpUrl } from "./publicUrl";
 import { normalizeImageBase64 } from "./imageData";
+import { validationOptionsForSource } from "./sourcePolicy";
 
 /** Fields the correction agent may supply, all optional. */
 const CORRECTION_SCHEMA = {
@@ -38,6 +39,7 @@ const CORRECTION_SCHEMA = {
 
 type SourceRow = typeof sources.$inferSelect;
 type EventRow = typeof events.$inferSelect;
+type CommunityRow = typeof communities.$inferSelect;
 
 /**
  * True when some other event already carries this picture.
@@ -72,6 +74,7 @@ async function correctOne(
   runId: number,
   ev: EventRow,
   source: SourceRow,
+  community: CommunityRow | null,
   instructions: string,
   models: string[],
 ): Promise<Outcome> {
@@ -167,14 +170,21 @@ Return only the missing fields from that page. For a missing image use THIS even
     }
   }
 
+  const validationOptions = validationOptionsForSource(
+    source,
+    source.communityId === ev.communityId ? community : null,
+    ev.eventType,
+  );
+  const correctedDescription =
+    (typeof patch.description === "string" && patch.description) || ev.description;
   const candidate = {
     ...ev,
-    // Same scrub the ingest path runs: a stray "tickets go on sale September 8"
-    // must not be what keeps an otherwise finished event out of the queue.
-    description:
-      stripDateSentences(
-        (typeof patch.description === "string" && patch.description) || ev.description,
-      ) ?? ev.description,
+    // Same scrub the ingest path runs. Apollo announcements are the one
+    // exception because their short description is intentionally a film/date
+    // schedule; long descriptions still use the ordinary rule below.
+    description: validationOptions.allowDateInDescription
+      ? correctedDescription
+      : stripDateSentences(correctedDescription) ?? ev.description,
     extendedDescription: stripDateSentences(
       (typeof patch.extendedDescription === "string" ? patch.extendedDescription : null) ??
         ev.extendedDescription,
@@ -196,7 +206,7 @@ Return only the missing fields from that page. For a missing image use THIS even
     eventType: ev.eventType ?? "ot",
   } as unknown as ExtractedEvent;
 
-  const issues = validateEvent(candidate);
+  const issues = validateEvent(candidate, validationOptions);
   const remaining = issues.filter((i) => HARD_ISSUES.has(i));
   if (remaining.length) {
     // If the call never landed, we learned nothing about this event, so say so
@@ -313,7 +323,7 @@ export async function correctNextEvent(
 
   let outcome: Outcome = "failed";
   try {
-    outcome = await correctOne(runId, ev, src, instructions, models);
+    outcome = await correctOne(runId, ev, src, community ?? null, instructions, models);
   } catch {
     outcome = "failed";
   }

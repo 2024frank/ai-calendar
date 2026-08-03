@@ -35,6 +35,7 @@ import {
   canonicalCommunityHubPostUrl,
   trustedAgentDuplicate,
 } from "./duplicatePolicy";
+import { validationOptionsForSource } from "./sourcePolicy";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
@@ -364,6 +365,7 @@ export async function ingestEvents(
     let publishedAutomatically = false;
     const e: ExtractedEvent = normalizeEvent(raw, community.timezone);
     const reportedDuplicate = trustedDuplicateFor(raw);
+    const validationOptions = validationOptionsForSource(source, community, e.eventType);
 
     // Drop site furniture the agent may still have picked up.
     if (e.imageCdnUrl && isGenericImage(e.imageCdnUrl)) e.imageCdnUrl = null;
@@ -477,7 +479,9 @@ export async function ingestEvents(
     // sessions hold the schedule, but it also lifts blocks off the page, and a
     // single "tickets go on sale September 8" line was enough to hold a
     // finished event out of the queue for a person to delete by hand.
-    e.description = stripDateSentences(e.description) ?? e.description;
+    if (!validationOptions.allowDateInDescription) {
+      e.description = stripDateSentences(e.description) ?? e.description;
+    }
     e.extendedDescription = stripDateSentences(e.extendedDescription);
 
     // A dead link is repointed at the nearest page above it that still exists,
@@ -513,7 +517,7 @@ export async function ingestEvents(
     const isTrustedReportedDuplicate = Boolean(
       reportedDuplicate.eventId || reportedDuplicate.url,
     );
-    const issues = isTrustedReportedDuplicate ? [] : validateEvent(e);
+    const issues = isTrustedReportedDuplicate ? [] : validateEvent(e, validationOptions);
     const stillDead =
       (e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) ||
       (e.website && deadLinks.has(e.website));

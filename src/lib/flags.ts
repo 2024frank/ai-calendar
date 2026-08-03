@@ -1,8 +1,9 @@
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { events } from "@/db/schema";
+import { communities, events, sources } from "@/db/schema";
 import { validateEvent, type ExtractedEvent } from "./contract";
+import { validationOptionsForSource } from "./sourcePolicy";
 
 /**
  * Recompute a pending event's "needs fields" flag from what is SAVED now.
@@ -13,6 +14,7 @@ export async function refreshPendingFlag(eventId: number) {
   const [ev] = await db
     .select({
       id: events.id,
+      eventType: events.eventType,
       status: events.status,
       title: events.title,
       description: events.description,
@@ -30,13 +32,18 @@ export async function refreshPendingFlag(eventId: number) {
       urlLink: events.urlLink,
       registrationUrl: events.registrationUrl,
       rejectionReason: events.rejectionReason,
+      sourceSlug: sources.slug,
+      communitySlug: communities.slug,
     })
     .from(events)
+    .leftJoin(sources, eq(sources.id, events.sourceId))
+    .leftJoin(communities, eq(communities.id, events.communityId))
     .where(eq(events.id, eventId))
     .limit(1);
   if (!ev || ev.status !== "pending") return;
 
   const adapted = {
+    eventType: ev.eventType ?? "ot",
     title: ev.title ?? "",
     description: ev.description ?? "",
     extendedDescription: ev.extendedDescription ?? null,
@@ -54,7 +61,14 @@ export async function refreshPendingFlag(eventId: number) {
     registrationUrl: ev.registrationUrl,
   } as unknown as ExtractedEvent;
 
-  const issues = validateEvent(adapted);
+  const issues = validateEvent(
+    adapted,
+    validationOptionsForSource(
+      { slug: ev.sourceSlug },
+      { slug: ev.communitySlug },
+      ev.eventType,
+    ),
+  );
   const reason = issues.length ? `Missing before publish: ${issues.join(", ")}` : null;
   if (reason !== ev.rejectionReason) {
     await db.update(events).set({ rejectionReason: reason }).where(eq(events.id, eventId));
