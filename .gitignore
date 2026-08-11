@@ -8,6 +8,7 @@ build
 *.log
 .DS_Store
 .vercel
+.claude/
 tsconfig.tsbuildinfo
 next-env.d.ts
 .env*
