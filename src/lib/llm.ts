@@ -154,7 +154,9 @@ export async function llmComplete(call: LlmCall): Promise<LlmResult> {
   let lastError: Error | null = null;
   // Every serverless route that calls the provider has a 300-second ceiling.
   // Leave enough time for parsing, persistence, and lease cleanup.
-  const deadlineAt = Date.now() + Math.min(Math.max(call.timeoutMs ?? 240_000, 1_000), 240_000);
+  // The ceiling tracks the 800s Fluid routes. Capping every call at 240s made
+  // the model give up minutes before the function had to.
+  const deadlineAt = Date.now() + Math.min(Math.max(call.timeoutMs ?? 240_000, 1_000), 700_000);
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await llmCompleteOnce(call, deadlineAt);

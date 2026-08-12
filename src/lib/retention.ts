@@ -56,6 +56,10 @@ export async function reapStaleRuns(nowMs = Date.now()) {
         // immediately considered silent and failed on the next page load.
         lt(runs.startedAt, new Date(nowMs - 15 * 60_000)),
         sql`not exists (select 1 from run_events re where re.run_id = ${runs.id} and re.ts > ${new Date(nowMs - 15 * 60_000)})`,
+        // An extraction whose serverless wait ended is quiet on our side while
+        // the agent finishes remotely and delivers through the ingest
+        // callback. Its own deadline, not the silence, bounds that wait.
+        sql`(${runs.runKind} <> 'extraction' or ${runs.deadlineAt} < ${new Date(nowMs)})`,
       ),
     );
 

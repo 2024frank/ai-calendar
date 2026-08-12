@@ -1,14 +1,19 @@
-/** Vercel route ceiling for extraction and ingest handlers. */
+/**
+ * Vercel route ceiling for extraction and ingest handlers; 300s is the Hobby
+ * plan's hard limit. A real extraction often needs longer than any budget that
+ * fits under it, which is why the agent also delivers through the ingest
+ * callback: the wait ending here no longer decides the run.
+ */
 export const SERVERLESS_ROUTE_BUDGET_MS = 300_000;
 
 /**
  * Stop provider work early enough that a fallback response can still be
  * validated, persisted, and terminalized in the same invocation.
  */
-export const PROVIDER_PHASE_BUDGET_MS = 190_000;
+export const PROVIDER_PHASE_BUDGET_MS = 250_000;
 
 /** Keep a final platform margin for terminal job/run writes. */
-export const FINALIZATION_DEADLINE_MS = 285_000;
+export const FINALIZATION_DEADLINE_MS = 290_000;
 
 /** Once this much time remains, ingestion performs database work only. */
 export const INGEST_PERSISTENCE_RESERVE_MS = 45_000;

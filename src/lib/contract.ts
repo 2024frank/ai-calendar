@@ -580,6 +580,18 @@ export function contentMatches(
 ): { match: boolean; reason: string } {
   const norm = (s: string | null | undefined) =>
     (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const tokens = (s: string | null | undefined) =>
+    norm(s)
+      .split(/\s+/)
+      .filter((t) => t.length > 2 && !/^\d{4}$/.test(t));
+  const overlap = (left: string[], right: string[]) => {
+    if (!left.length || !right.length) return 0;
+    const aSet = new Set(left);
+    const bSet = new Set(right);
+    let shared = 0;
+    for (const t of aSet) if (bSet.has(t)) shared++;
+    return shared / Math.min(aSet.size, bSet.size);
+  };
 
   const sameStart = a.startTimes.some((x) => b.startTimes.some((y) => Math.abs(x - y) < 3600));
   const sameDay = a.startTimes.some((x) => b.startTimes.some((y) => Math.abs(x - y) < 12 * 3600));
@@ -590,6 +602,8 @@ export function contentMatches(
   const da = norm(a.description);
   const db = norm(b.description);
   const sameDesc = da.length > 15 && db.length > 15 && da === db;
+  const titleOverlap = overlap(tokens(a.title), tokens(b.title));
+  const descOverlap = overlap(tokens(a.description), tokens(b.description));
 
   // Same title on the same day is the classic repost.
   if (sameTitle && sameDay) return { match: true, reason: "same title and date" };
@@ -598,6 +612,14 @@ export function contentMatches(
   // A retitled repost: identical description at the same start time and venue.
   if (sameDesc && sameStart && sameLoc) {
     return { match: true, reason: "same description, start time and location" };
+  }
+  // Same session with a near-identical title catches prefixes and recurring
+  // series wording, while still requiring venue or description evidence.
+  if (sameStart && titleOverlap >= 0.8 && (sameLoc || descOverlap >= 0.45)) {
+    return {
+      match: true,
+      reason: sameLoc ? "similar title, same start time and location" : "similar title, same start time and description",
+    };
   }
   return { match: false, reason: "" };
 }
