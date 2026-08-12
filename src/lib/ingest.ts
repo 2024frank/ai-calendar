@@ -2,7 +2,15 @@ import "server-only";
 import { createHash, randomBytes } from "crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, loginTokens, runs, sources, users } from "@/db/schema";
+import {
+  communities,
+  events,
+  loginTokens,
+  publishSubmissions,
+  runs,
+  sources,
+  users,
+} from "@/db/schema";
 import {
   computeDedupKey,
   contentMatches,
@@ -33,6 +41,7 @@ import { normalizeImageBase64 } from "./imageData";
 import { optionalIngestBudget } from "./extractionPolicy";
 import {
   canonicalCommunityHubPostUrl,
+  sourceEventUrlsOverlap,
   trustedAgentDuplicate,
 } from "./duplicatePolicy";
 import { validationOptionsForSource } from "./sourcePolicy";
@@ -233,6 +242,10 @@ export async function ingestEvents(
       description: events.description,
       sessions: events.sessions,
       dedupKey: events.dedupKey,
+      website: events.website,
+      calendarSourceUrl: events.calendarSourceUrl,
+      urlLink: events.urlLink,
+      registrationUrl: events.registrationUrl,
     })
     .from(events)
     .where(
@@ -251,6 +264,25 @@ export async function ingestEvents(
   const remoteInventory = inventoryBudget >= 250
     ? await fetchDestinationInventory(source.communityId, source.id, inventoryBudget)
     : [];
+
+  // What WE have already sent to the endpoint, from our own submission records.
+  // This does not depend on the hub listing the post back to us, which is
+  // exactly what failed: a post still awaiting a hub moderator is absent from
+  // their feed, so the next run treated it as new and sent it again.
+  const publishedByUs = await db
+    .select({
+      id: events.id,
+      title: events.title,
+      location: events.location,
+      description: events.description,
+      sessions: events.sessions,
+    })
+    .from(publishSubmissions)
+    .innerJoin(events, eq(events.id, publishSubmissions.eventId))
+    .where(
+      and(eq(publishSubmissions.state, "succeeded"), eq(events.communityId, source.communityId)),
+    )
+    .limit(2000);
   if (remoteInventory.length) {
     await emit(runId, "dedup_outcome", `Checked against ${remoteInventory.length} live post(s) on the endpoint`, {
       inventory: remoteInventory.length,
@@ -554,12 +586,18 @@ export async function ingestEvents(
       dupReason = "the agent matched it to this event";
     }
 
-    // 2) content match on title + start time + location + short description
+    // 2) exact source-event URL, then content match on title + start time +
+    // location + short description.
     if (!duplicateOf) {
       for (const x of existing) {
         const xs = Array.isArray(x.sessions)
           ? (x.sessions as { startTime?: number }[]).map((s) => Number(s.startTime)).filter(Boolean)
           : [];
+        if (sourceEventUrlsOverlap(e, x)) {
+          duplicateOf = x.id;
+          dupReason = "same source event URL";
+          break;
+        }
         const m = contentMatches(
           { title: e.title, startTimes, location: e.location ?? null, description: e.description },
           { title: x.title ?? "", startTimes: xs, location: x.location ?? null, description: x.description ?? null },
@@ -580,8 +618,35 @@ export async function ingestEvents(
     if (remoteDup) {
       dupReason = "the agent matched it to this CommunityHub post";
     }
+    // 2b) something we ourselves already published. Authoritative, because it
+    // is our own record of the send rather than the hub's view of it: a post
+    // still awaiting a hub moderator never appears in their feed, which is how
+    // four Allen Memorial exhibitions went out twice.
+    if (!duplicateOf && !remoteDup) {
+      for (const x of publishedByUs) {
+        const xs = Array.isArray(x.sessions)
+          ? (x.sessions as { startTime?: number }[]).map((s2) => Number(s2.startTime)).filter(Boolean)
+          : [];
+        const m = contentMatches(
+          { title: e.title, startTimes, location: e.location ?? null, description: e.description },
+          { title: x.title ?? "", startTimes: xs, location: x.location, description: x.description },
+        );
+        if (m.match) {
+          duplicateOf = x.id;
+          dupReason = `we already sent this to CommunityHub (${m.reason})`;
+          break;
+        }
+      }
+    }
+
     if (!duplicateOf) {
       for (const r of remoteInventory) {
+        if (sourceEventUrlsOverlap(e, r)) {
+          remoteDup = true;
+          dupReason = "already on the endpoint (same source event URL)";
+          duplicateOfUrl = r.url ?? duplicateOfUrl;
+          break;
+        }
         const m = contentMatches(
           { title: e.title, startTimes, location: e.location ?? null, description: e.description },
           { title: r.title, startTimes: r.startTimes, location: r.location, description: r.description },

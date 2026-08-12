@@ -5,6 +5,7 @@ import { communities, runs, sources } from "@/db/schema";
 import { buildSystemPrompt, builtInSourceInstructions, EVENTS_SCHEMA } from "./contract";
 import { fetchPage } from "./fetchPage";
 import { ingestEvents } from "./ingest";
+import { runToken } from "./agentToken";
 import { buildFeedbackBlock } from "./learning";
 import { lessonsFor } from "./learningAgent";
 import { llmComplete } from "./llm";
@@ -571,6 +572,20 @@ export async function runExtraction(runId: number) {
       specialInstructions: fillTemplate(source.specialInstructions ?? "", extractionVars),
     });
 
+    // Delivery insurance. The serverless wait dies at the platform's 300s
+    // ceiling, but the agent's own sandbox outlives it. Handing the agent a
+    // per-run token lets it POST the finished payload straight to the ingest
+    // endpoint, so a long extraction completes even after nobody is waiting.
+    // The in-process path below still ingests when the wait survives; the
+    // completed-run check before ingestion settles the race between the two.
+    const publicOrigin = process.env.APP_URL ? new URL(process.env.APP_URL).origin : appUrl;
+    const deliveryBlock = `
+DELIVERY (do BOTH, in this order):
+1. When your JSON payload is final, POST it once from the sandbox:
+   curl -s -X POST ${publicOrigin}/api/agent/ingest -H "content-type: application/json" --data @payload.json
+   where payload.json is {"runId": ${runId}, "token": "${runToken(runId)}", "events": [...], "duplicates": [...]} with the same events you are about to return. Build the file in code; never print its contents. A response of {"ok":true} means delivered; on any error just continue.
+2. Then still return the JSON payload as your response either way.`;
+
     // Input: the context and the untrusted page content, kept as data.
     const prompt = `Extract every upcoming event, announcement and job from this source and return them in the required JSON shape.
 
@@ -590,7 +605,8 @@ ${jsonLd.length ? `STRUCTURED DATA FOUND ON THE PAGE (prefer this when it is acc
 ${sourceText}
 </untrusted_source_content>
 
-Only include events that have a real date. Skip anything already past. If there are no upcoming events, return an empty list.`;
+Only include events that have a real date. Skip anything already past. If there are no upcoming events, return an empty list.
+${deliveryBlock}`;
 
     await emit(runId, "model_turn", "Running the extraction agent (sandbox: read inventories and dedupe)", {
       phase: "extraction",
@@ -656,6 +672,19 @@ Only include events that have a real date. Skip anything already past. If there 
       { ...counts, elapsedMs: Date.now() - started },
     );
   } catch (e) {
-    await fail(runId, (e as Error).message);
+    const message = (e as Error).message;
+    if (/aborted due to timeout|execution time budget/i.test(message)) {
+      // Our wait hit the serverless ceiling. The agent keeps working on the
+      // provider's side and delivers through the ingest callback, so the run
+      // stays open for it; the run deadline bounds how long.
+      await emit(
+        runId,
+        "model_turn",
+        "The serverless wait ended; the agent continues remotely and its callback will finish this run.",
+        { handoff: true },
+      );
+      return;
+    }
+    await fail(runId, message);
   }
 }
