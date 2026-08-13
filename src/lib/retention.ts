@@ -6,47 +6,61 @@ import { scheduledSourceIsDue } from "./schedule";
 import {
   DATELESS_RETENTION_DAYS,
   DATELESS_SWEEPABLE_STATUSES,
+  startOfDaySecs,
 } from "./retentionPolicy";
 
 /**
- * Delete events once they are over. In every status, approved and submitted
- * included: the calendar shows what is upcoming, not a permanent archive.
+ * Delete events once nothing is left of them.
  *
- * The column is named start_time_max for historical reasons but holds the
- * LATEST SESSION END, so a run of several dates survives until the final one is
- * finished, and an exhibition that opened months ago but closes next year stays.
+ * An event is finished when its LAST DATE HAS BEGUN. After that nobody can
+ * attend any part of it, so it is only clutter in the queue. A run of several
+ * dates survives until its final one starts; a one-off survives the whole day
+ * it happens and goes the following night, because the cutoff is the start of
+ * today in the community's own timezone rather than the moment itself.
  *
  * Two passes, because there are two ways to be finished:
  *
- *  1. The date has passed. Straightforward.
+ *  1. The last date has begun.
  *  2. There is no date at all. These were invisible to this sweep, which only
- *     ever looked at rows with a non-null start_time_max, so dateless rows
- *     accumulated forever and reviewers kept seeing them. A dateless row cannot
- *     expire on its own, so the only fair rule is age: clear the leftovers
- *     (auto-rejected and duplicate rows) once they are well past useful. Rows a
- *     person is still working with — pending, approved, submitted, rejected —
- *     are never touched by age alone.
+ *     ever looked at rows carrying a date, so dateless rows accumulated forever
+ *     and reviewers kept seeing them. They cannot expire on their own, so the
+ *     only fair rule is age, and only for leftovers: rows a person is still
+ *     working with are never swept on age alone.
  */
-export async function sweepExpiredEvents(nowSecs = Math.floor(Date.now() / 1000)) {
-  const [byDate] = await db
-    .delete(events)
-    .where(and(isNotNull(events.startTimeMax), lt(events.startTimeMax, nowSecs)));
+export async function sweepExpiredEvents(nowMs = Date.now()) {
+  // Each community's day ends at its own midnight, so the cutoff is computed
+  // per community rather than once against the server's clock.
+  const rows = await db
+    .select({ id: communities.id, timezone: communities.timezone })
+    .from(communities);
 
-  const cutoff = new Date((nowSecs - DATELESS_RETENTION_DAYS * 86_400) * 1000);
+  let deleted = 0;
+  for (const community of rows) {
+    const cutoff = startOfDaySecs(nowMs, community.timezone || "America/New_York");
+    const [res] = await db
+      .delete(events)
+      .where(
+        and(
+          eq(events.communityId, community.id),
+          isNotNull(events.startTimeMax),
+          lt(events.startTimeMax, cutoff),
+        ),
+      );
+    deleted += (res as { affectedRows?: number }).affectedRows ?? 0;
+  }
+
+  const ageCutoff = new Date(nowMs - DATELESS_RETENTION_DAYS * 86_400_000);
   const [byAge] = await db
     .delete(events)
     .where(
       and(
         isNull(events.startTimeMax),
         inArray(events.status, [...DATELESS_SWEEPABLE_STATUSES]),
-        lt(events.createdAt, cutoff),
+        lt(events.createdAt, ageCutoff),
       ),
     );
 
-  return (
-    ((byDate as { affectedRows?: number }).affectedRows ?? 0) +
-    ((byAge as { affectedRows?: number }).affectedRows ?? 0)
-  );
+  return deleted + ((byAge as { affectedRows?: number }).affectedRows ?? 0);
 }
 
 /**

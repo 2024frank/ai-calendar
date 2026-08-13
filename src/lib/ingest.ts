@@ -16,7 +16,7 @@ import {
   contentMatches,
   HARD_ISSUES,
   eventWithinLookahead,
-  maxEndTime,
+  maxStartTime,
   normalizeEvent,
   sessionsWithinLookahead,
   stripDateSentences,
@@ -678,7 +678,7 @@ export async function ingestEvents(
             .update(events)
             .set({
               sessions: merged,
-              startTimeMax: Math.max(...merged.map((x) => x.endTime)),
+              startTimeMax: Math.max(...merged.map((x) => x.startTime)),
             })
             .where(eq(events.id, duplicateOf));
           await emit(
@@ -719,7 +719,7 @@ export async function ingestEvents(
       description: e.description,
       extendedDescription: e.extendedDescription,
       sessions: e.sessions,
-      startTimeMax: maxEndTime(e),
+      startTimeMax: maxStartTime(e),
       locationType: e.locationType,
       location: e.location,
       urlLink: e.urlLink,

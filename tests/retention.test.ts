@@ -5,8 +5,9 @@ import {
   DATELESS_RETENTION_DAYS,
   isExpiredByAge,
   isExpiredByDate,
+  startOfDaySecs,
 } from "../src/lib/retentionPolicy";
-import { maxEndTime, type ExtractedEvent } from "../src/lib/contract";
+import { maxStartTime, type ExtractedEvent } from "../src/lib/contract";
 
 /**
  * The expiry rules, exercised as pure decisions.
@@ -21,8 +22,8 @@ import { maxEndTime, type ExtractedEvent } from "../src/lib/contract";
 const DAY = 86_400;
 const NOW = 1_800_000_000;
 
-const expiredByDate = (startTimeMax: number | null, nowSecs = NOW) =>
-  isExpiredByDate(startTimeMax, nowSecs);
+const expiredByDate = (lastStart: number | null, cutoff = NOW) =>
+  isExpiredByDate(lastStart, cutoff);
 
 const expiredByAge = (
   startTimeMax: number | null,
@@ -31,34 +32,45 @@ const expiredByAge = (
   nowSecs = NOW,
 ) => isExpiredByAge(startTimeMax, status, createdAtSecs, nowSecs);
 
-describe("expiry by date", () => {
-  it("keeps a run of dates until the last one has finished", () => {
+describe("expiry by the last date that has begun", () => {
+  it("keeps a run of dates until the final one starts", () => {
     const event = {
       sessions: [
         { startTime: NOW - 10 * DAY, endTime: NOW - 10 * DAY + 7200 },
         { startTime: NOW + 20 * DAY, endTime: NOW + 20 * DAY + 7200 },
       ],
     } as ExtractedEvent;
-    // The Frank Lloyd Wright case: September is over, November is not.
-    assert.equal(expiredByDate(maxEndTime(event)), false);
+    // The Frank Lloyd Wright case: September has been and gone, November has not.
+    assert.equal(expiredByDate(maxStartTime(event)), false);
   });
 
-  it("keeps a long exhibition that opened months ago and closes next year", () => {
-    const event = {
-      sessions: [{ startTime: NOW - 60 * DAY, endTime: NOW + 300 * DAY }],
-    } as ExtractedEvent;
-    assert.equal(expiredByDate(maxEndTime(event)), false);
+  it("keeps a weekly programme until its last week begins", () => {
+    const sessions = Array.from({ length: 22 }, (_, week) => ({
+      startTime: NOW - 4 * DAY + week * 7 * DAY,
+      endTime: NOW - 4 * DAY + week * 7 * DAY + 7200,
+    }));
+    assert.equal(expiredByDate(maxStartTime({ sessions } as ExtractedEvent)), false);
   });
 
-  it("claims an event whose every date has passed", () => {
+  it("lets an event run its whole day before removing it", () => {
+    // 7pm in New York, swept overnight rather than mid-event.
+    const evening = Date.parse("2026-08-12T23:00:00Z") / 1000;
+    const duringThatEvening = startOfDaySecs(Date.parse("2026-08-12T23:30:00Z"), "America/New_York");
+    const theNextNight = startOfDaySecs(Date.parse("2026-08-13T05:30:00Z"), "America/New_York");
+
+    assert.equal(expiredByDate(evening, duringThatEvening), false, "kept while it is happening");
+    assert.equal(expiredByDate(evening, theNextNight), true, "gone once its day is over");
+  });
+
+  it("removes an event whose only date has already been", () => {
     const event = {
       sessions: [{ startTime: NOW - 3 * DAY, endTime: NOW - 3 * DAY + 7200 }],
     } as ExtractedEvent;
-    assert.equal(expiredByDate(maxEndTime(event)), true);
+    assert.equal(expiredByDate(maxStartTime(event)), true);
   });
 
   it("cannot see a dateless row at all, which is why the second pass exists", () => {
-    assert.equal(maxEndTime({ sessions: [] } as unknown as ExtractedEvent), null);
+    assert.equal(maxStartTime({ sessions: [] } as unknown as ExtractedEvent), null);
     assert.equal(expiredByDate(null), false);
   });
 });

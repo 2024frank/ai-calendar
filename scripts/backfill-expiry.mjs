@@ -14,8 +14,9 @@ config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", im
  * and the bug agreed with each other.
  *
  * This fills the column in from the sessions the row already holds, using the
- * LATEST SESSION END, which is what the column means despite its name. Rows with
- * no sessions at all are left alone here; the sweep now ages those out itself.
+ * LATEST SESSION START: the last date the event still has ahead of it, which is
+ * what decides when it is finished. Rows with no sessions at all are left alone
+ * here; the sweep ages those out itself.
  *
  * Read-only by default. Pass --write to apply.
  */
@@ -30,15 +31,17 @@ const c = await mysql.createConnection({
   ssl: databaseSsl(),
 });
 
+// Every row with sessions, not only the ones missing a value. The column used
+// to hold the last session END and now holds the last session START, so rows
+// written under the old rule would otherwise linger past the day they should go.
 const [rows] = await c.query(
-  `select id, title, status, sessions
+  `select id, title, status, sessions, start_time_max
      from events
-    where start_time_max is null
-      and sessions is not null
+    where sessions is not null
       and json_length(sessions) > 0`,
 );
 
-console.log(`rows with sessions but no expiry date: ${rows.length}`);
+console.log(`rows with dates to recompute: ${rows.length}`);
 
 const nowSecs = Math.floor(Date.now() / 1000);
 let fixed = 0;
@@ -46,22 +49,23 @@ let past = 0;
 
 for (const row of rows) {
   const sessions = typeof row.sessions === "string" ? JSON.parse(row.sessions) : row.sessions;
-  const ends = (Array.isArray(sessions) ? sessions : [])
-    .map((s) => Number(s?.endTime))
+  const starts = (Array.isArray(sessions) ? sessions : [])
+    .map((s) => Number(s?.startTime))
     .filter((n) => Number.isFinite(n) && n > 0);
-  if (!ends.length) continue;
+  if (!starts.length) continue;
 
-  const latestEnd = Math.max(...ends);
-  if (latestEnd < nowSecs) past++;
+  const latestStart = Math.max(...starts);
+  if (Number(row.start_time_max) === latestStart) continue; // already correct
+  if (latestStart < nowSecs) past++;
   if (WRITE) {
-    await c.query("update events set start_time_max = ? where id = ?", [latestEnd, row.id]);
+    await c.query("update events set start_time_max = ? where id = ?", [latestStart, row.id]);
   }
   fixed++;
   if (fixed <= 15) {
-    const when = new Date(latestEnd * 1000).toISOString().slice(0, 10);
+    const when = new Date(latestStart * 1000).toISOString().slice(0, 10);
     console.log(
       `  ${WRITE ? "set" : "would set"} ${String(row.id).padEnd(6)} ${when}` +
-        `${latestEnd < nowSecs ? "  (already over)" : ""}  ${String(row.title).slice(0, 50)}`,
+        `${latestStart < nowSecs ? "  (already over)" : ""}  ${String(row.title).slice(0, 50)}`,
     );
   }
 }

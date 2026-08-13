@@ -602,10 +602,23 @@ export const HARD_ISSUES = new Set([
   "source_link_dead",
 ]);
 
-/** Latest session end, used for the public feed and expiry sweep. */
+/** Latest session end. */
 export function maxEndTime(e: ExtractedEvent): number | null {
   if (!e.sessions.length) return null;
   return Math.max(...e.sessions.map((s) => s.endTime));
+}
+
+/**
+ * Latest session START: the last moment this event still has something ahead
+ * of it, and what the expiry sweep and the public feed both key on.
+ *
+ * An event nobody can attend any part of is finished, whether or not its final
+ * session has technically run out. A weekly market survives until its last week
+ * begins; a one-off survives the day it happens and goes after that.
+ */
+export function maxStartTime(e: ExtractedEvent): number | null {
+  if (!e.sessions.length) return null;
+  return Math.max(...e.sessions.map((s) => s.startTime));
 }
 
 /** Same-source dedup signature: normalized title + session windows. */

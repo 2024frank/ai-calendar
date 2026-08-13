@@ -202,7 +202,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (JSON.stringify(prev) !== JSON.stringify(next)) {
       patch.sessions = next;
       // Keep the expiry sweep and the queue's "when" column in sync.
-      patch.startTimeMax = next.length ? Math.max(...next.map((s) => s.endTime)) : null;
+      // Expiry keys on the LAST START: the last date still ahead of the event.
+      patch.startTimeMax = next.length ? Math.max(...next.map((s) => s.startTime)) : null;
       changes.push({ field: "sessions", oldValue: JSON.stringify(prev), newValue: JSON.stringify(next) });
     }
   }
