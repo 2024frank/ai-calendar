@@ -1,21 +1,52 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, max, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, runs, sources } from "@/db/schema";
 import { scheduledSourceIsDue } from "./schedule";
+import {
+  DATELESS_RETENTION_DAYS,
+  DATELESS_SWEEPABLE_STATUSES,
+} from "./retentionPolicy";
 
 /**
- * Delete events once their date has passed. Every event whose start time is in
- * the past is removed, in every status, approved and submitted included: the
- * calendar shows what is upcoming, not a permanent archive. For an event with
- * more than one date, start_time_max stores its latest end, so it stays until
- * it is fully over. Events with no date are left alone.
+ * Delete events once they are over. In every status, approved and submitted
+ * included: the calendar shows what is upcoming, not a permanent archive.
+ *
+ * The column is named start_time_max for historical reasons but holds the
+ * LATEST SESSION END, so a run of several dates survives until the final one is
+ * finished, and an exhibition that opened months ago but closes next year stays.
+ *
+ * Two passes, because there are two ways to be finished:
+ *
+ *  1. The date has passed. Straightforward.
+ *  2. There is no date at all. These were invisible to this sweep, which only
+ *     ever looked at rows with a non-null start_time_max, so dateless rows
+ *     accumulated forever and reviewers kept seeing them. A dateless row cannot
+ *     expire on its own, so the only fair rule is age: clear the leftovers
+ *     (auto-rejected and duplicate rows) once they are well past useful. Rows a
+ *     person is still working with — pending, approved, submitted, rejected —
+ *     are never touched by age alone.
  */
 export async function sweepExpiredEvents(nowSecs = Math.floor(Date.now() / 1000)) {
-  const [res] = await db
+  const [byDate] = await db
     .delete(events)
     .where(and(isNotNull(events.startTimeMax), lt(events.startTimeMax, nowSecs)));
-  return (res as { affectedRows?: number }).affectedRows ?? 0;
+
+  const cutoff = new Date((nowSecs - DATELESS_RETENTION_DAYS * 86_400) * 1000);
+  const [byAge] = await db
+    .delete(events)
+    .where(
+      and(
+        isNull(events.startTimeMax),
+        inArray(events.status, [...DATELESS_SWEEPABLE_STATUSES]),
+        lt(events.createdAt, cutoff),
+      ),
+    );
+
+  return (
+    ((byDate as { affectedRows?: number }).affectedRows ?? 0) +
+    ((byAge as { affectedRows?: number }).affectedRows ?? 0)
+  );
 }
 
 /**

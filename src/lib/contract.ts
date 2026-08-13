@@ -54,7 +54,7 @@ export function builtInSourceInstructions(sourceName: string): string {
  */
 export const NORMALIZED_EVENT_CONTRACT = `
 THE THREE TYPES (decide this first, the rest of the record depends on it)
-- EVENT ("ot"): something that HAPPENS at a set time and a person attends. A concert, a class session, a tour, a screening, a game. Its sessions are the real times it takes place; separate real occurrences are separate events.
+- EVENT ("ot"): something that HAPPENS at a set time and a person attends. A concert, a class session, a tour, a screening, a game. Its sessions are the real times it takes place: EVERY occurrence of the same programme is another session on ONE event, never another event. Two events are separate only when they are genuinely different programmes.
 - ANNOUNCEMENT ("an"): an OPPORTUNITY with no single moment of attendance. Registration open, a call for volunteers or applications, a drive, a program running across a period. Its session is the window to display it, open to close. Its title names the action: "Register for Summer Art Camp", not "Summer Art Camp".
 - JOB ("jp"): a paid or stipended position someone is hired for. Its session is the posting window, now to the deadline.
 Test: ATTENDS at a time -> event. ACTS within a window (register, apply, donate, drop off) -> announcement. Is HIRED -> job.
@@ -80,7 +80,8 @@ FIELDS
 - description: the short description, one factual sentence, 10-200 characters.
 - extendedDescription: optional detail, up to 1000 characters.
 - sessions: non-empty array of { start, end } ISO strings (see DATES).
-- THE SAME EVENT ON SEVERAL DATES IS ONE EVENT with one { start, end } session per date. This covers every shape of repeat: a weekly program (Storytime every Friday), a performance run (a play staged four nights, an opera on several dates, RENT all weekend), a multi-day tournament, or the same listing appearing on several dates. Group by title + venue: if the title and venue match, it is the same event; add its dates to sessions and move on. NEVER create one event per date. One image covers all sessions. Separate events are only for genuinely different programs.
+- THE SAME EVENT ON SEVERAL DATES IS ONE EVENT with one { start, end } session per date. This covers every shape of repeat: a weekly program (Storytime every Friday), a performance run (a play staged four nights, an opera on several dates, RENT all weekend), a multi-day tournament, a monthly open house, or the same listing appearing on several dates. Group by title + venue: if the title and venue match, it is the same event; add its dates to sessions and move on. NEVER create one event per date. One image covers all sessions. Separate events are only for genuinely different programs.
+- A TITLE NEVER CARRIES A DATE. No month, no day, no year, no season, no "Part 2" numbering of the same programme. Write "Frank Lloyd Wright Open House", never "Frank Lloyd Wright Open House / September 2026" and never "... - October". Putting the month in the title is how one event gets torn into several: the titles stop matching, so the grouping rule above no longer sees them as the same event. If a source lists an event under a month heading, that heading is a date and belongs in sessions, not in the title.
 - locationType: "ph2" physical, "on" online, "bo" both, "ne" neither. ph2/bo need location; on/bo need urlLink.
 - location, placeName, roomNum: the venue when physical.
 - display: "all".
@@ -102,7 +103,7 @@ WRITING
 - The short description is YOUR writing job, never a script's. It goes on public screens, so it must read like a person wrote it: one factual sentence distilled from the event's FULL original description, faithful to what the source actually says, no em dashes, 10-200 characters. A script slicing the long description to 197 characters is forbidden; a cut-off sentence on a public screen is worse than none.
 - Division of labor when you work through a script: the script does everything mechanical (fetch, parse, dates, images, contacts, response assembly) and prints you a compact worklist of title + full description per event, nothing else. YOU then write each short description from that worklist and put it into the final structured response. Item 80 gets the same care as item 1; the worklist keeps the volume manageable.
 - It is NEVER the title restated, never the title plus leftover text, and never identical to the long description. If the source has no usable description, compose one true sentence from what you verified (what it is, who runs it, where); if you know nothing beyond the title, the event is not extractable.
-- BEFORE RETURNING, self-check the response IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, and every event has BOTH a contact email and a phone (the event's own, else the source default). Drop what fails; never return it as complete.
+- BEFORE RETURNING, self-check the response IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, and every event has BOTH a contact email and a phone (the event's own, else the source default). ALSO CHECK GROUPING: no title contains a month, a date or a year, and no two events share a title and venue. If two do, they are one event: merge their sessions into the first and drop the rest. Drop what fails; never return it as complete.
 - Announcement titles start with the action ("Register for...", "Apply for..."). Never a bare noun for an opportunity.
 - If registration is required, the short description includes "Registration required." If there is a cost, it includes "Paid event."
 - FIT BY REWRITING, NEVER BY CUTTING. When source text is longer than a field allows (200 for short, 1000 for long, 60 for title), REWRITE it shorter in complete sentences that end cleanly. Text chopped mid-word on a public screen is a defect.
@@ -517,9 +518,34 @@ export function validateEvent(
   return issues;
 }
 
-/** The date and time shapes a description must never carry. */
+const WEEKDAY = "(?:mon|tues|wednes|thurs|fri|satur|sun)day|(?:mon|tue|wed|thu|fri|sat|sun)\\b";
+const MONTH =
+  "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec";
+const CLOCK = "\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?\\s?m\\.?|\\d{1,2}:\\d{2}";
+
+/**
+ * The date and time shapes a description must never carry.
+ *
+ * A weekday on its own is NOT one of them. "Come play trivia with us every
+ * Thursday evening" is what the event IS, and a rule that reads the word
+ * "Thursday" as a date blocked exactly that sentence, with no way out: the
+ * scrubber below declines to cut a description down to nothing, so no automatic
+ * step could fix it and the publish gate refused the text anyway.
+ *
+ * A weekday only carries a date when it sits next to one: a month, a numeric
+ * date, or a clock time. That is what these match. Recurrence wording ("every
+ * Thursday", "Thursdays", "open Tuesday through Sunday") is left alone.
+ */
 const DATEISH = [
-  /\b(mon|tues|wednes|thurs|fri|satur|sun)day\b/i,
+  // A weekday pinned to a specific day: "Thursday, August 6", "Thu 8/6".
+  new RegExp(`\\b(?:${WEEKDAY})\\b[\\s,.-]*(?:the\\s+)?(?:${MONTH})\\b`, "i"),
+  new RegExp(
+    `\\b(?:${WEEKDAY})\\b[\\s,.-]*(?:the\\s+)?\\d{1,2}\\s*(?:[/-]\\s*\\d{1,2}|(?:st|nd|rd|th)\\b)`,
+    "i",
+  ),
+  // A weekday pinned to a clock time: "Thursday at 2:30 p.m.".
+  new RegExp(`\\b(?:${WEEKDAY})\\b[\\s,]*(?:at|from)?\\s*(?:${CLOCK})`, "i"),
+  // A clock time or a calendar date standing on its own.
   /\b\d{1,2}:\d{2}\s*[ap]\.?\s?m\.?/i,
   /\b(january|february|march|april|june|july|august|september|october|november|december)\s+\d/i,
   /\b(jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+\d{1,2}\b/i,
@@ -547,6 +573,34 @@ export function stripDateSentences(text: string | null | undefined): string | nu
   const out = kept.join(" ").replace(/\s+/g, " ").trim();
   return out.length >= 60 ? out : text;
 }
+
+/**
+ * Issues that make an event unpublishable, as opposed to merely untidy.
+ *
+ * These are structural: no title, no date, no picture, nobody to contact, a
+ * source link that does not exist. An event missing any of them is auto-rejected
+ * at ingest rather than shown to a reviewer, and publishing refuses it too.
+ *
+ * Everything NOT in this set is a soft issue: worth flagging for a reviewer,
+ * never worth blocking on. A reviewer who has read the event and approved it is
+ * the higher authority on wording.
+ */
+export const HARD_ISSUES = new Set([
+  "title_missing",
+  "description_too_short",
+  "sessions_missing",
+  "session_start_invalid",
+  "sponsors_missing",
+  "post_type_missing",
+  "image_missing",
+  "location_required",
+  // No reachable contact, no event: the public must have someone to ask.
+  "contact_email_missing",
+  "phone_missing",
+  // The link to the original is the ground truth. A page that does not exist
+  // means the event (or its link) was fabricated, so it never reaches review.
+  "source_link_dead",
+]);
 
 /** Latest session end, used for the public feed and expiry sweep. */
 export function maxEndTime(e: ExtractedEvent): number | null {

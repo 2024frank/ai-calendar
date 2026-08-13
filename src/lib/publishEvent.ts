@@ -7,6 +7,7 @@ import {
   fetchPublicBytes,
   readResponseBytesLimited,
 } from "./fetchPage";
+import { HARD_ISSUES } from "./contract";
 import { assertPublicHttpUrl, fetchPinnedPublicUrl } from "./publicUrl";
 import { POST_TYPE_IDS } from "./taxonomy";
 import { resolveDestination } from "./destination";
@@ -205,11 +206,20 @@ export async function publishEvent(
     ev,
     validationOptionsForSource(source, { slug: source?.communitySlug }, ev.eventType),
   );
-  if (validationIssues.length) {
+  // Block only on what makes an event unpublishable, not on what makes it
+  // untidy. Ingest already draws this line: a soft issue lets the event into the
+  // review queue, so refusing it here meant a reviewer saw an ordinary event,
+  // approved it, and was turned away at the last step over wording they had
+  // already read and accepted. The soft issues stay on the record and stay
+  // visible in the queue; they simply no longer veto a person's decision.
+  const blocking = validationIssues.filter(
+    (issue) => HARD_ISSUES.has(issue) || issue.endsWith("_invalid"),
+  );
+  if (blocking.length) {
     return {
       ok: false,
       state: "failed",
-      message: `This event is not ready to publish: ${validationIssues.join(", ")}.`,
+      message: `This event is not ready to publish: ${blocking.join(", ")}.`,
     };
   }
 

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { maxEndTime, sessionsWithinLookahead, type ExtractedEvent } from "../src/lib/contract";
+import {
+  HARD_ISSUES,
+  maxEndTime,
+  sessionsWithinLookahead,
+  type ExtractedEvent,
+} from "../src/lib/contract";
 import {
   buttonsWithRegistration,
   publishedImageUrl,
@@ -279,5 +284,100 @@ describe("event expiry boundary", () => {
 
     assert.equal(maxEndTime(event), 1_000);
     assert.equal(maxEndTime({ sessions: [] } as unknown as ExtractedEvent), null);
+  });
+});
+
+describe("recurrence wording is not a date", () => {
+  const base = {
+    eventType: "ot",
+    title: "Slow Train Cafe Trivia Night",
+    sessions: [{ startTime: 2_000_000_000, endTime: 2_000_007_200 }],
+    locationType: "ph2",
+    location: "55 East College St., Oberlin, OH 44074",
+    displayType: "all",
+    postTypeIds: [5],
+    sponsors: ["Slow Train Cafe"],
+    website: "https://www.slowtraincafe.com",
+    imageCdnUrl: "https://example.com/trivia.jpg",
+    contactEmail: "director@oberlinbusinesspartnership.com",
+    phone: "440-774-6262",
+    calendarSourceUrl: "https://www.oberlinbusinesspartnership.com/events/trivia-night/",
+  };
+
+  it("accepts the recurrence phrasing that blocked a reviewer", () => {
+    // The exact text from event 1594, reported by a reviewer as wrongly flagged.
+    const issues = storedEventIssues({
+      ...base,
+      description:
+        "Grab a cookie, beverage and a friend and come play Trivia with us every Thursday evening.",
+    });
+    assert.deepEqual(issues, []);
+  });
+
+  it("accepts other ways of saying an event repeats", () => {
+    for (const description of [
+      "Join us every Friday for storytime in the children's room downstairs.",
+      "A drop-in maker session held Thursdays in the community workshop space.",
+      "The galleries are open Tuesday through Sunday for self-guided visits.",
+    ]) {
+      assert.deepEqual(storedEventIssues({ ...base, description }), [], description);
+    }
+  });
+
+  it("still refuses a specific date or clock time", () => {
+    for (const description of [
+      "The competition final takes place Thursday, August 6 in Warner Concert Hall.",
+      "Doors open Thursday at 2:30 p.m. for the afternoon screening.",
+      "Tickets go on sale September 8 for all remaining performances.",
+      "The ensemble performs at 7:30 p.m. in the main hall.",
+    ]) {
+      assert.deepEqual(
+        storedEventIssues({ ...base, description }),
+        ["description_contains_date"],
+        description,
+      );
+    }
+  });
+});
+
+describe("publishing blocks on hard issues only", () => {
+  const softOnly = {
+    eventType: "ot",
+    title: "Concert: Oberlin Orchestra",
+    // A date in the long description is a soft issue: the reviewer sees it
+    // flagged, and their approval is allowed to stand over it.
+    description: "The Oberlin Orchestra performs works by Ravel and Sibelius in Finney Chapel.",
+    extendedDescription: "The programme repeats Thursday, August 6 for visiting families.",
+    sessions: [{ startTime: 2_000_000_000, endTime: 2_000_007_200 }],
+    locationType: "ph2",
+    location: "90 North Professor Street, Oberlin, OH 44074",
+    displayType: "all",
+    postTypeIds: [8],
+    sponsors: ["Oberlin College"],
+    website: "https://www.oberlin.edu",
+    imageCdnUrl: "https://example.com/orchestra.jpg",
+    contactEmail: "conpro@oberlin.edu",
+    phone: "440-775-8610",
+    calendarSourceUrl: "https://www.oberlin.edu/events/orchestra",
+  };
+
+  const blocking = (issues: string[]) =>
+    issues.filter((issue) => HARD_ISSUES.has(issue) || issue.endsWith("_invalid"));
+
+  it("reports the soft issue but does not let it veto publishing", () => {
+    const issues = storedEventIssues(softOnly);
+    assert.deepEqual(issues, ["long_description_contains_date"]);
+    assert.deepEqual(blocking(issues), []);
+  });
+
+  it("still refuses an event that is genuinely unpublishable", () => {
+    const issues = storedEventIssues({ ...softOnly, imageCdnUrl: null, contactEmail: null });
+    assert.ok(blocking(issues).includes("image_missing"));
+    assert.ok(blocking(issues).includes("contact_email_missing"));
+  });
+
+  it("still refuses corrupt enum values", () => {
+    const issues = storedEventIssues({ ...softOnly, locationType: "nonsense" });
+    assert.ok(blocking(issues).includes("location_type_invalid"));
   });
 });

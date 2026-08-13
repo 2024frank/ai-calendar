@@ -14,6 +14,7 @@ import {
 import {
   computeDedupKey,
   contentMatches,
+  HARD_ISSUES,
   eventWithinLookahead,
   maxEndTime,
   normalizeEvent,
@@ -53,29 +54,7 @@ const MAX_SOURCE_LINK_CHECKS = 80;
 const SOURCE_LINK_CHECK_BUDGET_MS = 45_000;
 const SOURCE_LINK_FALLBACK_BUDGET_MS = 45_000;
 
-// Structural minimums. An event missing any of these is not a real, publishable
-// event, so it is auto-rejected at ingest instead of entering the review queue.
-// Every real event has a picture, so a missing image disqualifies it outright.
-// A missing image disqualifies an event outright: every real event has one.
-// Contact details are still required before publishing, but some organizations
-// genuinely publish no phone, so a reviewer fills those in rather than losing
-// the event entirely.
-export const HARD_ISSUES = new Set([
-  "title_missing",
-  "description_too_short",
-  "sessions_missing",
-  "session_start_invalid",
-  "sponsors_missing",
-  "post_type_missing",
-  "image_missing",
-  "location_required",
-  // No reachable contact, no event: the public must have someone to ask.
-  "contact_email_missing",
-  "phone_missing",
-  // The link to the original is the ground truth. A page that does not exist
-  // means the event (or its link) was fabricated, so it never reaches review.
-  "source_link_dead",
-]);
+export { HARD_ISSUES } from "./contract";
 
 /** Which of these source links definitely do not exist (a real 404). */
 async function deadSourceLinks(
@@ -673,6 +652,44 @@ export async function ingestEvents(
     // An event missing a structural minimum (title, a real date, a sponsor) is
     // not completable, so it is auto-rejected rather than shown for review.
     const hardIssues = issues.filter((i) => HARD_ISSUES.has(i));
+
+    // A recurring event whose later dates were outside the lookahead comes back
+    // on a later run carrying the dates that have since come into range. It
+    // matches the stored row on title and venue, so it would be filed as a
+    // duplicate and those new dates thrown away. Fold them into the stored row
+    // instead: same event, more of its dates known.
+    if (duplicateOf && e.sessions.length) {
+      const [stored] = await db
+        .select({ sessions: events.sessions, status: events.status })
+        .from(events)
+        .where(eq(events.id, duplicateOf))
+        .limit(1);
+      const storedSessions = Array.isArray(stored?.sessions)
+        ? (stored.sessions as { startTime: number; endTime: number }[])
+        : [];
+      // Deleted events must not be resurrected, and a rejected one stays rejected.
+      const mergeable = stored && (stored.status === "pending" || stored.status === "approved");
+      if (mergeable) {
+        const seen = new Set(storedSessions.map((x) => `${x.startTime}-${x.endTime}`));
+        const added = e.sessions.filter((x) => !seen.has(`${x.startTime}-${x.endTime}`));
+        if (added.length) {
+          const merged = [...storedSessions, ...added].sort((a, b) => a.startTime - b.startTime);
+          await db
+            .update(events)
+            .set({
+              sessions: merged,
+              startTimeMax: Math.max(...merged.map((x) => x.endTime)),
+            })
+            .where(eq(events.id, duplicateOf));
+          await emit(
+            runId,
+            "dedup_outcome",
+            `Added ${added.length} new date(s) to the existing "${e.title}" instead of duplicating it`,
+            { eventId: duplicateOf, addedSessions: added.length },
+          );
+        }
+      }
+    }
 
     // Restricted mode keeps every completable event in review. Duplicates are
     // preserved. Structurally-broken events are kept as auto_rejected.

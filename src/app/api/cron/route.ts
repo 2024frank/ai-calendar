@@ -27,10 +27,30 @@ async function authorizePost(req: Request): Promise<boolean> {
 }
 
 async function runCron(requestOrigin: string) {
-  const recoveredJobs = await requeueStaleJobs();
-  const reaped = await reapStaleRuns();
-  const deleted = await sweepExpiredEvents();
-  const expiredRateLimitsDeleted = await sweepRateLimitBuckets();
+  // Each maintenance step stands on its own. They used to run unguarded in a
+  // row, so a throw in either of the first two would have taken the whole tick
+  // down and silently skipped the expiry sweep behind them. One failing chore
+  // should never cost the others their turn.
+  const step = async <T,>(name: string, work: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      console.error(`Cron step failed: ${name}`, {
+        message: error instanceof Error ? error.message : "unknown error",
+      });
+      return fallback;
+    }
+  };
+
+  const recoveredJobs = await step("requeueStaleJobs", requeueStaleJobs, {
+    requeued: 0,
+    failed: 0,
+    orphaned: 0,
+    expired: 0,
+  });
+  const reaped = await step("reapStaleRuns", reapStaleRuns, 0);
+  const deleted = await step("sweepExpiredEvents", sweepExpiredEvents, 0);
+  const expiredRateLimitsDeleted = await step("sweepRateLimitBuckets", sweepRateLimitBuckets, 0);
 
   // The hosting plan allows a single daily cron, so this one tick starts every
   // source that is due. Each run is still bounded by the platform's per-request
