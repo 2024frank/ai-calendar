@@ -35,6 +35,7 @@ import {
 import { mergePosterImages } from "./mergePosters";
 import { fetchDestinationInventory } from "./inventory";
 import { publishEvent } from "./publishEvent";
+import { inlineRemoteImage } from "./inlineImage";
 import { sendNewEventsDigest } from "./email";
 import { emit } from "./runEvents";
 import { sourceLinkFallbackCandidates } from "./sourceLinks";
@@ -761,6 +762,29 @@ export async function ingestEvents(
     };
     if (e.imageData && !e.imageCdnUrl) {
       patch.imageCdnUrl = `${appUrl}/api/events/${newId}/image.jpg`;
+    }
+    // Bring the picture HOME while the event is fresh. An event whose image
+    // stays a third-party URL is publishable only for as long as that host
+    // keeps answering; Farm Friday's host stopped, and a reviewer found out at
+    // the Approve button weeks later. So the bytes are copied onto this server
+    // at ingest, and from then on nothing outside can break the image. Agent
+    // bytes (imageB64) already arrive inline; this covers plain URLs. On
+    // failure the URL is kept: publish retries the fetch, and the reviewer now
+    // gets told exactly why if it fails again. Skipped near the deadline so a
+    // slow host cannot eat the persistence reserve.
+    if (!e.imageData && e.imageCdnUrl && status !== "duplicate" && optionalIngestBudget(options.deadlineAt, 12_000) >= 10_000) {
+      const inlined = await inlineRemoteImage(e.imageCdnUrl, 8_000);
+      if ("imageData" in inlined) {
+        patch.imageData = inlined.imageData;
+        patch.imageCdnUrl = `${appUrl}/api/events/${newId}/image.jpg`;
+        e.imageData = inlined.imageData;
+      } else {
+        await emit(runId, "image_enriched", `Image left on its host (${inlined.failure}): ${e.title}`, {
+          eventId: newId,
+          failure: inlined.failure,
+          image: e.imageCdnUrl,
+        });
+      }
     }
     await db.update(events).set(patch).where(eq(events.id, newId));
     if (e.imageData && !e.imageCdnUrl) {
