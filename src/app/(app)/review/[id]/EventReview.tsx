@@ -367,7 +367,17 @@ export function EventReview({
         setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review?tab=approved"), 1400);
       } else {
         if (d.publish === "unknown") setNeedsPublishReconciliation(true);
-        setMsg(d.error ? `Could not approve: ${d.error}` : "Could not approve.");
+        // A crash or a platform timeout returns no JSON at all, so d.error is
+        // empty and the reviewer used to be told only "Could not approve."
+        // Show the status code instead of nothing; a 504 is a timeout worth
+        // retrying, which is not something a blank message can convey.
+        setMsg(
+          d.error
+            ? `Could not approve: ${d.error}`
+            : res.status === 504 || res.status === 408
+              ? "Could not approve: CommunityHub or the image host took too long. Nothing was published. Try again."
+              : `Could not approve (server error ${res.status}). Nothing was published.`,
+        );
       }
     } catch {
       setMsg("Network error. Nothing was approved or published.");

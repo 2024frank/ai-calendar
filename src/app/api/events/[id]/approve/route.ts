@@ -8,6 +8,12 @@ import { publishEvent } from "@/lib/publishEvent";
 import { logActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
+// Approving downloads and re-hosts the event's image, then sends the post to
+// CommunityHub. The image fetch alone is allowed 20 seconds, so on the default
+// limit a slow image host killed the function mid-approve. The reviewer then
+// got a non-JSON 504, which the page could only render as a bare "Could not
+// approve." with no reason, for what is really a timeout and not a rejection.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
