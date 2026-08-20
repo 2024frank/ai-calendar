@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, sources } from "@/db/schema";
+import { verifyRunToken } from "@/lib/agentToken";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ export const dynamic = "force-dynamic";
  * Query parameters
  *   status     approved | submitted | published | all
  *              (default: every accepted or published event)
+ *              "pending" is available ONLY to the extraction agent, which
+ *              proves itself with runId + token. The review queue is not public.
  *   community  community id or slug
  *   source     source id
  *   from       only events with a session starting at/after this ISO date
@@ -24,7 +27,29 @@ export const dynamic = "force-dynamic";
  *   offset     for paging
  */
 const STATUSES = ["approved", "submitted", "published"] as const;
-type Status = (typeof STATUSES)[number];
+type Status = (typeof STATUSES)[number] | "pending";
+
+/**
+ * The agent is the duplicate judge, so it has to see everything this calendar
+ * already holds, including the events still waiting for a reviewer. Those are
+ * unreviewed and must never reach the public feed, so "pending" is unlocked
+ * only for a caller holding the HMAC token for a live run.
+ *
+ * Without this the agent compared against approved events alone and was blind
+ * to the whole review queue. Anything duplicated into pending stayed invisible,
+ * so the next run brought another copy that also landed in pending. That is how
+ * one opera arrived twice and one monthly open house arrived as three events.
+ */
+function agentMaySeePending(p: URLSearchParams): boolean {
+  const runId = Number(p.get("runId"));
+  const token = (p.get("token") ?? "").trim();
+  if (!Number.isSafeInteger(runId) || runId <= 0 || !token) return false;
+  try {
+    return verifyRunToken(runId, token);
+  } catch {
+    return false;
+  }
+}
 
 function boundedInt(value: string | null, fallback: number, min: number, max: number) {
   if (value === null || value.trim() === "") return fallback;
@@ -46,14 +71,17 @@ export async function GET(req: Request) {
   const offset = boundedInt(p.get("offset"), 0, 0, 10_000);
 
   const statusParam = (p.get("status") ?? "").trim();
+  const allowed: readonly string[] = agentMaySeePending(p)
+    ? [...STATUSES, "pending"]
+    : STATUSES;
   let statuses: Status[];
   if (statusParam === "all") {
-    statuses = [...STATUSES];
+    statuses = [...allowed] as Status[];
   } else if (statusParam) {
     statuses = statusParam
       .split(",")
       .map((s) => s.trim())
-      .filter((s): s is Status => (STATUSES as readonly string[]).includes(s));
+      .filter((s): s is Status => allowed.includes(s));
     if (!statuses.length) {
       return NextResponse.json(
         { error: `status must be one of: ${STATUSES.join(", ")}, or all` },
@@ -61,7 +89,7 @@ export async function GET(req: Request) {
       );
     }
   } else {
-    statuses = [...STATUSES];
+    statuses = [...STATUSES] as Status[];
   }
 
   const activeCommunityIds = db

@@ -221,6 +221,8 @@ export async function ingestEvents(
       description: events.description,
       sessions: events.sessions,
       dedupKey: events.dedupKey,
+      imageCdnUrl: events.imageCdnUrl,
+      extendedDescription: events.extendedDescription,
       website: events.website,
       calendarSourceUrl: events.calendarSourceUrl,
       urlLink: events.urlLink,
@@ -578,8 +580,10 @@ export async function ingestEvents(
           break;
         }
         const m = contentMatches(
-          { title: e.title, startTimes, location: e.location ?? null, description: e.description },
-          { title: x.title ?? "", startTimes: xs, location: x.location ?? null, description: x.description ?? null },
+          { title: e.title, startTimes, location: e.location ?? null, description: e.description,
+            imageUrl: e.imageCdnUrl ?? null, extendedDescription: e.extendedDescription ?? null },
+          { title: x.title ?? "", startTimes: xs, location: x.location ?? null, description: x.description ?? null,
+            imageUrl: x.imageCdnUrl ?? null, extendedDescription: x.extendedDescription ?? null },
         );
         if (m.match) {
           duplicateOf = x.id;
@@ -607,7 +611,8 @@ export async function ingestEvents(
           ? (x.sessions as { startTime?: number }[]).map((s2) => Number(s2.startTime)).filter(Boolean)
           : [];
         const m = contentMatches(
-          { title: e.title, startTimes, location: e.location ?? null, description: e.description },
+          { title: e.title, startTimes, location: e.location ?? null, description: e.description,
+            imageUrl: e.imageCdnUrl ?? null },
           { title: x.title ?? "", startTimes: xs, location: x.location, description: x.description },
         );
         if (m.match) {
@@ -765,6 +770,25 @@ export async function ingestEvents(
         image: served,
       });
     }
+    // Everything inserted becomes a candidate for the rest of this batch.
+    // Only the exact-hash map was updated here before, so two copies of one
+    // event arriving in the same run could only be caught if their hashes
+    // matched to the byte. Two identical opera listings differing solely by an
+    // image size word therefore both landed in the queue.
+    existing.unshift({
+      id: newId,
+      title: e.title,
+      location: e.location ?? null,
+      description: e.description,
+      sessions: e.sessions,
+      dedupKey,
+      imageCdnUrl: e.imageCdnUrl ?? null,
+      extendedDescription: e.extendedDescription ?? null,
+      website: e.website ?? null,
+      calendarSourceUrl: e.calendarSourceUrl ?? null,
+      urlLink: e.urlLink ?? null,
+      registrationUrl: e.registrationUrl ?? null,
+    } as (typeof existing)[number]);
     if (status === "pending") {
       counts.inserted++;
       existingByKey.set(dedupKey, newId);

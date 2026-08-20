@@ -568,7 +568,11 @@ export async function runExtraction(runId: number) {
       communityHubInventoryUrl: destCfg.inventory_url ?? null,
       communityHubPostUrlBase: destCfg.api_base ? `${destCfg.api_base}/calendar/post/` : null,
       lookaheadDays: source.lookaheadDays ?? 14,
-      aiCalendarApprovedUrl: `${appUrl}/api/public/events?status=approved,submitted&community=${community.slug}`,
+      // Everything this calendar already holds, the review queue included. The
+      // agent is the duplicate judge and cannot judge what it cannot see; the
+      // run token is what lets it read pending, which stays out of the public
+      // feed.
+      aiCalendarApprovedUrl: `${appUrl}/api/public/events?status=approved,submitted,pending&community=${community.slug}&limit=500&runId=${runId}&token=${runToken(runId)}`,
       specialInstructions: fillTemplate(source.specialInstructions ?? "", extractionVars),
     });
 

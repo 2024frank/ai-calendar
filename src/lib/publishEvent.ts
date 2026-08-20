@@ -151,11 +151,37 @@ const permanentFailure = (status: number) => status === 400 || status === 401 ||
  */
 type RehostedImage = { url: string; imageData: string };
 
+/**
+ * Why a re-host failed, in the reviewer's words.
+ *
+ * This used to return a bare null for five different causes and the reviewer
+ * got one sentence for all of them, which told neither them nor me what to do
+ * about it. A site logo served as SVG and a photo behind a bot wall are not the
+ * same problem and do not have the same fix.
+ */
+type RehostFailure =
+  | "unreachable"
+  | "not_an_image"
+  | "vector_image"
+  | "too_large"
+  | "unreadable";
+
+const REHOST_FAILURE_TEXT: Record<RehostFailure, string> = {
+  unreachable:
+    "The image host did not serve the picture to us. Replace the image with one on a reachable host.",
+  not_an_image:
+    "That image link does not return a picture; it returns a web page. Open the link, right-click the picture itself, and use its direct image address.",
+  vector_image:
+    "That is an SVG logo or banner, not a photo of the event. CommunityHub cannot take SVG. Replace it with the event's own picture.",
+  too_large: "That image is over 8MB. Replace it with a smaller one.",
+  unreadable: "That image file is damaged and could not be read. Replace it.",
+};
+
 async function rehostImage(
   eventId: number,
   url: string,
   appUrl: string,
-): Promise<RehostedImage | null> {
+): Promise<RehostedImage | { failure: RehostFailure }> {
   try {
     const fetched = await fetchPublicBytes(url, {
       maxBytes: 8 * 1024 * 1024,
@@ -166,16 +192,30 @@ async function rehostImage(
         accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
       },
     });
-    if (!fetched.ok) return null;
+    if (!fetched.ok) {
+      return { failure: fetched.status === 413 ? "too_large" : "unreachable" };
+    }
     const buf = Buffer.from(fetched.bytes);
+    if (!buf.length) return { failure: "unreachable" };
     // Sanity-check it really is an image before we serve it as one.
     const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
     const isPng = buf[0] === 0x89 && buf[1] === 0x50;
     const isGif = buf[0] === 0x47 && buf[1] === 0x49;
     const isWebp = buf.subarray(8, 12).toString() === "WEBP";
-    if (!buf.length || !(isJpeg || isPng || isGif || isWebp)) return null;
+    if (!(isJpeg || isPng || isGif || isWebp)) {
+      // Name the two shapes that actually turn up, because they have different
+      // fixes. An SVG is nearly always a site logo the agent grabbed instead of
+      // the event's own picture; HTML means the link points at a page, not a
+      // file. Anything else is genuinely unknown.
+      const head = buf.subarray(0, 512).toString("utf8").trim().toLowerCase();
+      if (head.startsWith("<svg") || head.includes("<svg") || head.startsWith("<?xml"))
+        return { failure: "vector_image" };
+      if (head.startsWith("<!doctype html") || head.startsWith("<html"))
+        return { failure: "not_an_image" };
+      return { failure: "not_an_image" };
+    }
     const jpeg = await fitInlineImage(buf);
-    if (!jpeg) return null;
+    if (!jpeg) return { failure: "unreadable" };
     const imageData = jpeg.toString("base64");
     const hostedUrl = `${appUrl.replace(/\/+$/, "")}/api/events/${eventId}/image.jpg`;
     await db
@@ -184,7 +224,7 @@ async function rehostImage(
       .where(eq(events.id, eventId));
     return { url: hostedUrl, imageData };
   } catch {
-    return null;
+    return { failure: "unreachable" };
   }
 }
 
@@ -263,12 +303,11 @@ export async function publishEvent(
   let publishableEvent = ev;
   if (!ev.imageData && ev.imageCdnUrl) {
     const hosted = await rehostImage(ev.id, ev.imageCdnUrl, appUrl);
-    if (!hosted) {
+    if ("failure" in hosted) {
       return {
         ok: false,
         state: "failed",
-        message:
-          "The event image could not be securely downloaded and re-hosted. Replace the image before publishing.",
+        message: `Could not use this event's image. ${REHOST_FAILURE_TEXT[hosted.failure]}`,
       };
     }
     publishableEvent = { ...ev, imageData: hosted.imageData, imageCdnUrl: hosted.url };

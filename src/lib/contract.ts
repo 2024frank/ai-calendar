@@ -103,7 +103,7 @@ WRITING
 - The short description is YOUR writing job, never a script's. It goes on public screens, so it must read like a person wrote it: one factual sentence distilled from the event's FULL original description, faithful to what the source actually says, no em dashes, 10-200 characters. A script slicing the long description to 197 characters is forbidden; a cut-off sentence on a public screen is worse than none.
 - Division of labor when you work through a script: the script does everything mechanical (fetch, parse, dates, images, contacts, response assembly) and prints you a compact worklist of title + full description per event, nothing else. YOU then write each short description from that worklist and put it into the final structured response. Item 80 gets the same care as item 1; the worklist keeps the volume manageable.
 - It is NEVER the title restated, never the title plus leftover text, and never identical to the long description. If the source has no usable description, compose one true sentence from what you verified (what it is, who runs it, where); if you know nothing beyond the title, the event is not extractable.
-- BEFORE RETURNING, self-check the response IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, and every event has BOTH a contact email and a phone (the event's own, else the source default). ALSO CHECK GROUPING: no title contains a month, a date or a year, and no two events share a title and venue. If two do, they are one event: merge their sessions into the first and drop the rest. Drop what fails; never return it as complete.
+- BEFORE RETURNING, self-check the response IN CODE, deterministically, and fix or drop failures: every description 10-200 chars, no URL in any description, description differs from the title, extendedDescription differs from description, every event has an image, sessions non-empty, and every event has BOTH a contact email and a phone (the event's own, else the source default). ALSO CHECK GROUPING: no title contains a month, a date or a year, and no two events share a title and venue. If two do, they are one event: merge their sessions into the first and drop the rest. ALSO CHECK IMAGES: no imageCdnUrl ends in .svg or contains logo, banner, header, share, default, placeholder or og-image, because those are the site's own graphic and never an event photo. If two events share an imageCdnUrl, that is allowed only when the source itself serves one picture for a whole series (a concert season often does); if instead you fell back to a site-wide graphic, go back to each event's detail page for its own picture. AND: when the host is one the server cannot reach (Locable and any host the curl playbook was needed for), you MUST return the bytes in imageB64. A bare URL on a blocked host fails at publishing time and a reviewer, not you, has to deal with it. Drop what fails; never return it as complete.
 - Announcement titles start with the action ("Register for...", "Apply for..."). Never a bare noun for an opportunity.
 - If registration is required, the short description includes "Registration required." If there is a cost, it includes "Paid event."
 - FIT BY REWRITING, NEVER BY CUTTING. When source text is longer than a field allows (200 for short, 1000 for long, 60 for title), REWRITE it shorter in complete sentences that end cleanly. Text chopped mid-word on a public screen is a defect.
@@ -174,9 +174,9 @@ You are the ${ctx.sourceName} Agent for CommunityHub. Extract this source's publ
 a. Read what already exists, so you never repost. Fetch BOTH inventories and READ their content (each item has a title, description, dates and location):
    - CommunityHub, pending AND approved:
 ${chInv}
-   - The AI calendar, APPROVED events only:
+   - The AI calendar, EVERYTHING it already holds, including events still waiting for a reviewer:
 ${aiInv}
-   YOU are the duplicate judge, and you judge by MEANING, not by string equality. The same real-world event often appears with slightly different wording: a shortened title, a rephrased description, a venue written two ways. If the title, dates, venue and what the description says all point at the same actual event, it IS a duplicate even when no field matches word for word. Two different events at the same venue on the same day are NOT duplicates. When you are unsure, open the actual CommunityHub post or event page and read it before deciding.
+   YOU are the duplicate judge, and you judge by MEANING, not by string equality. Both lists are complete, so an event you find in either one is already here and must not be sent again, whether a reviewer has looked at it yet or not. The same real-world event often appears with slightly different wording: a shortened title, a rephrased description, a venue written two ways. If the title, dates, venue and what the description says all point at the same actual event, it IS a duplicate even when no field matches word for word. Two different events at the same venue on the same day are NOT duplicates. When you are unsure, open the actual CommunityHub post or event page and read it before deciding.
 b. Read the source, ${lookahead} DAYS AHEAD ONLY: fetch and process only items starting within the next ${lookahead} days (plus anything already ongoing). When an API takes a date range, request ${lookahead} days; when reading pages, stop at items past that horizon. The schedule re-checks this source, so later events arrive when their dates approach.
 ${links}
    If a fetch is refused (403, Cloudflare challenge, empty shell), do NOT give up: retry from the sandbox over HTTP/1.1 with a browser user agent, which passes most bot walls:
@@ -641,9 +641,34 @@ export function computeDedupKey(e: ExtractedEvent): string {
  * or the description; a shared venue and day alone is NEVER enough, because
  * one venue hosts many different events on the same day.
  */
+type MatchCandidate = {
+  title: string;
+  startTimes: number[];
+  location: string | null;
+  description?: string | null;
+  imageUrl?: string | null;
+  extendedDescription?: string | null;
+};
+
+/**
+ * The picture two listings share, ignoring how the host was asked to size it.
+ *
+ * Localist serves the same photo at /photos/<id>/huge/<hash> and
+ * /photos/<id>/card/<hash>. Two copies of one opera differed by exactly that
+ * one word, which was enough to make them look like different events.
+ */
+export function imageIdentity(url: string | null | undefined): string {
+  if (!url) return "";
+  let u = url.split("?")[0].toLowerCase();
+  u = u.replace(/\/(huge|big|card|thumb|thumbnail|small|medium|large|original|full|preview)\//g, "/");
+  u = u.replace(/[-_](\d{2,4})x(\d{2,4})(?=\.[a-z]{3,4}$)/g, "");
+  u = u.replace(/[-_](scaled|cropped|resized)(?=\.[a-z]{3,4}$)/g, "");
+  return u;
+}
+
 export function contentMatches(
-  a: { title: string; startTimes: number[]; location: string | null; description?: string | null },
-  b: { title: string; startTimes: number[]; location: string | null; description?: string | null },
+  a: MatchCandidate,
+  b: MatchCandidate,
 ): { match: boolean; reason: string } {
   const norm = (s: string | null | undefined) =>
     (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -671,6 +696,19 @@ export function contentMatches(
   const sameDesc = da.length > 15 && db.length > 15 && da === db;
   const titleOverlap = overlap(tokens(a.title), tokens(b.title));
   const descOverlap = overlap(tokens(a.description), tokens(b.description));
+  // Content signals. The old test for a shared description was exact string
+  // equality, so a single retyped character defeated it; overlap survives an
+  // edit. The image is compared by identity, not URL, because one host serves
+  // the same picture under several size words.
+  const ia = imageIdentity(a.imageUrl);
+  const ib = imageIdentity(b.imageUrl);
+  const sameImage = Boolean(ia) && ia === ib;
+  const nearDesc = da.length > 40 && db.length > 40 && descOverlap >= 0.9;
+  const longOverlap = overlap(tokens(a.extendedDescription), tokens(b.extendedDescription));
+  const nearLong =
+    norm(a.extendedDescription).length > 80 &&
+    norm(b.extendedDescription).length > 80 &&
+    longOverlap >= 0.9;
 
   // Same title on the same day is the classic repost.
   if (sameTitle && sameDay) return { match: true, reason: "same title and date" };
@@ -687,6 +725,24 @@ export function contentMatches(
       match: true,
       reason: sameLoc ? "similar title, same start time and location" : "similar title, same start time and description",
     };
+  }
+  // Content evidence, with no date coincidence required. A repeating programme
+  // is ONE event with a session per date, so two listings telling the same
+  // story at the same venue are the same event even when their dates differ;
+  // the caller folds the new dates into the stored row. Each of these needs two
+  // independent signals, because one venue runs many different events and a
+  // season often reuses a single promo image across its whole series.
+  if (sameImage && titleOverlap >= 0.8) {
+    return { match: true, reason: "same picture and near-identical title" };
+  }
+  if (sameImage && nearDesc) {
+    return { match: true, reason: "same picture and near-identical description" };
+  }
+  if (nearDesc && sameLoc) {
+    return { match: true, reason: "near-identical description at the same venue" };
+  }
+  if (nearLong && sameLoc && titleOverlap >= 0.5) {
+    return { match: true, reason: "near-identical long description at the same venue" };
   }
   return { match: false, reason: "" };
 }
