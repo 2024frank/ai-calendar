@@ -36,6 +36,23 @@ function isUnsupportedModelError(message: string): boolean {
   return /model .* is not supported|models\[\d+\]/i.test(message);
 }
 
+/**
+ * Whether a 400 is worth retrying without the models chain.
+ *
+ * The check above matches the wording the API used when it named the bad
+ * model. On 2026-08-20 it started returning a bare {"message":"invalid
+ * request"} for the same condition, which sailed past that wording check, so
+ * the fallback never fired and every scheduled extraction failed at
+ * validation in under a second. The models chain is the only part of our
+ * request that changes on Perplexity's side rather than ours, so any 400 on a
+ * request that carried one is worth one retry under their own selection: if
+ * the chain was the problem the retry works, and if the body itself is bad
+ * the retry fails identically and the error says both attempts failed.
+ */
+function worthRetryingWithoutModels(status: number, message: string, hadModels: boolean): boolean {
+  return status === 400 && (hadModels || isUnsupportedModelError(message));
+}
+
 /** The models this key may use, straight from the API. */
 export async function listModels(): Promise<string[]> {
   const res = await fetch("https://api.perplexity.ai/v1/models", {
@@ -214,7 +231,7 @@ async function llmCompleteOnce(call: LlmCall, deadlineAt: number): Promise<LlmRe
   if (!res.ok) {
     // A retired or renamed model fails validation for the whole request. Retry
     // once letting Perplexity pick, so a model going away is not an outage.
-    if (res.status === 400 && isUnsupportedModelError(raw)) {
+    if (worthRetryingWithoutModels(res.status, raw, Boolean(body.models))) {
       const rest = { ...body };
       delete rest.models;
       const retry = await fetch(AGENT_URL, {
@@ -228,7 +245,10 @@ async function llmCompleteOnce(call: LlmCall, deadlineAt: number): Promise<LlmRe
       });
       const retryRaw = await retry.text();
       if (!retry.ok) {
-        throw new Error(`Perplexity ${retry.status}: ${retryRaw.slice(0, 400)}`);
+        throw new Error(
+          `Perplexity ${res.status}: ${raw.slice(0, 200)} | retried without the models chain ` +
+            `(was ${JSON.stringify(body.models)}), still failed: ${retry.status}: ${retryRaw.slice(0, 200)}`,
+        );
       }
       raw = retryRaw;
     } else {
