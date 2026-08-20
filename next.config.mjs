@@ -5,7 +5,14 @@ const scriptPolicy =
     : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
 
 const nextConfig = {
-  serverExternalPackages: ["mysql2"],
+  serverExternalPackages: ["mysql2", "sharp"],
+  // sharp's libvips shared library is loaded with dlopen, which Next's file
+  // tracer cannot see, so deployments shipped the JS half of sharp without the
+  // native half and every importing route crashed on load (ERR_DLOPEN_FAILED,
+  // libvips-cpp.so missing). Force the whole @img tree into every function.
+  outputFileTracingIncludes: {
+    "/**": ["./node_modules/@img/**"],
+  },
   async headers() {
     const securityHeaders = [
       {

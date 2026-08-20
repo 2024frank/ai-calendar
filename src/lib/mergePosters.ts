@@ -1,5 +1,15 @@
 import "server-only";
-import sharp from "sharp";
+// sharp is a native module. Loaded lazily so that if its platform binary is
+// missing in a deployment, only image PROCESSING fails, with a caught error at
+// the call site, instead of every route that transitively imports this file
+// crashing on load. That exact failure took down /dashboard and the Approve
+// button: routes that never touch an image died loading libvips.
+type Sharp = typeof import("sharp").default;
+let sharpModule: Sharp | null = null;
+async function loadSharp(): Promise<Sharp> {
+  if (!sharpModule) sharpModule = (await import("sharp")).default;
+  return sharpModule;
+}
 import { fetchPublicBytes, resolveUrlSecrets } from "./fetchPage";
 
 export const MAX_POSTER_IMAGES = 4;
@@ -21,7 +31,7 @@ export async function fitInlineImage(input: Buffer): Promise<Buffer | null> {
 
   for (const attempt of attempts) {
     try {
-      const output = await sharp(input, {
+      const output = await (await loadSharp())(input, {
         failOn: "error",
         limitInputPixels: 40_000_000,
         sequentialRead: true,
@@ -74,7 +84,7 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
     try {
       const raw = await fetchImageBytes(url);
       if (!raw) continue;
-      const out = await sharp(raw, {
+      const out = await (await loadSharp())(raw, {
         failOn: "error",
         limitInputPixels: 40_000_000,
         sequentialRead: true,
@@ -109,7 +119,7 @@ export async function mergePosterImages(urls: string[]): Promise<Buffer | null> 
     return item;
   });
 
-  const merged = await sharp({
+  const merged = await (await loadSharp())({
     create: {
       width: totalWidth,
       height: canvasHeight,
