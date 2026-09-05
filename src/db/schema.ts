@@ -256,9 +256,18 @@ export const events = mysqlTable(
     // The already-published CommunityHub post this duplicates, when the match
     // was remote rather than another event in this app.
     duplicateOfUrl: text("duplicate_of_url"),
-    // Set when the correction agent filled a missing field and re-queued a
-    // previously auto-rejected event. Drives the "corrected" metric.
+    // A successful automatic or reviewer-requested correction timestamp.
+    // This is not evidence that the event was previously auto-rejected.
     correctedAt: timestamp("corrected_at"),
+    correctionRequest: text("correction_request"),
+    correctionState: mysqlEnum("correction_state", ["requested", "running", "failed", "completed"]),
+    correctionError: text("correction_error"),
+    correctionRequestedAt: timestamp("correction_requested_at"),
+    correctionLeaseToken: varchar("correction_lease_token", { length: 36 }),
+    proposedUpdateOfEventId: int("proposed_update_of_event_id").references((): AnyMySqlColumn => events.id, {
+      onDelete: "restrict",
+    }),
+    proposalResolvedAt: timestamp("proposal_resolved_at"),
     rejectionReason: text("rejection_reason"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
@@ -269,6 +278,7 @@ export const events = mysqlTable(
     index("idx_events_status").on(t.status),
     // Retention sweep: purge past-date, restricted, unapproved events.
     index("idx_events_expiry").on(t.status, t.startTimeMax),
+    index("idx_events_proposal").on(t.proposedUpdateOfEventId, t.proposalResolvedAt),
   ],
 );
 
@@ -481,6 +491,9 @@ export const publishSubmissions = mysqlTable(
       .notNull()
       .references(() => destinations.id, { onDelete: "cascade" }),
     payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+    operation: mysqlEnum("operation", ["create", "update"]).notNull().default("create"),
+    // Immutable endpoint provenance. Older claims without it cannot be PATCHed.
+    destinationSubmitUrl: text("destination_submit_url"),
     state: mysqlEnum("state", SUBMISSION_STATE).notNull().default("prepared"),
     externalPostId: varchar("external_post_id", { length: 120 }),
     payload: json("payload"),
@@ -490,6 +503,24 @@ export const publishSubmissions = mysqlTable(
   },
   (t) => [uniqueIndex("uq_submission").on(t.eventId, t.destinationId, t.payloadHash)],
 );
+
+/** Append-only research evidence. No update/delete API; source deletion is restricted. */
+export const evaluations = mysqlTable("evaluations", {
+  id: int("id").autoincrement().primaryKey(),
+  communityId: int("community_id").notNull().references(() => communities.id, { onDelete: "restrict" }),
+  sourceId: int("source_id").notNull().references(() => sources.id, { onDelete: "restrict" }),
+  createdBy: int("created_by").references(() => users.id, { onDelete: "set null" }),
+  creator: json("creator").notNull(), // immutable attribution even if the user account is deleted
+  title: varchar("title", { length: 200 }).notNull(),
+  version: int("version").notNull().default(1),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  provenance: json("provenance").notNull(),
+  snapshot: json("snapshot").notNull(),
+  confirmedMatches: json("confirmed_matches").notNull(),
+  report: json("report").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("idx_evaluations_community").on(t.communityId, t.id), index("idx_evaluations_source").on(t.sourceId)]);
 
 /** Simple platform-wide key/value settings (e.g. the active model). */
 export const appSettings = mysqlTable("app_settings", {

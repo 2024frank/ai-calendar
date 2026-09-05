@@ -118,6 +118,7 @@ function fixture(
     };
   });
 
+  Object.assign(db, { transaction: async (work: (tx: typeof db) => unknown) => work(db) });
   const runEvents = loadRoute<typeof import("../src/lib/runEvents")>(
     new URL("../src/lib/runEvents.ts", import.meta.url),
     { "server-only": {}, "@/db": { db }, "@/db/schema": schema },

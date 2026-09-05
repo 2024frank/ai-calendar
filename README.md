@@ -81,6 +81,12 @@ Run `npm run check` for lint, TypeScript, regression tests, and a production bui
 
 The configured Vercel cron runs daily. Fast recovery after a killed worker chain requires a separate frequent consumer of `/api/internal/jobs`; the daily schedule alone cannot meet a two-minute queue objective. See the operational requirements and release checks in [docs/RELIABILITY.md](docs/RELIABILITY.md).
 
+`npm run worker:tick -- --help` describes the independent worker command. Configure its endpoint and secret explicitly in a protected service environment; no recurring schedule is installed by this command.
+
+`npm run test:destination -- --port 4320` starts a separate loopback-only, in-memory receiver for marked synthetic event submissions. It never forwards to CommunityHub. `npm run test:mysql` runs the real database and local HTTP publishing suites against an explicitly configured disposable MySQL server; see the acceptance protocol for its required test-only environment and safety boundaries.
+
+The pilot's [acceptance and research protocol](docs/PILOT-ACCEPTANCE.md) covers safe downstream content updates, correction requests, source-policy fixtures, retained reference-versus-extraction evaluations, migration rehearsal, and a fresh-community setup trial. Evaluation coverage describes a declared reference sample, not overall AI accuracy. Existing deployments must review the historical schema catch-up before running the new migrations.
+
 ### Environment
 
 | Variable | For |
@@ -90,6 +96,8 @@ The configured Vercel cron runs daily. Fast recovery after a killed worker chain
 | `AUTH_JWT_SECRET` | Signing the session cookie |
 | `AGENT_INGEST_SECRET` | Signs per-run callback and scoped pending-inventory tokens; the signing secret itself is never sent to the model |
 | `CRON_SECRET` | Authorizes the daily cron |
+| `WORKER_SECRET` | Authorizes worker requests; the app falls back to `CRON_SECRET` if omitted |
+| `AI_CALENDAR_WORKER_URL` | Explicit full `/api/internal/jobs` endpoint for the independent worker runner only |
 | `APP_URL` | Public base URL, used in sign-in links |
 | `HOSTINGER_EMAIL`, `HOSTINGER_EMAIL_PASSWORD` | The mailbox mail is sent from. `HOSTINGER_SMTP_HOST` and `_PORT` override the defaults |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional fallback if the mailbox is unset or refuses. With neither, links get logged in development instead of emailed |

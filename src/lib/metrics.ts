@@ -10,7 +10,7 @@ export const MINUTES_PER_MANUAL_EVENT = 6;
 export type SourceMetric = {
   name: string;
   gathered: number;
-  completeOnArrival: number; // arrived with every field filled
+  currentUnflagged: number; // current records with no stored rejection reason
   duplicatesCaught: number;
   editsNeeded: number; // reviewer field edits recorded
 };
@@ -20,15 +20,15 @@ export type PilotMetrics = {
   eventsGathered: number; // complete events handed to review (not counting caught duplicates)
   duplicatesCaught: number;
   filteredIncomplete: number; // events the system caught as incomplete before a person saw them
-  completeOnArrivalPct: number; // of gathered events, how many needed no field added
-  approvedAsIsPct: number | null; // of approved/published, share kept with no edits (null if none yet)
+  currentUnflaggedPct: number | null; // mutable operational state, not arrival accuracy
+  approvedAsIsPct: number | null; // reviewer-attributed approvals with no recorded field edits
   approvedTotal: number;
   totalReviewerEdits: number;
   estimatedHoursSaved: number;
   runsCompleted: number;
   totalSpendUsd: number; // real API dollars, summed from what the Agent API billed
   costPerEventUsd: number; // spend divided by events gathered
-  correctedCount: number; // auto-rejected events the correction agent fixed and re-queued
+  correctedCount: number; // records with a correction timestamp, including reviewer-requested corrections
   correctedAccepted: number; // of those, how many a reviewer later approved/published
   bySource: SourceMetric[];
   byModel: ModelMetric[];
@@ -41,7 +41,7 @@ export type ModelMetric = {
   eventsExtracted: number;
   costUsd: number;
   costPerEventUsd: number; // the money question: cheaper per usable event
-  cleanPct: number; // of what it found, the share that was usable (quality)
+  cleanPct: number | null; // extraction-only validation share, unavailable when nothing was found
 };
 
 function n(v: unknown): number {
@@ -79,11 +79,11 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     .groupBy(fieldEditLog.eventId);
   const editedSet = new Set(editedEventIds.map((r) => r.id));
 
-  // Approved/published events, to compute the "kept as-is" rate.
+  // Submitted status alone is not evidence of human approval.
   const approvedRows = await db
     .select({ id: events.id, status: events.status })
     .from(events)
-    .where(sql`${events.status} in ('approved','submitted')`);
+    .where(sql`${events.status} in ('approved','submitted') and ${events.publishedVia} = 'reviewer'`);
   const approvedTotal = approvedRows.length;
   const approvedAsIs = approvedRows.filter((e) => !editedSet.has(e.id)).length;
 
@@ -95,18 +95,17 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     .from(runs);
   const totalSpendUsd = n(runRow?.costMicros) / 1_000_000;
 
-  // Correction agent: events it rescued from auto-rejection, and how many of
-  // those a reviewer later accepted (a direct measure that the fixes were good).
+  // Correction timestamps do not distinguish original auto-rejections from
+  // reviewer-requested corrections. Neither count proves correctness.
   const [corrRow] = await db
     .select({
       total: sql<number>`count(*)`,
-      accepted: sql<number>`sum(case when ${events.status} in ('approved','submitted') then 1 else 0 end)`,
+      accepted: sql<number>`sum(case when ${events.status} in ('approved','submitted') and ${events.publishedVia} = 'reviewer' then 1 else 0 end)`,
     })
     .from(events)
     .where(sql`${events.correctedAt} is not null`);
 
-  // Per-model comparison, straight from run rows: what each model found, cost,
-  // and how clean its output was. This is the "which is better and cheaper" view.
+  // Only extraction runs use the found/invalid/extracted counters comparably.
   const modelRows = await db
     .select({
       model: runs.model,
@@ -117,7 +116,7 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
       costMicros: sql<number>`sum(${runs.costMicros})`,
     })
     .from(runs)
-    .where(sql`${runs.model} is not null`)
+    .where(sql`${runs.model} is not null and ${runs.runKind} = 'extraction'`)
     .groupBy(runs.model);
   const byModel: ModelMetric[] = modelRows
     .map((r) => {
@@ -130,7 +129,7 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
         eventsExtracted: extracted,
         costUsd,
         costPerEventUsd: extracted ? costUsd / extracted : 0,
-        cleanPct: found ? Math.round(((found - n(r.invalid)) / found) * 100) : 0,
+        cleanPct: found ? Math.round(((found - n(r.invalid)) / found) * 100) : null,
       };
     })
     .sort((a, b) => b.eventsExtracted - a.eventsExtracted);
@@ -139,18 +138,18 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   // Aggregate.
   // Events shown to a reviewer (pending/approved/submitted). Auto-rejected events
   // are the ones the system caught as incomplete BEFORE a person saw them, so they
-  // are a separate figure, never mixed into the "complete on arrival" rate.
+  // are a separate current-state count, not an immutable arrival measure.
   const reviewStatuses = new Set(["pending", "approved", "submitted"]);
   let eventsGathered = 0;
   let duplicatesCaught = 0;
-  let completeOnArrival = 0;
+  let currentUnflagged = 0;
   let filteredIncomplete = 0;
   const perSource = new Map<number, SourceMetric>();
 
   for (const r of rows) {
     const sid = r.sourceId ?? -1;
     const name = nameOf.get(sid) ?? "Unknown";
-    const s = perSource.get(sid) ?? { name, gathered: 0, completeOnArrival: 0, duplicatesCaught: 0, editsNeeded: 0 };
+    const s = perSource.get(sid) ?? { name, gathered: 0, currentUnflagged: 0, duplicatesCaught: 0, editsNeeded: 0 };
     const total = n(r.total);
     const flagged = n(r.flagged);
 
@@ -161,9 +160,9 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
       filteredIncomplete += total;
     } else if (reviewStatuses.has(r.status ?? "")) {
       eventsGathered += total;
-      completeOnArrival += total - flagged; // flagged = something still missing
+      currentUnflagged += total - flagged;
       s.gathered += total;
-      s.completeOnArrival += total - flagged;
+      s.currentUnflagged += total - flagged;
     }
     perSource.set(sid, s);
   }
@@ -177,7 +176,7 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     eventsGathered,
     duplicatesCaught,
     filteredIncomplete,
-    completeOnArrivalPct: eventsGathered ? Math.round((completeOnArrival / eventsGathered) * 100) : 0,
+    currentUnflaggedPct: eventsGathered ? Math.round((currentUnflagged / eventsGathered) * 100) : null,
     approvedAsIsPct: approvedTotal ? Math.round((approvedAsIs / approvedTotal) * 100) : null,
     approvedTotal,
     totalReviewerEdits: editRows.reduce((a, r) => a + n(r.edits), 0),

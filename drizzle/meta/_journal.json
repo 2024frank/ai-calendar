@@ -15,6 +15,20 @@
       "when": 1784627545050,
       "tag": "0001_lethal_betty_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788632200963,
+      "tag": "0002_historical_schema_catchup",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1788633878458,
+      "tag": "0003_pilot_reliability_evidence",
+      "breakpoints": true
     }
   ]
 }

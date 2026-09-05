@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
-import { desc, eq, sql } from "drizzle-orm";
+import Link from "next/link";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, learnings, sources, users } from "@/db/schema";
+import { communities, learnings, runs, sources, users } from "@/db/schema";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { currentCommunityId } from "@/lib/data";
 import { Card, EmptyState, PageHeader, StatusBadge, TableShell } from "@/components/ui";
@@ -22,6 +23,7 @@ export default async function LearningPage() {
   const s = await requireUser();
   if (!isAdmin(s)) redirect("/dashboard");
   const communityId = await currentCommunityId(s);
+  if (!communityId) redirect("/dashboard");
   const [community] = communityId
     ? await db.select({ timezone: communities.timezone }).from(communities).where(eq(communities.id, communityId)).limit(1)
     : [undefined];
@@ -58,13 +60,26 @@ export default async function LearningPage() {
     .from(learnings)
     .where(communityId ? eq(learnings.communityId, communityId) : undefined);
 
+  const failures = await db.select({ id: runs.id, startedAt: runs.startedAt, errorLog: runs.errorLog }).from(runs)
+    .where(and(eq(runs.communityId, communityId), eq(runs.runKind, "learning"), eq(runs.status, "failed")))
+    .orderBy(desc(runs.id)).limit(20);
+
   return (
     <div className="grid" style={{ gap: 20 }}>
       <PageHeader
-        eyebrow="Training Data"
-        title="What reviewers have taught the agents"
-        description="Every correction a person makes becomes one instruction the agents are given on their next run. Download the whole set to train a model of your own."
+        eyebrow="Reviewer feedback"
+        title="Instructions derived from review"
+        description="Some corrections produce reusable prompt instructions; others produce no lesson, and generation can fail. These are prompt inputs, not fine-tuning or evidence of improved extraction accuracy."
       />
+
+      {failures.length > 0 && <Card>
+        <h2>Lesson generation failed</h2>
+        <p>Latest 20 failed learning runs in this community. A failed generation is not a decision that there was nothing worth teaching. Inspect the original correction and run before requesting a retry; extraction reruns do not automatically retry these lessons.</p>
+        <ul>{failures.map((run) => {
+          const context = Array.isArray(run.errorLog) ? run.errorLog[0] as { eventId?: number; fieldName?: string } | undefined : undefined;
+          return <li key={run.id}><Link href={`/runs/${run.id}`}>Run #{run.id}</Link> · {fmtDate(run.startedAt, timeZone)}{context?.eventId ? <> · <Link href={`/review/${context.eventId}`}>Original event #{context.eventId}</Link></> : null}{context?.fieldName ? ` · Field: ${context.fieldName}` : ""}</li>;
+        })}</ul>
+      </Card>}
 
       <Card>
         <div className="grid" style={{ gap: 14 }}>
@@ -82,7 +97,7 @@ export default async function LearningPage() {
               <div style={{ fontSize: 26, fontWeight: 700 }}>{Number(tally?.fromRejections ?? 0)}</div>
             </div>
             <div>
-              <div className="label">People who taught them</div>
+              <div className="label">Review contributors</div>
               <div style={{ fontSize: 26, fontWeight: 700 }}>{Number(tally?.people ?? 0)}</div>
             </div>
           </div>
@@ -97,13 +112,13 @@ export default async function LearningPage() {
         <div className="section-header" style={{ padding: "18px 20px 4px" }}>
           <div>
             <h2>Lessons</h2>
-            <p>Newest first. Each one came from a person correcting or rejecting a real event.</p>
+            <p>Newest first. Model-written instructions derived from reviewer feedback; being served to a run does not prove the instruction helped.</p>
           </div>
         </div>
         {rows.length === 0 ? (
           <EmptyState
-            title="Nothing learned yet"
-            description="Correct a field or reject an event in the review queue, and the lesson drawn from it appears here."
+            title="No retained instructions yet"
+            description="Reusable instructions may appear after review. No-lesson decisions and failed generation are separate outcomes."
           />
         ) : (
           <TableShell label="Lessons learned from reviewers">

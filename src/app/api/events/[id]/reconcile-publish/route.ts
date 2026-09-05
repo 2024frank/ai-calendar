@@ -5,6 +5,7 @@ import { events, learnings, publishSubmissions } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
 import { logActivity } from "@/lib/activity";
+import { readJsonObjectBody } from "@/lib/requestBody";
 import {
   parsePublishReconciliationOutcome,
   publishSubmissionCanBeReconciled,
@@ -42,8 +43,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const event = await getEventScoped(session, eventId);
   if (!event) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const body = (await req.json().catch(() => null)) as { outcome?: unknown } | null;
-  const outcome = parsePublishReconciliationOutcome(body?.outcome);
+  const parsed = await readJsonObjectBody(req,8192);
+  if (!parsed.ok) return NextResponse.json({error:parsed.error},{status:parsed.status});
+  const body = parsed.body;
+  const outcome = parsePublishReconciliationOutcome(body.outcome);
   if (!outcome) {
     return NextResponse.json(
       { error: 'outcome must be "published" or "not_published"' },
@@ -71,6 +74,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         destinationId: publishSubmissions.destinationId,
         payloadHash: publishSubmissions.payloadHash,
         updatedAt: publishSubmissions.updatedAt,
+        operation: publishSubmissions.operation,
       })
       .from(publishSubmissions)
       .where(
@@ -84,6 +88,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .for("update");
 
     if (!submission) return null;
+    if (submission.operation === "update" && body.operation !== "update") return { wrongOperation: true as const };
     if (!publishSubmissionCanBeReconciled(submission.state, submission.updatedAt, reconciledAt.getTime())) {
       return { active: true as const };
     }
@@ -123,7 +128,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // decision or apply a contradictory event transition.
     if (affectedRows(claimed) !== 1) return { conflict: true as const };
 
-    if (transition.eventStatus) {
+    if (transition.eventStatus && submission.operation !== "update") {
       await tx
         .update(events)
         .set({
@@ -153,6 +158,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       submissionId: submission.id,
       destinationId: submission.destinationId,
       payloadHash: submission.payloadHash,
+      operation: submission.operation ?? "create",
+      eventStatus: submission.operation === "update" ? currentEvent.status : transition.eventStatus ?? currentEvent.status,
     };
   });
 
@@ -168,6 +175,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       { status: 409 },
     );
   }
+  if ("wrongOperation" in result) return NextResponse.json({error:"Verify whether the requested content update was applied, not merely whether the post exists. Refresh and use update reconciliation."},{status:409});
   if (result.conflict) {
     return NextResponse.json(
       { error: "This publish submission was already reconciled. Refresh and try again." },
@@ -176,17 +184,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   await logActivity({
-    action: outcome === "published" ? "approve" : "edit",
+    action: outcome === "published" && result.operation !== "update" ? "approve" : "edit",
     actorUserId: session.uid,
     actorEmail: session.email,
     targetType: "event",
     targetId: event.id,
     summary:
-      outcome === "published"
+      result.operation === "update"
+        ? `Confirmed CommunityHub content update ${outcome === "published" ? "applied" : "not applied"} for event #${event.id}`
+        : outcome === "published"
         ? `Confirmed CommunityHub published "${(event.title ?? "untitled").slice(0, 80)}"`
         : `Confirmed CommunityHub did not publish "${(event.title ?? "untitled").slice(0, 80)}"; retry enabled`,
     detail: {
       reconciliation: outcome,
+      operation: result.operation,
       submissionId: result.submissionId,
       destinationId: result.destinationId,
       payloadHash: result.payloadHash,
@@ -199,7 +210,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     submissionId: result.submissionId,
     outcome,
     submissionState: transition.submissionState,
-    eventStatus: transition.eventStatus ?? event.status,
+    eventStatus: result.eventStatus,
+    operation: result.operation,
     retryEnabled: outcome === "not_published",
   });
 }

@@ -30,6 +30,27 @@ export type PublishResult = {
   remoteId?: string | null;
 };
 
+/** Conservative accepted response forms already used by the create parser.
+ * Payload documentation does not promise a response schema: anything without
+ * an unambiguous numeric post id must be reconciled, not assumed successful.
+ */
+export function acknowledgedCommunityHubPostId(body: string, expectedId?: string): string | null {
+  try {
+    const value: unknown = JSON.parse(body);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const json = value as Record<string, unknown>;
+    if (json.success === false || json.ok === false || json.error || json.status === "error") return null;
+    const post = json.post && typeof json.post === "object" ? json.post as Record<string, unknown> : {};
+    const rawIds = [json.id, json.post_id, post.id].filter(id => id != null);
+    if (!rawIds.length) return null;
+    const ids = rawIds.map(id => typeof id === "number" && Number.isSafeInteger(id) && id > 0
+      ? String(id) : typeof id === "string" && /^[1-9]\d*$/.test(id) ? id : null);
+    const id = ids[0];
+    if (!id || ids.some(other => other !== id) || (expectedId !== undefined && expectedId !== id)) return null;
+    return id;
+  } catch { return null; }
+}
+
 /** Build the exact CommunityHub payload for an event. */
 export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string) {
   const sessions = (ev.sessions ?? []) as { startTime: number; endTime: number }[];
@@ -167,6 +188,7 @@ export async function publishEvent(
 ): Promise<PublishResult> {
   const [ev] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!ev) return { ok: false, state: "failed", message: "Event not found." };
+  if (ev.proposedUpdateOfEventId) return { ok: false, state: "skipped", message: `This is a recurrence update proposal. Review and update existing event #${ev.proposedUpdateOfEventId}; do not create another post.` };
   const holdReason = automaticPublishHoldReason(ev, finalStatus);
   if (holdReason) return { ok: false, state: "skipped", message: holdReason };
   const [source] = ev.sourceId
@@ -250,7 +272,7 @@ export async function publishEvent(
   const payload = buildPayload(publishableEvent, process.env.PUBLISH_EMAIL || "", appUrl);
   const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 
-  const claim = await claimPublication({ eventId: ev.id, destinationId: dest.id, payloadHash, payload });
+  const claim = await claimPublication({ eventId: ev.id, destinationId: dest.id, payloadHash, payload, destinationSubmitUrl: new URL(cfg.submit_url).toString() });
   if (claim.kind === "missing") return { ok: false, state: "failed", message: "Event no longer exists." };
   if (claim.kind === "already_sent") {
     if (claim.payloadChanged) {
@@ -269,6 +291,7 @@ export async function publishEvent(
       message: "A previous send is unresolved. Reconcile it in CommunityHub before retrying.",
     };
   }
+  if (claim.kind !== "claimed") return { ok: false, state: "failed", message: "Create publication was not claimed." };
 
   const submissionId = claim.submissionId;
 
@@ -320,13 +343,13 @@ export async function publishEvent(
     };
   }
 
-  let remoteId: string | null = null;
-  try {
-    const json = JSON.parse(body) as Record<string, unknown>;
-    const raw = json.id ?? json.post_id ?? (json.post as Record<string, unknown>)?.id;
-    if (raw != null) remoteId = String(raw);
-  } catch {
-    /* a non-JSON success body is still a success */
+  const remoteId = acknowledgedCommunityHubPostId(body);
+  if (!remoteId) {
+    await db.update(publishSubmissions).set({
+      state: "accepted_unreconciled",
+      error: { status: res.status, message: "No trustworthy post acknowledgment.", body: body.slice(0, 500) },
+    }).where(eq(publishSubmissions.id, submissionId));
+    return { ok: false, state: "unknown", message: "CommunityHub did not return a trustworthy post acknowledgment. Verify the post before retrying." };
   }
 
   // The status reflects the PATH, not just "reached the hub". "approved" means

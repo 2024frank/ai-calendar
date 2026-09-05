@@ -18,7 +18,7 @@ CREATE TABLE `jobs` (
 	`locked_by` varchar(120),
 	`last_error` text,
 	`created_at` timestamp(3) NOT NULL DEFAULT (now()),
-	`updated_at` timestamp(3) NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`updated_at` timestamp(3) NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP(3),
 	CONSTRAINT `jobs_id` PRIMARY KEY(`id`),
 	CONSTRAINT `jobs_run_id_unique` UNIQUE(`run_id`),
 	CONSTRAINT `jobs_dedupe_key_unique` UNIQUE(`dedupe_key`)
@@ -29,7 +29,7 @@ CREATE TABLE `rate_limit_buckets` (
 	`window_started_at_ms` bigint NOT NULL,
 	`count` int NOT NULL DEFAULT 0,
 	`expires_at` timestamp(3) NOT NULL,
-	`updated_at` timestamp(3) NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`updated_at` timestamp(3) NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP(3),
 	CONSTRAINT `rate_limit_buckets_key_hash` PRIMARY KEY(`key_hash`)
 );
 --> statement-breakpoint

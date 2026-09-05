@@ -1,7 +1,7 @@
 import "server-only";
-import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, runs, sources } from "@/db/schema";
+import { communities, events, publishSubmissions, runs, sources } from "@/db/schema";
 import { HARD_ISSUES } from "./ingest";
 import { mergePosterImages } from "./mergePosters";
 import { stripDateSentences, validateEvent, type ExtractedEvent } from "./contract";
@@ -14,6 +14,7 @@ import { isPublicHttpUrl } from "./publicUrl";
 import { normalizeImageBase64 } from "./imageData";
 import { validationOptionsForSource } from "./sourcePolicy";
 import { preserveEventHolds } from "./eventHolds";
+import { claimCorrection, failCorrection, persistCorrection } from "./correctionLease";
 
 /** Fields the correction agent may supply, all optional. */
 const CORRECTION_SCHEMA = {
@@ -71,13 +72,14 @@ async function imageAlreadyUsed(url: string, exceptEventId: number): Promise<boo
 type Outcome = "fixed" | "incomplete" | "failed";
 
 /** Try to complete one auto-rejected event. */
-async function correctOne(
+export async function correctOne(
   runId: number,
   ev: EventRow,
   source: SourceRow,
   community: CommunityRow | null,
   instructions: string,
   models: string[],
+  options: { request?: string; persist: (patch: Partial<EventRow>) => Promise<void> },
 ): Promise<Outcome> {
   const missing = String(ev.rejectionReason ?? "").replace(/^[^:]*:\s*/, "");
   const pageUrl = ev.calendarSourceUrl || ev.website || source.url || "";
@@ -103,6 +105,7 @@ async function correctOne(
 
 EVENT: ${ev.title}
 MISSING: ${missing}
+${options.request ? `REVIEWER REQUEST (only description, extended description, contact email, phone, location, website, or a missing image): ${options.request}` : ""}
 PAGE: ${pageUrl}
 ${access}${imagery}
 Return only the missing fields from that page. For a missing image use THIS event's own photo in imageCdnUrl, or imageB64 if the host blocks downloads. Never a logo, and never a picture of the venue: a hall interior or a building exterior taken from the listing page belongs to every event there, not to this one, and will be refused. If this event has no picture of its own, leave the image null rather than substituting one. If a field truly is not on the page, leave it null and set found=false. One page, no crawling.`;
@@ -132,6 +135,10 @@ Return only the missing fields from that page. For a missing image use THIS even
       eventId: ev.id,
     });
   }
+  if (options.request && (callFailed || patch.found !== true)) return callFailed ? "failed" : "incomplete";
+  if (options.request && !Object.entries(patch).some(([key,value]) =>
+    key !== "found" && key in CORRECTION_SCHEMA.properties && typeof value === "string" && value.trim().length > 0,
+  )) return "incomplete";
 
   // Resolve the image: agent URL, agent base64, or a server-side page rescue.
   let imageCdnUrl = ev.imageCdnUrl;
@@ -227,22 +234,20 @@ Return only the missing fields from that page. For a missing image use THIS even
     issues.filter((i) => !HARD_ISSUES.has(i)),
     ev.rejectionReason,
   );
-  await db
-    .update(events)
-    .set({
-      status: "pending",
-      rejectionReason: softIssues.length ? `Missing before publish: ${softIssues.join(", ")}` : null,
-      imageCdnUrl: imageCdnUrl ?? null,
-      imageData: imageData ?? null,
-      description: candidate.description,
-      extendedDescription: candidate.extendedDescription ?? null,
-      contactEmail: candidate.contactEmail ?? null,
-      phone: candidate.phone ?? null,
-      location: candidate.location ?? null,
-      website: candidate.website ?? null,
-      correctedAt: new Date(),
-    })
-    .where(eq(events.id, ev.id));
+  const corrected: Partial<EventRow> = {
+    status: "pending",
+    rejectionReason: softIssues.length ? `Missing before publish: ${softIssues.join(", ")}` : null,
+    imageCdnUrl: imageCdnUrl ?? null,
+    imageData: imageData ?? null,
+    description: candidate.description,
+    extendedDescription: candidate.extendedDescription ?? null,
+    contactEmail: candidate.contactEmail ?? null,
+    phone: candidate.phone ?? null,
+    location: candidate.location ?? null,
+    website: candidate.website ?? null,
+    correctedAt: new Date(),
+  };
+  await options.persist(corrected);
   await emit(runId, "queue_outcome", `Corrected and re-queued: ${ev.title}`, { eventId: ev.id });
   return "fixed";
 }
@@ -277,25 +282,26 @@ export async function correctNextEvent(
   // Skip ones already attempted, so a page that genuinely lacks the field can
   // never trap the loop on the same event forever.
   const untried = sql`(${events.rejectionReason} is null or ${events.rejectionReason} not like '%[tried]%')`;
-  const where = sourceId
-    ? and(
-        communityId ? eq(events.communityId, communityId) : undefined,
-        eq(events.sourceId, sourceId),
-        eq(events.status, "auto_rejected"),
-        untried,
-      )
-    : and(
-        communityId ? eq(events.communityId, communityId) : undefined,
-        eq(events.status, "auto_rejected"),
-        isNotNull(events.sourceId),
-        untried,
-      );
+  const where = and(
+    communityId ? eq(events.communityId, communityId) : undefined,
+    sourceId ? eq(events.sourceId, sourceId) : isNotNull(events.sourceId),
+    eq(events.status, "auto_rejected"), untried,
+    or(isNull(events.correctionState), ne(events.correctionState, "running")),
+    notExists(db.select({ id: publishSubmissions.id }).from(publishSubmissions).where(and(
+      eq(publishSubmissions.eventId, events.id), inArray(publishSubmissions.state, ["sending", "accepted_unreconciled", "succeeded"]),
+    ))),
+  );
 
-  const [ev] = await db.select().from(events).where(where).limit(1);
-  if (!ev) return { done: true, fixed: false, failed: false, title: null, remaining: 0 };
-
-  const [src] = await db.select().from(sources).where(eq(sources.id, ev.sourceId!)).limit(1);
-  if (!src) return { done: true, fixed: false, failed: false, title: null, remaining: 0 };
+  const [candidate] = await db.select().from(events).where(where).limit(1);
+  if (!candidate) return { done: true, fixed: false, failed: false, title: null, remaining: 0 };
+  const lease = await claimCorrection(candidate.id, candidate.communityId, "Complete missing source-backed fields for review.", { automatic: true });
+  if (!lease) return { done: false, fixed: false, failed: false, title: candidate.title, remaining: 1 };
+  const ev = lease.event;
+  let outcome: Outcome = "failed";
+  let errorMessage = "The correction service failed. Retry is available.";
+  try {
+  const [src] = await db.select().from(sources).where(and(eq(sources.id, ev.sourceId!), eq(sources.communityId, ev.communityId))).limit(1);
+  if (!src) throw new Error("This event has no authorized source to check.");
   const [community] = await db
     .select()
     .from(communities)
@@ -316,32 +322,16 @@ export async function correctNextEvent(
   const instructions = fillTemplate(src.specialInstructions ?? "", vars);
   const models = await modelChain();
 
-  // Claim the event BEFORE working on it. If this request is killed partway,
-  // for a slow page or a platform timeout, the marker is already committed, so
-  // the next call moves to a different event instead of hitting the same slow
-  // one forever. A success overwrites rejectionReason below, so the marker
-  // only survives on events that genuinely could not be completed.
-  await db
-    .update(events)
-    .set({ rejectionReason: `${ev.rejectionReason ?? "Auto-rejected (incomplete)"} [tried]` })
-    .where(eq(events.id, ev.id));
-
-  let outcome: Outcome = "failed";
-  try {
-    outcome = await correctOne(runId, ev, src, community ?? null, instructions, models);
-  } catch {
+    outcome = await correctOne(runId, ev, src, community ?? null, instructions, models, {
+      persist: patch => persistCorrection(lease, patch),
+    });
+  } catch (error) {
     outcome = "failed";
+    errorMessage = error instanceof Error ? error.message : errorMessage;
   }
   const fixed = outcome === "fixed";
 
-  // A call that never landed leaves the event exactly as it was found, so take
-  // the marker back off and let a later pass have a proper go at it.
-  if (outcome === "failed") {
-    await db
-      .update(events)
-      .set({ rejectionReason: sql`replace(${events.rejectionReason}, ' [tried]', '')` })
-      .where(eq(events.id, ev.id));
-  }
+  if (!fixed) await failCorrection(lease, outcome === "incomplete" ? "The source did not provide the missing fields. Manual review or an explicit retry is needed." : errorMessage, outcome === "incomplete");
 
   // Persist progress on the run as we go, so closing the tab loses nothing and
   // coming back can pick up exactly where this left off.
@@ -357,20 +347,7 @@ export async function correctNextEvent(
   const [row] = await db
     .select({ n: sql<number>`count(*)` })
     .from(events)
-    .where(
-      sourceId
-        ? and(
-            communityId ? eq(events.communityId, communityId) : undefined,
-            eq(events.sourceId, sourceId),
-            eq(events.status, "auto_rejected"),
-            untried,
-          )
-        : and(
-            communityId ? eq(events.communityId, communityId) : undefined,
-            eq(events.status, "auto_rejected"),
-            untried,
-          ),
-    );
+    .where(where);
   const remaining = Number(row?.n ?? 0);
   return {
     done: remaining === 0,

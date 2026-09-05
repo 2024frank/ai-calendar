@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { communities, events, publishSubmissions, sources } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getEventScoped } from "@/lib/data";
+import { resolveDestination } from "@/lib/destination";
 import { EventStatus } from "@/components/bits";
 import { EventReview } from "./EventReview";
 
@@ -35,7 +36,7 @@ export default async function ReviewDetail({
     .where(eq(communities.id, ev.communityId))
     .limit(1);
   const [unresolvedPublish] = await db
-    .select({ state: publishSubmissions.state })
+    .select({ state: publishSubmissions.state, operation: publishSubmissions.operation })
     .from(publishSubmissions)
     .where(
       and(
@@ -45,6 +46,34 @@ export default async function ReviewDetail({
     )
     .orderBy(desc(publishSubmissions.updatedAt), desc(publishSubmissions.id))
     .limit(1);
+  const sentPublications = await db.select({
+    destinationId: publishSubmissions.destinationId,
+    externalPostId: publishSubmissions.externalPostId,
+    destinationSubmitUrl: publishSubmissions.destinationSubmitUrl,
+  }).from(publishSubmissions).where(and(eq(publishSubmissions.eventId, ev.id), eq(publishSubmissions.state, "succeeded")))
+    .orderBy(desc(publishSubmissions.id));
+  const hasPublishedPost = sentPublications.length > 0 || ["submitted", "published"].includes(ev.status);
+  let updateUnavailableReason: string | null = null;
+  let canUpdatePublished = false;
+  if (hasPublishedPost) {
+    const { destination, error } = await resolveDestination(ev.communityId, ev.sourceId);
+    const linked = sentPublications.find(attempt => attempt.destinationId === destination?.id);
+    if (error || !destination) updateUnavailableReason = error || "No destination is configured. This sent record cannot create another post.";
+    else if (!linked) updateUnavailableReason = "No post is linked at the current destination. The destination may have changed; verify the original post before continuing.";
+    else if (!linked.externalPostId || !/^[1-9]\d*$/.test(linked.externalPostId)) updateUnavailableReason = "This sent record has no verified numeric remote post ID. Reconcile its link before updating; no new post will be created.";
+    else if (!linked.destinationSubmitUrl) updateUnavailableReason = "This historical post has no recorded endpoint provenance. Verify its original destination before updating; no new post will be created.";
+    else {
+      try {
+        const config = typeof destination.config === "string" ? JSON.parse(destination.config) : destination.config;
+        const url = new URL((config as { submit_url: string }).submit_url);
+        if (url.pathname !== "/api/legacy/calendar/post/submit" || url.search || url.hash || url.username || url.password || !["http:", "https:"].includes(url.protocol) || (process.env.NODE_ENV === "production" && url.protocol !== "https:")) {
+          updateUnavailableReason = "The configured destination does not support the expected CommunityHub update endpoint.";
+        } else if (url.toString() !== linked.destinationSubmitUrl) {
+          updateUnavailableReason = "The endpoint changed after this post was sent. Verify its original destination before updating; no new post will be created.";
+        } else canUpdatePublished = true;
+      } catch { updateUnavailableReason = "The destination configuration is invalid; verify it before updating."; }
+    }
+  }
 
   // For a duplicate, load the event it duplicates so the reviewer can compare.
   const [original] = ev.duplicateOfEventId
@@ -66,7 +95,7 @@ export default async function ReviewDetail({
           <EventStatus status={ev.status} />
         </div>
         <div className="muted" style={{ marginTop: 4 }}>
-          Edit anything that is wrong, then approve. Rejecting teaches the agent what to avoid.
+          Save edits, then approve an unsent event or explicitly update its existing post. Request a correction for fixable details; reject permanently only when it should be excluded.
         </div>
       </div>
 
@@ -105,11 +134,20 @@ export default async function ReviewDetail({
           duplicateOfEventId: ev.duplicateOfEventId,
           duplicateOfUrl: ev.duplicateOfUrl,
           duplicateOfTitle: original?.title ?? null,
+          proposedUpdateOfEventId: ev.proposedUpdateOfEventId,
+          correctionRequest: ev.correctionRequest,
+          correctionState: ev.correctionState,
+          correctionError: ev.correctionError,
+          proposalResolvedAt: ev.proposalResolvedAt?.toISOString() ?? null,
         }}
         sourceName={source?.name ?? "Unknown source"}
         publishEmail={process.env.PUBLISH_EMAIL ?? ""}
         timezone={community?.timezone ?? "America/New_York"}
         unresolvedPublish={Boolean(unresolvedPublish)}
+        unresolvedOperation={unresolvedPublish?.operation ?? "create"}
+        hasPublishedPost={hasPublishedPost}
+        canUpdatePublished={canUpdatePublished}
+        updateUnavailableReason={updateUnavailableReason}
       />
     </div>
   );

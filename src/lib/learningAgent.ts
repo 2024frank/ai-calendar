@@ -120,8 +120,17 @@ Rules for the instruction:
     });
     model = res.model;
     parsed = JSON.parse(res.text || "{}");
+    if (!parsed || typeof parsed.lesson !== "string" || typeof parsed.worthKeeping !== "boolean" || !["source", "community"].includes(parsed.scope ?? "") || (parsed.worthKeeping && parsed.lesson.trim().length < 12)) {
+      throw new Error("Invalid lesson result");
+    }
   } catch {
-    parsed = {};
+    if (runId) {
+      // Do not retain raw provider errors: they can include request contents or credentials.
+      const error = { message: "Lesson generation failed. Review the original correction before retrying.", retryable: true, eventId: input.eventId, triggerKind: input.triggerKind, fieldName: input.fieldName ?? null };
+      await db.update(runs).set({ status: "failed", phase: "failed", finishedAt: new Date(), errorLog: [error] }).where(eq(runs.id, runId));
+      await emit(runId, "error", error.message, error);
+    }
+    return null;
   }
 
   const closeRun = async () => {

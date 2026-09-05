@@ -8,6 +8,8 @@ AI Calendar is a research pilot with a production deployment. Passing a build or
 
 Tests cover actual route handlers and generated database queries with external services replaced, plus worker transitions against disposable in-memory SQL. They cover callback/result races, expired leases, completed-run preservation, publishing claims after payload edits, tenant-bound pending access, selected-community creation, malformed authentication requests, source URL identity, and timeline recovery. These tests do not prove MySQL locking behavior or an AI provider's external callback guarantees.
 
+The separate `npm run test:mysql` suite applies migrations to a uniquely named, disposable database and exercises independent MySQL connections. Its explicit local-server prerequisites and the isolated CI job are documented in [PILOT-ACCEPTANCE.md](PILOT-ACCEPTANCE.md#real-mysql-isolation-suite). It is not silently skipped or counted as passing by the fast suite when no test server is available.
+
 ## Interface verification
 
 Run `npm run ui:preview` and open the displayed loopback address. The fixture bundles the real components and CSS with explicit synthetic data. Check:
@@ -26,9 +28,11 @@ An extraction job retains its active dedupe key while the provider callback or i
 
 `vercel.json` schedules daily maintenance. Worker chaining can process queued work promptly, but if a chain is killed it needs another invocation. For dependable recovery, configure a managed scheduler or dedicated worker to call `POST /api/internal/jobs?limit=1` frequently with `Authorization: Bearer <WORKER_SECRET>`. The fallback secret is `CRON_SECRET`. Check hosting-plan frequency/runtime allowances before changing schedules. Do not use a browser or a model as the scheduler. Monitor queue age, failed runs, callback deadline expiry, and ready-check failures.
 
+`npm run worker:tick -- --help` documents the bounded, independent invocation command. It requires an explicit endpoint and worker secret, does not follow redirects, and prints only counters. It does not install a schedule. Configuration and recovery trials are described in [PILOT-ACCEPTANCE.md](PILOT-ACCEPTANCE.md#independent-worker-operation).
+
 ## Publishing and duplicates
 
-Publishing claims serialize on the event row and examine all submissions for the same destination. Changing a payload cannot bypass an unresolved send or create a second post after a successful send. Once sent, editing the local event is not an update to the remote post; the UI must say so. Reconcile ambiguous submissions against the destination before retrying. Successful submission and local status are committed together.
+Publishing claims serialize on the event row and examine all submissions for the same destination. Changing a payload cannot bypass an unresolved send or create a second post after a successful send. Once sent, editing the local event is not an update to the remote post. A separate reviewer command can PATCH the already-linked numeric CommunityHub post ID at the same destination; it must not change moderation/subscription fields or fall back to creation. Reconcile ambiguous submissions against the destination before retrying. Successful creation and local status are committed together.
 
 An unavailable destination inventory is different from an empty calendar. Extraction records the unavailable check, retains candidates for review, and holds automatic delivery, including later backlog flushes. A reviewer can check the destination and explicitly approve. Shared configured listing URLs are excluded from event-identity matching; their individual events still require content comparison.
 
@@ -43,6 +47,6 @@ Use a separate MySQL database, test accounts in two communities, and a test dest
 5. Submit once to the test destination, lose the response, edit the local event, and try again. No second remote post may be created. Verify the published/not-published reconciliation actions.
 6. Take the inventory endpoint offline. Candidates must stay reviewable with a visible warning; automatic publishing must remain held even after a no-op save or automated correction.
 7. Complete mobile and desktop review, save, reject, approve, and community-switch flows using real database data. Test both success and destination errors.
-8. Run a production build, review schema changes (this hardening change needs none), and smoke-test `/api/health/live`, `/api/health/ready`, login, and the accepted public feed after deployment.
+8. Run a production build, rehearse the schema upgrade, and smoke-test `/api/health/live`, `/api/health/ready`, login, and the accepted public feed after deployment. The reliability/evidence extension has migrations, including a separate historical schema catch-up. Read [PILOT-ACCEPTANCE.md](PILOT-ACCEPTANCE.md) before migrating an existing installation.
 
 The full development dependency audit may report advisories in the legacy esbuild loader used by Drizzle Kit. Track these separately from runtime dependencies; do not apply an automatic downgrade or a breaking migration-tool update just to clear an audit report.

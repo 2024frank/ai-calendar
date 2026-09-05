@@ -182,9 +182,9 @@ export function NewSourceForm({
               ))}
             </select>
             <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-              Two weeks keeps big calendars manageable. A small organization with only a few
-              events a year can look further out. Sources with about ten or fewer upcoming items
-              always take all of them. Both settings can be changed later on the source page.
+              Two weeks keeps calendars manageable. The selected range is a hard maximum for
+              every source, including small ones; events already underway are still kept. You can
+              change this setting later on the source page.
             </div>
           </div>
         </div>

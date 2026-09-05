@@ -50,6 +50,11 @@ type EventRow = {
   duplicateOfEventId: number | null;
   duplicateOfUrl: string | null;
   duplicateOfTitle: string | null;
+  proposedUpdateOfEventId?: number | null;
+  proposalResolvedAt?: string | null;
+  correctionRequest?: string | null;
+  correctionState?: string | null;
+  correctionError?: string | null;
 };
 
 function supportedValue(
@@ -139,12 +144,20 @@ export function EventReview({
   publishEmail,
   timezone,
   unresolvedPublish = false,
+  unresolvedOperation = "create",
+  hasPublishedPost = false,
+  canUpdatePublished = false,
+  updateUnavailableReason = null,
   backQuery = null,
 }: {
   event: EventRow;
   sourceName: string;
   publishEmail: string;
   unresolvedPublish?: boolean;
+  unresolvedOperation?: "create" | "update";
+  hasPublishedPost?: boolean;
+  canUpdatePublished?: boolean;
+  updateUnavailableReason?: string | null;
   /** The queue's filters when this event was opened, to return to the same view. */
   backQuery?: string | null;
   timezone: string;
@@ -185,6 +198,9 @@ export function EventReview({
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState<string>(REJECT_REASONS[0].code);
   const [note, setNote] = useState("");
+  const [requestingCorrection, setRequestingCorrection] = useState(false);
+  const [correctionNote, setCorrectionNote] = useState(event.correctionRequest ?? "");
+  const [proposalResolvedAt, setProposalResolvedAt] = useState(event.proposalResolvedAt ?? null);
   const [showErrors, setShowErrors] = useState(false);
   const [showPayload, setShowPayload] = useState(false);
   const [brokenPreview, setBrokenPreview] = useState<string | null>(null);
@@ -312,7 +328,7 @@ export function EventReview({
       setMsg(
         res.ok
           ? d.changed
-            ? `Saved ${d.changed} change(s). The agent learns from these.`
+            ? `Saved ${d.changed} change(s). Feedback is recorded and may inform later runs.`
             : "No changes."
           : d.error || "Could not save changes.",
       );
@@ -403,7 +419,7 @@ export function EventReview({
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
-        setMsg("Rejected. The agent learns from this for next time.");
+        setMsg("Permanently rejected. Your feedback is recorded and may inform later runs.");
         setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review"), 1200);
       } else {
         setMsg(d.error ? `Could not reject: ${d.error}` : "Could not reject.");
@@ -415,9 +431,54 @@ export function EventReview({
     }
   }
 
+  async function requestCorrection() {
+    if (Object.keys(dirtyBody()).length) { setMsg("Save your edits before requesting correction."); return; }
+    if (!window.confirm("Ask the correction agent to check this exact event's source? The result stays in review and is not published.")) return;
+    setBusy("correction"); setMsg(null);
+    try {
+      const response = await fetch(`/api/events/${event.id}/request-correction`, {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({note:correctionNote})});
+      const result = await response.json().catch(() => ({}));
+      if (response.ok) { window.location.reload(); return; }
+      setMsg(result.error || "Correction was not confirmed. Reload to check its saved state; an interrupted request can be retried after six minutes.");
+      router.refresh();
+    } catch { setMsg("Correction was not confirmed. Reload to inspect its saved state before retrying."); }
+    finally { setBusy(null); }
+  }
+
+  async function updatePublished() {
+    if (!canUpdatePublished) { setMsg(updateUnavailableReason || "The post's destination link must be verified before updating."); return; }
+    if (Object.keys(dirtyBody()).length) { setMsg("Save your edits first, then update the existing post."); return; }
+    if (!window.confirm("Send the saved content changes to this event's existing CommunityHub post? Its moderation and subscription settings will not be changed.")) return;
+    setBusy("update"); setMsg(null);
+    try {
+      const response = await fetch(`/api/events/${event.id}/update-published`, {method:"POST"});
+      const result = await response.json().catch(() => ({}));
+      if (result.publish === "unknown" || (!response.ok && !result.error)) setNeedsPublishReconciliation(true);
+      setMsg(result.message || result.error || "Update was not confirmed. Check the post's content before retrying.");
+      router.refresh();
+    } catch { setNeedsPublishReconciliation(true); setMsg("Update outcome is unknown. Check the existing post's content before retrying."); }
+    finally { setBusy(null); }
+  }
+
+  async function resolveProposal() {
+    if (!window.confirm("Have you finished reviewing these proposed dates against the original event? Mark this proposal resolved without rejecting the event or teaching an exclusion rule?")) return;
+    setBusy("resolve"); setMsg(null);
+    try {
+      const response = await fetch(`/api/events/${event.id}/resolve-proposal`, { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) { setMsg(result.error || "Could not resolve this proposal."); return; }
+      setProposalResolvedAt(result.proposalResolvedAt);
+      setMsg("Proposal resolved and removed from the pending queue. No rejection or exclusion lesson was recorded.");
+      router.refresh();
+    } catch { setMsg("Resolution was not confirmed. Reload to check the proposal's saved status."); }
+    finally { setBusy(null); }
+  }
+
   async function reconcilePublish(outcome: "published" | "not_published") {
     const confirmed = window.confirm(
-      outcome === "published"
+      unresolvedOperation === "update"
+        ? outcome === "published" ? "Confirm only if the requested content changes are present on the existing CommunityHub post. Mere post existence is not enough." : "Confirm only if the requested content changes were NOT applied to the existing post. Enable retry of this update?"
+        : outcome === "published"
         ? "Confirm only if you opened CommunityHub and found this event there. Mark it approved?"
         : "Confirm only if you checked CommunityHub and this event is not there. This will make a retry safe.",
     );
@@ -429,12 +490,13 @@ export function EventReview({
       const res = await fetch(`/api/events/${event.id}/reconcile-publish`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ outcome }),
+        body: JSON.stringify({ outcome, operation: unresolvedOperation }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error || "Could not reconcile this send.");
 
       setNeedsPublishReconciliation(false);
+      if (unresolvedOperation === "update") { setMsg(outcome === "published" ? "Confirmed the content update. Moderation status was left unchanged." : "Confirmed the update was not applied. Update retry is enabled."); router.refresh(); return; }
       if (outcome === "published") {
         setMsg("Confirmed in CommunityHub and marked approved.");
         setTimeout(
@@ -526,6 +588,27 @@ export function EventReview({
                 <li key={line}>{line}</li>
               ))}
             </ul>
+          </div>
+        )}
+        {event.proposedUpdateOfEventId && (
+          <div className="card" style={{borderColor:"var(--warn)"}}>
+            <div className="label">{proposalResolvedAt ? "Proposal resolved" : "New recurrence dates need review"}</div>
+            <p>This proposal was not merged or published. Compare its dates with <a href={`/review/${event.proposedUpdateOfEventId}`}>the existing event #{event.proposedUpdateOfEventId}</a>, save the dates you accept there, then use Update existing post. Mark this proposal resolved after reviewing it; do not create a second post.</p>
+          </div>
+        )}
+        {hasPublishedPost && !canUpdatePublished && (
+          <div className="card" role="status" style={{borderColor:"var(--warn)"}}>
+            <div className="label">Update unavailable</div>
+            <p>{updateUnavailableReason || "The existing post's numeric ID and original endpoint must be verified before updating."}</p>
+          </div>
+        )}
+        {event.correctionState && (
+          <div className="card" role="status" style={{borderColor:"var(--warn)"}}>
+            <div className="label">Correction: {event.correctionState}</div>
+            <p>{event.correctionRequest}</p>
+            {event.correctionError && <p>{event.correctionError}</p>}
+            {event.correctionState === "completed" && <p>Returned to review. Nothing was published; check the corrected fields before approving.</p>}
+            {event.correctionState === "running" && <p>A request may still be running. An interrupted request can be retried after six minutes.</p>}
           </div>
         )}
 
@@ -776,8 +859,9 @@ export function EventReview({
           <div className="card" style={{ borderColor: "var(--warn)" }}>
             <div className="label">Check CommunityHub before continuing</div>
             <p style={{ fontSize: 13, margin: "6px 0 12px" }}>
-              The last send ended without a trustworthy answer. Open CommunityHub and search for
-              this event, then record what you find so the calendar cannot create a duplicate.
+              {unresolvedOperation === "update"
+                ? "The last update ended without a trustworthy answer. Open the existing CommunityHub post and verify whether the requested content changes were applied. Finding the post alone does not verify an update."
+                : "The last send ended without a trustworthy answer. Open CommunityHub and search for this event, then record what you find so the calendar cannot create a duplicate."}
             </p>
             <div className="row" style={{ flexWrap: "wrap" }}>
               <button
@@ -786,7 +870,7 @@ export function EventReview({
                 disabled={!!busy}
                 onClick={() => reconcilePublish("published")}
               >
-                {busy === "reconcile" ? "Saving…" : "I found it - mark approved"}
+                {busy === "reconcile" ? "Saving…" : unresolvedOperation === "update" ? "Content changes are present" : "I found it - mark approved"}
               </button>
               <button
                 className="btn"
@@ -794,7 +878,7 @@ export function EventReview({
                 disabled={!!busy}
                 onClick={() => reconcilePublish("not_published")}
               >
-                It is not there - enable retry
+                {unresolvedOperation === "update" ? "Content changes were not applied - enable retry" : "It is not there - enable retry"}
               </button>
             </div>
           </div>
@@ -802,7 +886,7 @@ export function EventReview({
 
         {rejecting ? (
           <div className="card">
-            <Field label="Why is this wrong? (this is what the agent learns from)">
+            <Field label="Why should this event be permanently excluded?">
               <select className="input" value={reason} onChange={(e) => setReason(e.target.value)}>
                 {REJECT_REASONS.map((r) => (
                   <option key={r.code} value={r.code}>
@@ -811,7 +895,7 @@ export function EventReview({
                 ))}
               </select>
             </Field>
-            <Field label="Note (optional, but it makes the next run better)">
+            <Field label="Note (optional feedback for later runs)">
               <textarea
                 className="input"
                 rows={2}
@@ -835,18 +919,27 @@ export function EventReview({
             </div>
           </div>
         ) : (
-          <div className="row">
-            <button className="btn primary" onClick={approve} disabled={!!busy} title={ready ? "" : "Fill required fields first"}>
+          <div className="row" style={{flexWrap:"wrap"}}>
+            {hasPublishedPost ? canUpdatePublished && <button className="btn primary" onClick={updatePublished} disabled={!!busy || needsPublishReconciliation}>{busy === "update" ? "Updating…" : "Update existing post"}</button> : !event.proposedUpdateOfEventId &&
+            <button className="btn primary" onClick={approve} disabled={!!busy || needsPublishReconciliation} title={ready ? "" : "Fill required fields first"}>
               {busy === "approve" ? "Approving…" : "Approve"}
-            </button>
+            </button>}
             <button className="btn" onClick={save} disabled={!!busy}>
               {busy === "save" ? "Saving…" : "Save changes"}
             </button>
-            <button className="btn" onClick={() => setRejecting(true)} disabled={!!busy}>
-              Reject
-            </button>
+            {!event.proposedUpdateOfEventId && <button className="btn" onClick={() => setRejecting(true)} disabled={!!busy}>
+              Reject permanently
+            </button>}
+            {event.proposedUpdateOfEventId && !proposalResolvedAt && <button className="btn" onClick={resolveProposal} disabled={!!busy}>{busy === "resolve" ? "Resolving…" : "Mark proposal resolved"}</button>}
+            {!hasPublishedPost && !event.proposedUpdateOfEventId && ["pending","auto_rejected"].includes(event.status) && <button className="btn" onClick={() => setRequestingCorrection(!requestingCorrection)} disabled={!!busy}>{event.correctionState === "failed" || event.correctionState === "running" ? "Retry correction" : "Request correction"}</button>}
           </div>
         )}
+        {requestingCorrection && <Section title="Request a source-backed correction" hint="Supports descriptions, contact email, phone, location, website, and missing images. Edit title, dates and categories manually. This does not reject or publish the event.">
+          <Field label="What should the agent correct?">
+            <textarea className="input" rows={3} maxLength={1000} value={correctionNote} onChange={e => setCorrectionNote(e.target.value)} />
+          </Field>
+          <button className="btn" disabled={!!busy || !correctionNote.trim()} onClick={requestCorrection}>{busy === "correction" ? "Correcting…" : "Confirm correction request"}</button>
+        </Section>}
       </fieldset>
 
       {/* RIGHT: readiness + payload preview */}

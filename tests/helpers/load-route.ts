@@ -6,7 +6,7 @@ import ts from "typescript";
 export function loadRoute<T>(file: URL, dependencies: Record<string, unknown>): T {
   const source = readFileSync(file, "utf8");
   const { outputText } = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
     fileName: file.pathname,
   });
   const require = createRequire(file);

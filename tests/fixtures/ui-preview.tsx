@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { AppShell } from "../../src/components/AppShell";
 import { Nav } from "../../src/components/Nav";
 import { CommunitySwitcher } from "../../src/components/CommunitySwitcher";
@@ -8,6 +9,7 @@ import { LiveTimeline } from "../../src/app/(app)/runs/[id]/LiveTimeline";
 import { RunStatus } from "../../src/components/bits";
 import { Alert, Button, Card, PageHeader, TableShell, ThemeToggle } from "../../src/components/ui";
 import { usePathname } from "./next-navigation";
+import { PilotWorkflowPreview } from "./pilot-workflows";
 import "../../src/app/globals.css";
 
 const communities = [{ id: 1, name: "Oberlin (fixture)" }, { id: 2, name: "Cleveland (fixture)" }];
@@ -45,6 +47,8 @@ function Preview() {
   return <AppShell sidebar={sidebar}>
     <div className="grid" style={{ gap: 22 }}>
       <Alert tone="info">UI test fixture. Synthetic data only. This checks real components, not production data or authentication.</Alert>
+      <nav className="row" style={{ flexWrap: "wrap" }} aria-label="Preview scenarios"><Link href="/dashboard">Dashboard fixture</Link><Link href="/review">Review workflows</Link><Link href="/evaluations">Research comparisons</Link></nav>
+      {["/review", "/evaluations"].includes(pathname) ? <PilotWorkflowPreview kind={pathname === "/review" ? "review" : "evaluations"} /> : <>
       <PageHeader eyebrow="Workspace overview" title={pathname === "/dashboard" ? "Dashboard" : "Component preview"} description={`Selected community: ${communities.find((item) => item.id === community.activeId)?.name}`} actions={<Button icon="plus">Add source (fixture)</Button>} />
       <section className="kpi-grid" aria-label="Workspace metrics">
         {[["Active Sources", 12, "Enabled for extraction"], ["Pending Review", community.pending, "Needs a decision"], ["Duplicates", 23, "Protected from republishing"], ["Approved", 8, "Reviewer approved"], ["Auto-sent", 0, "Sent to CommunityHub for review"]].map(([label, count, hint]) => <Card className="kpi-card" key={label}><div className="kpi-card__top">{label}</div><div className="kpi">{count}</div><div className="kpi-card__hint">{hint}</div></Card>)}
@@ -57,6 +61,7 @@ function Preview() {
         </select>
         <LiveTimeline key={scenario.id} runId={scenario.id} timeZone="America/New_York" initialStatus={scenario.status} initialPhase={scenario.phase} initialTokens={{ prompt: 1200, completion: 350 }} />
       </Card>
+      </>}
     </div>
   </AppShell>;
 }

@@ -12,7 +12,7 @@ describe("event-wide publishing claim", () => {
       if (sql.includes("from `events`")) return { rows: [[41]] };
       if (sql.includes("from `publish_submissions`")) {
         const hashFiltered = sql.split(" where ")[1]?.includes("`payload_hash` =");
-        return { rows: hashFiltered ? prior.filter((row) => params.includes(row[2])) : prior };
+        return { rows: (hashFiltered ? prior.filter((row) => params.includes(row[2])) : prior).map(row=>[...row,null,"create",7]) };
       }
       return { rows: [{ insertId: 90, affectedRows: 1 }] };
     });
@@ -53,7 +53,7 @@ describe("event-wide publishing claim", () => {
     assert.ok(queries[0].params.includes(41));
     const history = queries.find(({ sql }) => sql.includes("from `publish_submissions`"))!;
     assert.match(history.sql, /`event_id` = \?/);
-    assert.match(history.sql, /`destination_id` = \?/);
+    assert.doesNotMatch(history.sql.split(" where ")[1], /`destination_id` =/);
     assert.doesNotMatch(history.sql.split(" where ")[1], /`payload_hash` =/);
   });
 

@@ -1,5 +1,6 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, isNull, lt, max, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, max, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { db } from "@/db";
 import { communities, events, runs, sources } from "@/db/schema";
 import { scheduledSourceIsDue } from "./schedule";
@@ -8,6 +9,39 @@ import {
   DATELESS_SWEEPABLE_STATUSES,
   startOfDaySecs,
 } from "./retentionPolicy";
+
+const retentionProposal = alias(events, "retention_proposal");
+
+function affectedRows(result: unknown): number {
+  return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
+}
+
+/**
+ * Claim unreferenced rows under an event lock, then delete only those ids.
+ *
+ * This two-step shape is valid MySQL (unlike DELETE ... NOT EXISTS against the
+ * target table). The self-FK prevents a proposal insertion from racing the
+ * locked parent. Any proposal reference, resolved or not, conservatively keeps
+ * its original until the proposal itself expires; that can retain the original
+ * for one extra sweep after its final child is removed.
+ */
+async function deleteUnreferencedEvents(predicate: SQL | undefined): Promise<number> {
+  return db.transaction(async (tx) => {
+    const candidates = await tx
+      .select({ id: events.id })
+      .from(events)
+      .leftJoin(
+        retentionProposal,
+        eq(retentionProposal.proposedUpdateOfEventId, events.id),
+      )
+      .where(and(predicate, isNull(retentionProposal.id)))
+      .for("update");
+    const ids = candidates.map((row) => row.id);
+    if (!ids.length) return 0;
+    const [result] = await tx.delete(events).where(inArray(events.id, ids));
+    return affectedRows(result);
+  });
+}
 
 /**
  * Delete events once nothing is left of them.
@@ -37,22 +71,17 @@ export async function sweepExpiredEvents(nowMs = Date.now()) {
   let deleted = 0;
   for (const community of rows) {
     const cutoff = startOfDaySecs(nowMs, community.timezone || "America/New_York");
-    const [res] = await db
-      .delete(events)
-      .where(
+    deleted += await deleteUnreferencedEvents(
         and(
           eq(events.communityId, community.id),
           isNotNull(events.startTimeMax),
           lt(events.startTimeMax, cutoff),
         ),
       );
-    deleted += (res as { affectedRows?: number }).affectedRows ?? 0;
   }
 
   const ageCutoff = new Date(nowMs - DATELESS_RETENTION_DAYS * 86_400_000);
-  const [byAge] = await db
-    .delete(events)
-    .where(
+  const byAge = await deleteUnreferencedEvents(
       and(
         isNull(events.startTimeMax),
         inArray(events.status, [...DATELESS_SWEEPABLE_STATUSES]),
@@ -60,7 +89,7 @@ export async function sweepExpiredEvents(nowMs = Date.now()) {
       ),
     );
 
-  return deleted + ((byAge as { affectedRows?: number }).affectedRows ?? 0);
+  return deleted + byAge;
 }
 
 /**

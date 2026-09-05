@@ -25,3 +25,30 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm audit --omit=dev --audit-level=moderate
+
+  mysql-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # Disposable CI-only database, not an application or production secret.
+          MYSQL_ROOT_PASSWORD: integration-only
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pintegration-only"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:mysql
+        env:
+          AI_CALENDAR_TEST_MYSQL_URL: mysql://root:integration-only@127.0.0.1:3306/
+          AI_CALENDAR_ALLOW_TEST_DATABASE_CREATE: "1"

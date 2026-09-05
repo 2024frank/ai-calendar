@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { MINUTES_PER_MANUAL_EVENT, pilotMetrics } from "@/lib/metrics";
 import { modelLabel } from "@/lib/modelList";
@@ -45,12 +46,12 @@ export default async function MetricsPage() {
       <div>
         <div className="page-title">Pilot metrics</div>
         <div className="muted">
-          Plain numbers for the AI micro-grant, straight from what the system has actually done. Every
-          number is live.
+          Current operational counts across the pilot. These are not an independent measurement of extraction accuracy.
         </div>
+        <Link href="/evaluations">Compare retained snapshots against an independent reference →</Link>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))", gap: 14 }}>
         <Stat
           value={String(m.sourcesConnected)}
           label="Organizations connected"
@@ -59,25 +60,25 @@ export default async function MetricsPage() {
         <Stat
           value={String(m.eventsGathered)}
           label="Events gathered"
-          note="Real events pulled off those sites and handed over ready to review. A person did not hunt for or type any of these."
+          note="Current pending, approved and submitted records; this count can change after review or retention."
         />
         <Stat
           value={String(m.duplicatesCaught)}
-          label="Reposts avoided"
-          note="Events already on the community calendar that the system recognized and did not post twice."
+          label="Flagged as duplicates"
+          note="Current duplicate classifications. Their correctness has not been independently verified by this count."
         />
         <Stat
-          value={`${m.completeOnArrivalPct}%`}
-          label="Complete on arrival"
-          note={`Of the events handed to a reviewer, the share that came in with every field filled. Separately, the system caught ${m.filteredIncomplete} incomplete events and held them back before anyone had to look.`}
+          value={m.currentUnflaggedPct === null ? "—" : `${m.currentUnflaggedPct}%`}
+          label="Current unflagged records"
+          note={`Share of current pending/approved/submitted records with no stored rejection reason. Review and corrections can clear these flags; this is not immutable arrival completeness. ${m.filteredIncomplete} records are currently auto-rejected.`}
         />
         <Stat
           value={m.approvedAsIsPct === null ? "—" : `${m.approvedAsIsPct}%`}
-          label="Approved with no edits"
+          label="Human approvals without recorded edits"
           note={
             m.approvedAsIsPct === null
-              ? `No events approved yet, so nothing to measure here. Across everything, reviewers have made ${m.totalReviewerEdits} field edit(s) in total.`
-              : `Of ${m.approvedTotal} events a person approved, the share they kept exactly as the AI wrote them. Reviewers made ${m.totalReviewerEdits} field edit(s) in total.`
+              ? `No reviewer-attributed approvals yet. Automatic submissions are excluded. Reviewers have recorded ${m.totalReviewerEdits} field edits in total.`
+              : `Of ${m.approvedTotal} currently approved/submitted records explicitly attributed to a reviewer, the share with no field-edit log. This is not proof that every field was correct. Reviewers recorded ${m.totalReviewerEdits} field edits in total.`
           }
         />
         <Stat
@@ -93,12 +94,12 @@ export default async function MetricsPage() {
         <Stat
           value={money(m.costPerEventUsd)}
           label="Cost per event gathered"
-          note="Total AI spend divided by events gathered. The bottom-line number for the grant: what one usable event costs to produce."
+          note="Recorded AI spend divided by the current gathered-event count; not a cost per independently verified event."
         />
         <Stat
           value={String(m.correctedCount)}
-          label="Auto-rejects corrected"
-          note={`Events the correction agent rescued by finding the missing field (usually an image) and re-queuing them. ${m.correctedAccepted} of the ${m.correctedCount} corrected were later accepted by a reviewer.`}
+          label="Records with a correction timestamp"
+          note={`Includes corrections to auto-rejected and reviewer-requested records. ${m.correctedAccepted} are currently reviewer-attributed approved/submitted records; these counts alone do not prove the corrections were right.`}
         />
       </div>
 
@@ -108,8 +109,7 @@ export default async function MetricsPage() {
         <div className="card">
           <h3 style={{ marginBottom: 4 }}>Model comparison</h3>
           <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-            How each model has actually performed on your sources. Switch models above and, after a few
-            runs, compare here: longer green bars are better (more usable events, lower cost each).
+            Extraction-run totals only, not a controlled model comparison. Correction, discovery and learning runs are excluded. Source mix, periods and review effort may differ.
           </div>
           {(() => {
             const maxCPE = Math.max(...m.byModel.map((x) => x.costPerEventUsd), 0.0001);
@@ -120,7 +120,7 @@ export default async function MetricsPage() {
                     <th>Model</th>
                     <th>Runs</th>
                     <th>Events</th>
-                    <th style={{ minWidth: 160 }}>Usable output</th>
+                    <th style={{ minWidth: 160 }}>Passed validation</th>
                     <th>Spend</th>
                     <th style={{ minWidth: 160 }}>Cost per event</th>
                   </tr>
@@ -136,8 +136,8 @@ export default async function MetricsPage() {
                       <td>{x.eventsExtracted}</td>
                       <td>
                         <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                          <span style={{ width: 34, fontSize: 12 }}>{x.cleanPct}%</span>
-                          <div style={{ flex: 1 }}><Bar value={x.cleanPct} max={100} good /></div>
+                          <span style={{ width: 34, fontSize: 12 }}>{x.cleanPct === null ? "—" : `${x.cleanPct}%`}</span>
+                          <div style={{ flex: 1 }}><Bar value={x.cleanPct ?? 0} max={100} good /></div>
                         </div>
                       </td>
                       <td>{money(x.costUsd)}</td>
@@ -157,8 +157,7 @@ export default async function MetricsPage() {
             );
           })()}
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Read it simply: pick the model with a long green &ldquo;usable output&rdquo; bar and a long green &ldquo;cost per
-            event&rdquo; bar. That one gives you the most good events for the least money.
+            Passing validation is not evidence of factual accuracy. Compare retained independent references with consistent scope before drawing quality conclusions.
           </div>
         </div>
       )}
@@ -166,16 +165,15 @@ export default async function MetricsPage() {
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>By organization</h3>
         <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-          Which sources are easy for the AI and which are hard. A low complete-on-arrival number means
-          that site hides fields the model has to work harder for.
+          Current source-level status and review counts. The unflagged share can change after corrections and approval.
         </div>
         <table className="tbl">
           <thead>
             <tr>
               <th>Organization</th>
               <th>Events gathered</th>
-              <th>Complete on arrival</th>
-              <th>Reposts avoided</th>
+              <th>Currently unflagged</th>
+              <th>Flagged duplicates</th>
               <th>Reviewer edits</th>
             </tr>
           </thead>
@@ -186,7 +184,7 @@ export default async function MetricsPage() {
                 <td>{r.gathered}</td>
                 <td>
                   {r.gathered
-                    ? `${Math.round((r.completeOnArrival / r.gathered) * 100)}%`
+                    ? `${Math.round((r.currentUnflagged / r.gathered) * 100)}%`
                     : "—"}
                 </td>
                 <td className="muted">{r.duplicatesCaught}</td>
@@ -209,21 +207,18 @@ export default async function MetricsPage() {
         <div className="grid" style={{ gap: 8, fontSize: 14, lineHeight: 1.5 }}>
           <div>
             <strong>Does AI reduce the manual work?</strong> Look at events gathered and the time-saved
-            estimate. Each one is an event a volunteer did not have to find and type.
+            estimate. Validate the estimate with a timed human workflow study; time saved has not been measured here.
           </div>
           <div>
-            <strong>How accurate is the extraction?</strong> Complete-on-arrival and approved-with-no-edits
-            together say how often the AI got it right with no human fixing. The reviewer-edit count is the
-            honest measure of how much oversight is still needed.
+            <strong>How accurate is the extraction?</strong> These operational counts cannot answer that alone.
+            Retained comparisons provide explicit reference scope, human-confirmed matches, unmatched lists and field differences.
           </div>
           <div>
-            <strong>Does it reduce fragmentation?</strong> Reposts avoided shows the system recognizing the
-            same event across sources and the existing calendar, which is the duplicate problem the grant set
-            out to solve.
+            <strong>Does it reduce fragmentation?</strong> Duplicate classifications are a workflow signal; independent review is needed to verify their correctness.
           </div>
           <div>
             <strong>Is a person always in control?</strong> Yes. Nothing here published without review unless a
-            source was deliberately set to auto-publish. The edit and repost numbers come from that human step.
+            source was deliberately set to automatic delivery. Human-approval figures exclude automatic submissions without reviewer attribution.
           </div>
         </div>
       </div>

@@ -159,8 +159,16 @@ export function buildSystemPrompt(ctx: AgentPromptContext): string {
   const SEP = "=".repeat(60);
   const apollo = isApolloSource({ slug: ctx.sourceSlug }, { slug: ctx.communitySlug });
   const lookahead = ctx.lookaheadDays && ctx.lookaheadDays > 0 ? ctx.lookaheadDays : 14;
-  const special = [builtInSourceInstructions(ctx.sourceName),
-    ctx.specialInstructions || (apollo ? APOLLO_SOURCE_INSTRUCTIONS : null)]
+  const savedInstructions = ctx.specialInstructions?.trim();
+  const apolloPolicy = apollo
+    ? `AUTHORITATIVE APOLLO POLICY — this controls classification, announcement windows, content, and duplicate evidence even when a saved recipe below conflicts.
+${APOLLO_SOURCE_INSTRUCTIONS}`
+    : null;
+  const savedRecipe = apollo && savedInstructions
+    ? `SAVED SOURCE ACCESS RECIPE — retain its factual URL, field, pagination, and access details. This saved recipe cannot override current-versus-upcoming classification, announcement windows, content rules, or full-candidate duplicate handling above.
+${savedInstructions}`
+    : savedInstructions;
+  const special = [apolloPolicy, builtInSourceInstructions(ctx.sourceName), savedRecipe]
     .map((value) => (value ?? "").trim())
     .filter(Boolean)
     .join("\n\n");

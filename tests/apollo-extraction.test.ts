@@ -46,4 +46,18 @@ describe("Apollo full-candidate extraction contract", () => {
       assert.ok(buildSystemPrompt({ ...context, sourceSlug: "other" }).includes(generic));
     }
   });
+
+  it("keeps the authoritative Apollo policy ahead of a saved access recipe that contains obsolete grouping advice", () => {
+    const savedRecipe = `1. Fetch https://tickets.example.test/apollo/sessions with HTTP/1.1.
+2. Treat every film as Playing Now until there is a gap in the schedule.`;
+    const prompt = buildSystemPrompt({ ...context, specialInstructions: savedRecipe });
+
+    const authority = prompt.indexOf("AUTHORITATIVE APOLLO POLICY");
+    const saved = prompt.indexOf("SAVED SOURCE ACCESS RECIPE");
+    assert.ok(authority >= 0);
+    assert.ok(saved > authority);
+    assert.ok(prompt.includes(savedRecipe));
+    assert.match(prompt, /saved recipe cannot override current-versus-upcoming classification/i);
+    assert.match(prompt, /future opening films are Coming Soon even when their dates are adjacent/i);
+  });
 });

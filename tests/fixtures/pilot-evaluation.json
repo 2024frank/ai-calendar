@@ -1,0 +1,40 @@
+{
+  "id": 901,
+  "title": "Synthetic comparison: two snapshots",
+  "createdAt": "2026-09-05T15:00:00Z",
+  "createdBy": 1,
+  "creator": {"id": 1, "email": "fixture@example.org", "name": "Synthetic reviewer"},
+  "snapshot": {
+    "version": 1,
+    "sourceId": 1,
+    "title": "Synthetic comparison: two snapshots",
+    "period": {"start": "2026-09-01T00:00:00.000Z", "end": "2026-10-01T00:00:00.000Z"},
+    "scope": {"description": "Synthetic September concert occurrences, not real community data", "referenceCompleteness": "partial", "confirmed": true},
+    "provenance": {
+      "reference": {"description": "Hand-written fixture for UI testing, not a real study", "capturedAt": "2026-09-05T14:00:00.000Z", "independent": true},
+      "extracted": {"description": "Hand-written extraction fixture; no model was called", "capturedAt": "2026-09-05T14:30:00.000Z"}
+    },
+    "reference": [
+      {"id": "ref-A", "title": "Example concert", "startTime": "2026-09-10T18:00:00.000Z", "endTime": null, "location": "Hall", "url": null},
+      {"id": "ref-B", "title": "Another concert", "startTime": "2026-09-12T18:00:00.000Z", "endTime": null, "location": "Park", "url": null}
+    ],
+    "extracted": [
+      {"id": "ext-A", "title": "Example concert", "startTime": "2026-09-10T18:00:00.000Z", "endTime": null, "location": "Park", "url": null},
+      {"id": "ext-C", "title": "Additional concert", "startTime": "2026-09-13T18:00:00.000Z", "endTime": null, "location": null, "url": null}
+    ],
+    "matches": [{"referenceId": "ref-A", "extractedId": "ext-A"}],
+    "humanConfirmedMatches": true
+  },
+  "report": {
+    "version": 1,
+    "referenceCount": 2,
+    "extractedCount": 2,
+    "confirmedMatchCount": 1,
+    "referenceCompleteness": "partial",
+    "referenceCoveragePct": 50,
+    "matches": [{"referenceId": "ref-A", "extractedId": "ext-A", "differences": [{"field": "location", "reference": "Hall", "extracted": "Park"}]}],
+    "referenceOnly": [{"id": "ref-B", "title": "Another concert", "startTime": "2026-09-12T18:00:00.000Z", "endTime": null, "location": "Park", "url": null}],
+    "extractedOnly": [{"id": "ext-C", "title": "Additional concert", "startTime": "2026-09-13T18:00:00.000Z", "endTime": null, "location": null, "url": null}],
+    "caveat": "Coverage is of this declared reference only, not measured overall accuracy. Unmatched extracted candidates are not proven false positives. Human matches and reference completeness have not been independently verified by this software."
+  }
+}

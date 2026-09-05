@@ -6,25 +6,17 @@
  * Soon" announcement payloads — no LLM, no hand-reading of HTML, no date math by
  * the model. The agent only adds posters and POSTs.
  *
- * Rules (from the product owner's worked example):
- *  - The agent fetches a day ahead, so Showing Now windows START at today + 1.
- *    A movie that only plays today is not announced.
- *  - Showing Now is forward-looking and chains: a new window begins at every
- *    lineup change — when a film ENDS (window ends on its last day) AND when a
- *    new film OPENS (window ends the day before it opens). Films fold in as they
- *    open and drop as they end, for as long as the schedule is contiguous. A gap
- *    in coverage stops the chain (a far pre-sale after a gap is Coming Soon only).
- *      e.g. ToyStory(–Jul8), Minions(–Jul9), Moana(Jul9–), Ghostbusters(Jul12–):
- *        [Jul1–8] Toy Story·Minions → [Jul9] Minions·Moana
- *        [Jul10–11] Moana → [Jul12–…] Ghostbusters·Moana
- *  - Ends are observed, never invented. A film at the far edge of the contiguous
- *    run (its last visible date == the horizon) is still on sale → "now playing".
- *    A film that ends earlier while others continue → "through <last day>". Its
- *    true end is only confirmed once it disappears from a later weekly run
- *    (tracked server-side, not here).
- *  - Coming Soon announces upcoming films from the run date, segmented by opening
- *    date, each window ending the day before a film opens — "opens <date>"
- *    (open-ended, never a closed single-day range).
+ * Rules:
+ *  - Showing Now windows start at today + 1. A movie that only plays today is
+ *    not announced.
+ *  - A film is current only when its verified opening is on or before the
+ *    community-local run date. Tracking preserves that fact when today is a
+ *    closed day and the first visible session is tomorrow.
+ *  - Future openings never fold into Showing Now merely because their dates are
+ *    adjacent to a current film. The nearest future opening group is Coming Soon;
+ *    later presales wait for a later run so they do not flood the review queue.
+ *  - Descriptions retain each film's own observed opening and latest visible
+ *    date. Coming Soon retains its verified opening date.
  */
 import type { VeeziFilm } from './veezi';
 
@@ -60,9 +52,7 @@ export function parseVeeziDay(s: string, today: Day): Day | null {
   return day;
 }
 
-// Epoch seconds for a wall-clock America/New_York time on a given day.
-function etOffsetMinutes(day: Day): number {
-  const at = new Date(Date.UTC(day.y, day.mo, day.d, 12, 0, 0));
+function etOffsetMinutes(at: Date): number {
   const name = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' })
     .formatToParts(at).find(p => p.type === 'timeZoneName')?.value || 'GMT-5';
   const m = name.match(/GMT([+-]?\d{1,2})(?::?(\d{2}))?/);
@@ -72,9 +62,15 @@ function etOffsetMinutes(day: Day): number {
   return h * 60 + (h < 0 ? -min : min);
 }
 function etEpoch(day: Day, endOfDay: boolean): number {
-  const off = etOffsetMinutes(day);
   const [hh, mm, ss] = endOfDay ? [23, 59, 59] : [0, 0, 0];
-  return Math.floor((Date.UTC(day.y, day.mo, day.d, hh, mm, ss) - off * 60000) / 1000);
+  const wallClock = Date.UTC(day.y, day.mo, day.d, hh, mm, ss);
+  let instant = wallClock;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const resolved = wallClock - etOffsetMinutes(new Date(instant)) * 60000;
+    if (resolved === instant) break;
+    instant = resolved;
+  }
+  return Math.floor(instant / 1000);
 }
 
 function todayInET(now: Date): Day {
@@ -108,28 +104,30 @@ export function buildApolloAnnouncements(
   const T = dayNum(today);
   const allRuns = films.map(f => toRun(f, today)).filter((r): r is Run => !!r);
   const out: ApolloAnnouncement[] = [];
+  const openingDay = (run: Run): Day => {
+    const recorded = tracked.get(run.key);
+    if (!recorded || recorded.endedOn) return run.start;
+    return isoToDay(recorded.openedOn) || run.start;
+  };
 
   // ── Showing Now ────────────────────────────────────────────────────────────
-  // Start a day ahead and chain forward through the contiguous run.
+  // Start a day ahead, but only include films that had already opened by the
+  // community-local run date. Missing showtimes inside that established run are
+  // ordinary closed days, not evidence that the film is future-only.
   const showStart = T + 1;
-  const showRuns = allRuns.filter(r => dayNum(r.end) >= showStart);
-
-  // Contiguous coverage from showStart → lastCovered (stop at the first gap).
-  const covered = new Set<number>();
-  for (const r of showRuns) {
-    for (let d = Math.max(dayNum(r.start), showStart); d <= dayNum(r.end); d++) covered.add(d);
-  }
-  let lastCovered = showStart - 1;
-  if (covered.has(showStart)) { let d = showStart; while (covered.has(d)) d++; lastCovered = d - 1; }
+  const showRuns = allRuns.filter(r =>
+    dayNum(openingDay(r)) <= T && dayNum(r.end) >= showStart,
+  );
+  const lastCovered = showRuns.length
+    ? Math.max(...showRuns.map(r => dayNum(r.end)))
+    : showStart - 1;
 
   if (lastCovered >= showStart) {
-    const cands = showRuns.filter(r => dayNum(r.start) <= lastCovered && dayNum(r.end) >= showStart);
-    const horizon = lastCovered; // films still on sale at the run's edge are "now playing"
+    const cands = showRuns;
 
-    // Cut points: today+1, every opening within the run, every (end + 1).
+    // Current films can only drop from the lineup; future openings are kept out.
     const points = [...new Set([
       showStart,
-      ...cands.filter(r => dayNum(r.start) > showStart).map(r => dayNum(r.start)),
       ...cands.map(r => dayNum(r.end) + 1),
     ])].filter(p => p >= showStart && p <= lastCovered + 1).sort((a, b) => a - b);
 
@@ -137,26 +135,11 @@ export function buildApolloAnnouncements(
       const ws = points[i], we = points[i + 1] - 1;
       if (we < ws || we > lastCovered) continue;
       const lineup = cands
-        .filter(r => dayNum(r.start) <= ws && dayNum(r.end) >= we)
+        .filter(r => dayNum(r.end) >= we)
         .sort((a, b) => dayNum(a.end) - dayNum(b.end) || a.title.localeCompare(b.title));
       if (!lineup.length) continue;
-      // Dates each film runs. The opened date comes from the first run that ever
-      // saw the film, not from this week's window, which would claim a long
-      // running film "starts" today. A stop date is only shown when it is real:
-      // either the film disappeared from a later run, or it ends inside this
-      // window while others continue. A film still on sale at the edge of the
-      // published schedule has no observed end, so none is invented.
       const description = lineup
-        .map(r => {
-          const t = tracked.get(r.key);
-          const opened = (t?.openedOn && isoToDay(t.openedOn)) || r.start;
-          const confirmedEnd = t?.endedOn ? isoToDay(t.endedOn) : null;
-          const endsInWindow = dayNum(r.end) < horizon ? r.end : null;
-          const stop = confirmedEnd ?? endsInWindow;
-          return stop
-            ? `${r.title}: ${fmt(opened)} to ${fmt(stop)}`
-            : `${r.title}: from ${fmt(opened)}`;
-        })
+        .map(r => `${r.title}: ${fmt(openingDay(r))} to ${fmt(r.end)}`)
         .join(' · ');
       out.push({
         kind: 'showing_now', title: 'Playing Now at the Apollo', description,
@@ -167,27 +150,21 @@ export function buildApolloAnnouncements(
   }
 
   // ── Coming Soon ────────────────────────────────────────────────────────────
-  // From the run date, one window per opening; each ends the day before a film
-  // opens. A film here also folds into Showing Now once it has opened.
-  const comingSoon = allRuns.filter(r => dayNum(r.start) > T);
+  // Announce only the nearest verified future opening group. Its display
+  // session is the opening day itself; later presales wait for the next run.
+  const comingSoon = allRuns.filter(r => dayNum(openingDay(r)) > T);
   if (comingSoon.length) {
-    const starts = [...new Set(comingSoon.map(r => dayNum(r.start)))].sort((a, b) => a - b);
-    let prev = T; // coming-soon announcements start on the run date
-    for (const s of starts) {
-      const ws = prev, we = s - 1;
-      prev = s;
-      if (we < ws) continue;
-      const lineup = comingSoon
-        .filter(r => dayNum(r.start) > we)
-        .sort((a, b) => dayNum(a.start) - dayNum(b.start) || a.title.localeCompare(b.title));
-      if (!lineup.length) continue;
-      out.push({
-        kind: 'coming_soon', title: 'Coming Soon at the Apollo',
-        description: lineup.map(r => `${r.title}: opens ${fmt(r.start)}`).join(' · '),
-        startTime: etEpoch(fromNum(ws), false), endTime: etEpoch(fromNum(we), true),
-        movies: lineup.map(r => ({ title: r.title, rating: r.rating })),
-      });
-    }
+    const nextOpening = Math.min(...comingSoon.map(r => dayNum(openingDay(r))));
+    const lineup = comingSoon
+      .filter(r => dayNum(openingDay(r)) === nextOpening)
+      .sort((a, b) => a.title.localeCompare(b.title));
+    const displayDay = fromNum(nextOpening);
+    out.push({
+      kind: 'coming_soon', title: 'Coming Soon at the Apollo',
+      description: lineup.map(r => `${r.title}: opens ${fmt(openingDay(r))}`).join(' · '),
+      startTime: etEpoch(displayDay, false), endTime: etEpoch(displayDay, true),
+      movies: lineup.map(r => ({ title: r.title, rating: r.rating })),
+    });
   }
 
   return out;

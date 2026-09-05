@@ -64,6 +64,17 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/__fixture/state") return json(response, { activeId, pending: pending() });
     if (url.pathname === "/api/pending-count") return json(response, { count: pending() });
+    if (url.pathname === "/api/events/900/image.jpg") {
+      response.writeHead(200, { "content-type": "image/png" });
+      response.end(await readFile(resolve(root, "public/brand/communityhub-mark.png")));
+      return;
+    }
+    if (url.pathname === "/api/evaluations/901") return json(response, JSON.parse(await readFile(resolve(root, "tests/fixtures/pilot-evaluation.json"), "utf8")));
+    if (url.pathname === "/api/evaluations" && request.method === "POST") return json(response, { error: "Synthetic preview only: no evidence was retained. Real retention is tested separately against isolated SQL." }, 409);
+    if (url.pathname === "/api/events/900/request-correction" && request.method === "POST") return json(response, { error: "Synthetic correction failure. No model was called and no event was changed." }, 503);
+    if (url.pathname === "/api/events/900/update-published" && request.method === "POST") return json(response, { ok: true, message: "Synthetic update confirmed. No CommunityHub request was made." });
+    if (url.pathname === "/api/events/900/resolve-proposal" && request.method === "POST") return json(response, { ok: true, eventId: 900, originalEventId: 899, proposalResolvedAt: "2026-09-05T15:00:00Z", alreadyResolved: false });
+    if (url.pathname === "/api/events/900" && request.method === "PATCH") return json(response, { changed: 1 });
     if (url.pathname === "/api/communities/switch" && request.method === "POST") {
       let body = "";
       for await (const chunk of request) body += chunk;

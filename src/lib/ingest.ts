@@ -718,31 +718,40 @@ export async function ingestEvents(
     // A recurring event whose later dates were outside the lookahead comes back
     // on a later run carrying the dates that have since come into range. It
     // matches the stored row on title and venue, so it would be filed as a
-    // duplicate and those new dates thrown away. Fold them into the stored row
-    // instead: same event, more of its dates known.
+    // duplicate and those new dates thrown away. Unsent review rows may merge;
+    // sent or ambiguous rows require a separate, never-auto-published proposal.
+    let proposedUpdateOfEventId: number | null = null;
     if (!apollo && duplicateOf && e.sessions.length) {
-      const [stored] = await db
+      const originalId = duplicateOf;
+      await db.transaction(async tx => {
+      const [stored] = await tx
         .select({ sessions: events.sessions, status: events.status })
         .from(events)
-        .where(eq(events.id, duplicateOf))
-        .limit(1);
+        .where(and(eq(events.id, originalId),eq(events.communityId,source.communityId)))
+        .limit(1).for("update");
       const storedSessions = Array.isArray(stored?.sessions)
         ? (stored.sessions as { startTime: number; endTime: number }[])
         : [];
-      // Deleted events must not be resurrected, and a rejected one stays rejected.
-      const mergeable = stored && (stored.status === "pending" || stored.status === "approved");
+      const [sent] = stored ? await tx.select({id:publishSubmissions.id}).from(publishSubmissions)
+        .where(and(eq(publishSubmissions.eventId,originalId),inArray(publishSubmissions.state,["sending","accepted_unreconciled","succeeded"]))).limit(1).for("update") : [];
+      const seen = new Set(storedSessions.map((x) => `${x.startTime}-${x.endTime}`));
+      const added = e.sessions.filter((x) => !seen.has(`${x.startTime}-${x.endTime}`));
+      if (stored && added.length && (sent || ["approved","submitted","published"].includes(stored.status))) {
+        proposedUpdateOfEventId = originalId;
+        return;
+      }
+      // Rejected/deleted events stay untouched, including locally approved ones.
+      const mergeable = stored?.status === "pending" && !sent;
       if (mergeable) {
-        const seen = new Set(storedSessions.map((x) => `${x.startTime}-${x.endTime}`));
-        const added = e.sessions.filter((x) => !seen.has(`${x.startTime}-${x.endTime}`));
         if (added.length) {
           const merged = [...storedSessions, ...added].sort((a, b) => a.startTime - b.startTime);
-          await db
+          await tx
             .update(events)
             .set({
               sessions: merged,
               startTimeMax: Math.max(...merged.map((x) => x.startTime)),
             })
-            .where(eq(events.id, duplicateOf));
+            .where(eq(events.id, originalId));
           await emit(
             runId,
             "dedup_outcome",
@@ -751,20 +760,23 @@ export async function ingestEvents(
           );
         }
       }
+      });
     }
 
     // Restricted mode keeps every completable event in review. Duplicates are
     // preserved. Structurally-broken events are kept as auto_rejected.
-    const status = duplicateOf || remoteDup
+    const status = proposedUpdateOfEventId ? "pending" : duplicateOf || remoteDup
       ? "duplicate"
       : hardIssues.length
         ? "auto_rejected"
         : "pending";
     if (issues.length) counts.invalid++;
-    if (duplicateOf || remoteDup) counts.duplicate++;
+    if (!proposedUpdateOfEventId && (duplicateOf || remoteDup)) counts.duplicate++;
     if (!duplicateOf && hardIssues.length) counts.autoRejected++;
 
-    const rejectionReason = duplicateOf || remoteDup
+    const rejectionReason = proposedUpdateOfEventId
+      ? `New recurrence dates require review on existing event #${proposedUpdateOfEventId}; no update has been sent.`
+      : duplicateOf || remoteDup
       ? (remoteDup ? `Already published: ${dupReason}` : null)
       : hardIssues.length
         ? `Auto-rejected (incomplete): ${preserveEventHolds(hardIssues, issues.join(", ")).join(", ")}`
@@ -774,6 +786,7 @@ export async function ingestEvents(
 
     const [res] = await db.insert(events).values({
       communityId: source.communityId,
+      proposedUpdateOfEventId,
       sourceId: source.id,
       status,
       eventType: e.eventType,
@@ -876,6 +889,7 @@ export async function ingestEvents(
 
       if (
         skipsOurReview(mode) &&
+        !proposedUpdateOfEventId &&
         issues.length === 0 &&
         optionalIngestBudget(options.deadlineAt, 90_000) >= 90_000
       ) {
@@ -928,7 +942,7 @@ export async function ingestEvents(
       await emit(
         runId,
         "queue_outcome",
-        duplicateOf || remoteDup
+        proposedUpdateOfEventId ? `New dates kept for review on existing event #${proposedUpdateOfEventId} (proposal #${newId})` : duplicateOf || remoteDup
           ? `Kept as duplicate (#${newId})`
           : status === "auto_rejected"
             ? `Auto-rejected as incomplete (#${newId}): ${hardIssues.join(", ")}`
