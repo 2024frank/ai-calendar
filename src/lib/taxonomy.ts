@@ -49,6 +49,8 @@ export const GEO_SCOPES = [
 
 /** Plain English for every validation code, so no reviewer sees raw jargon. */
 export const ISSUE_LABELS: Record<string, string> = {
+  destination_inventory_unavailable:
+    "The destination calendar could not be checked for duplicates. Open it and check for an existing copy before approving this event",
   title_missing: "The title is missing",
   title_too_long: "The title is longer than 60 characters",
   description_too_short: "The short description is too short",

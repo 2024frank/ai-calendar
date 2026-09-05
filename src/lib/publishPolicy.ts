@@ -3,6 +3,7 @@ import {
   type EventValidationOptions,
   type ExtractedEvent,
 } from "./contract";
+import { hasDestinationInventoryHold } from "./eventHolds";
 
 type StoredEvent = {
   eventType?: string | null;
@@ -95,4 +96,14 @@ export function publishedImageUrl(
 
 export function submissionBlocksRetry(state: string | null | undefined): boolean {
   return state === "sending" || state === "accepted_unreconciled";
+}
+
+/** Inventory outages require a human check, including when a backlog is flushed. */
+export function automaticPublishHoldReason(
+  event: { rejectionReason?: string | null },
+  finalStatus: "approved" | "submitted" | "published",
+): string | null {
+  return finalStatus !== "approved" && hasDestinationInventoryHold(event.rejectionReason)
+    ? "Automatic publishing is paused for this event because its destination duplicate check was unavailable. A reviewer must check for an existing post."
+    : null;
 }

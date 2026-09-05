@@ -9,11 +9,24 @@ import {
 } from "../src/lib/contract";
 import {
   buttonsWithRegistration,
+  automaticPublishHoldReason,
   publishedImageUrl,
   storedEventIssues,
   submissionBlocksRetry,
 } from "../src/lib/publishPolicy";
 import { validationOptionsForSource } from "../src/lib/sourcePolicy";
+
+describe("automatic publishing after an incomplete duplicate check", () => {
+  const held = { rejectionReason: "Missing before publish: destination_inventory_unavailable" };
+  it("holds both automated paths until the destination has been checked", () => {
+    assert.ok(automaticPublishHoldReason(held, "submitted"));
+    assert.ok(automaticPublishHoldReason(held, "published"));
+  });
+  it("allows a reviewer to make the decision explicitly", () => {
+    assert.equal(automaticPublishHoldReason(held, "approved"), null);
+    assert.equal(automaticPublishHoldReason({ rejectionReason: null }, "submitted"), null);
+  });
+});
 
 describe("stored event publish validation", () => {
   const dateBearingAnnouncement = {

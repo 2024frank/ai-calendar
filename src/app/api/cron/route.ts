@@ -27,6 +27,7 @@ async function authorizePost(req: Request): Promise<boolean> {
 }
 
 async function runCron(requestOrigin: string) {
+  const failedSteps: string[] = [];
   // Each maintenance step stands on its own. They used to run unguarded in a
   // row, so a throw in either of the first two would have taken the whole tick
   // down and silently skipped the expiry sweep behind them. One failing chore
@@ -35,6 +36,7 @@ async function runCron(requestOrigin: string) {
     try {
       return await work();
     } catch (error) {
+      failedSteps.push(name);
       console.error(`Cron step failed: ${name}`, {
         message: error instanceof Error ? error.message : "unknown error",
       });
@@ -55,11 +57,15 @@ async function runCron(requestOrigin: string) {
   // The hosting plan allows a single daily cron, so this one tick starts every
   // source that is due. Each run is still bounded by the platform's per-request
   // limit; a source that needs longer is run manually until that limit lifts.
-  const due = await dueScheduledSources();
+  const due = await step("dueScheduledSources", dueScheduledSources, []);
   const started: { sourceId: number; runId: number; jobId: number; deduplicated: boolean }[] = [];
   for (const s of due) {
-    const queued = await enqueueExtraction(s.id, s.communityId);
-    started.push({ sourceId: s.id, ...queued });
+    const queued = await step(
+      `enqueueExtraction:${s.id}`,
+      () => enqueueExtraction(s.id, s.communityId),
+      null,
+    );
+    if (queued) started.push({ sourceId: s.id, ...queued });
   }
   // Start a sequential serverless worker chain. Each extraction gets its own
   // invocation and the final worker dispatches the next, so all due sources are
@@ -78,7 +84,8 @@ async function runCron(requestOrigin: string) {
   });
 
   return NextResponse.json({
-    ok: true,
+    ok: failedSteps.length === 0,
+    failedSteps,
     staleRunsFailed: reaped,
     recoveredJobs,
     expiredDeleted: deleted,
@@ -86,7 +93,7 @@ async function runCron(requestOrigin: string) {
     scheduledRunsStarted: started.length,
     workerDispatchScheduled: true,
     started,
-  });
+  }, { status: failedSteps.length ? 503 : 200 });
 }
 
 // Vercel Cron issues GET. GET mutates state, so it is bearer-only and can never

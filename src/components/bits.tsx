@@ -52,9 +52,10 @@ const RUN: Record<string, StatusTone> = {
 };
 export function RunStatus({ status, phase }: { status: string; phase?: string | null }) {
   const queued = status === "running" && phase === "queued";
+  const awaitingCallback = status === "running" && phase === "awaiting_callback";
   return (
-    <StatusBadge tone={queued ? "neutral" : (RUN[status] ?? "neutral")}>
-      {queued ? "queued" : status}
+    <StatusBadge tone={queued || awaitingCallback ? "neutral" : (RUN[status] ?? "neutral")}>
+      {queued ? "queued" : awaitingCallback ? "Waiting for results" : status}
     </StatusBadge>
   );
 }

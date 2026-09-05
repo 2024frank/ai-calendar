@@ -54,6 +54,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const transition = reconciliationTransition(outcome);
   const reconciledAt = new Date();
   const result = await db.transaction(async (tx) => {
+    // Match claimPublication's event -> submission order. Locking a submission
+    // first can deadlock against a publisher waiting on that same submission.
+    const [currentEvent] = await tx
+      .select({ id: events.id, status: events.status })
+      .from(events)
+      .where(eq(events.id, event.id))
+      .limit(1)
+      .for("update");
+    if (!currentEvent) return null;
+
     const [submission] = await tx
       .select({
         id: publishSubmissions.id,
@@ -70,7 +80,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         ),
       )
       .orderBy(desc(publishSubmissions.updatedAt), desc(publishSubmissions.id))
-      .limit(1);
+      .limit(1)
+      .for("update");
 
     if (!submission) return null;
     if (!publishSubmissionCanBeReconciled(submission.state, submission.updatedAt, reconciledAt.getTime())) {
@@ -123,7 +134,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         .where(eq(events.id, event.id));
 
       // Match normal approval semantics when this reverses a rejection.
-      if (event.status === "rejected" || event.status === "auto_rejected") {
+      if (currentEvent.status === "rejected" || currentEvent.status === "auto_rejected") {
         await tx
           .update(learnings)
           .set({ status: "retired" })

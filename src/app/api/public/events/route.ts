@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, events, sources } from "@/db/schema";
+import { communities, events, runs, sources } from "@/db/schema";
 import { verifyRunToken } from "@/lib/agentToken";
 
 export const runtime = "nodejs";
@@ -40,15 +40,35 @@ type Status = (typeof STATUSES)[number] | "pending";
  * so the next run brought another copy that also landed in pending. That is how
  * one opera arrived twice and one monthly open house arrived as three events.
  */
-function agentMaySeePending(p: URLSearchParams): boolean {
+async function agentPendingCommunity(p: URLSearchParams): Promise<number | null> {
   const runId = Number(p.get("runId"));
   const token = (p.get("token") ?? "").trim();
-  if (!Number.isSafeInteger(runId) || runId <= 0 || !token) return false;
+  if (!Number.isSafeInteger(runId) || runId <= 0 || !token) return null;
   try {
-    return verifyRunToken(runId, token);
+    if (!verifyRunToken(runId, token)) return null;
   } catch {
-    return false;
+    return null;
   }
+  // A signature proves possession, not current permission. Bind access to the
+  // actual live extraction and its tenant; old tokens must not expose a queue.
+  const [run] = await db
+    .select({ communityId: runs.communityId })
+    .from(runs)
+    .innerJoin(sources, eq(sources.id, runs.sourceId))
+    .innerJoin(communities, eq(communities.id, runs.communityId))
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.runKind, "extraction"),
+        eq(runs.status, "running"),
+        isNull(runs.finishedAt),
+        or(isNull(runs.deadlineAt), gt(runs.deadlineAt, new Date())),
+        eq(sources.communityId, runs.communityId),
+        eq(communities.status, "active"),
+      ),
+    )
+    .limit(1);
+  return run?.communityId ?? null;
 }
 
 function boundedInt(value: string | null, fallback: number, min: number, max: number) {
@@ -71,7 +91,8 @@ export async function GET(req: Request) {
   const offset = boundedInt(p.get("offset"), 0, 0, 10_000);
 
   const statusParam = (p.get("status") ?? "").trim();
-  const allowed: readonly string[] = agentMaySeePending(p)
+  const pendingCommunityId = await agentPendingCommunity(p);
+  const allowed: readonly string[] = pendingCommunityId !== null
     ? [...STATUSES, "pending"]
     : STATUSES;
   let statuses: Status[];
@@ -97,6 +118,7 @@ export async function GET(req: Request) {
     .from(communities)
     .where(eq(communities.status, "active"));
   const conds = [inArray(events.status, statuses), inArray(events.communityId, activeCommunityIds)];
+  if (pendingCommunityId !== null) conds.push(eq(events.communityId, pendingCommunityId));
 
   const communityParam = (p.get("community") ?? "").trim();
   if (communityParam) {
@@ -195,9 +217,11 @@ export async function GET(req: Request) {
     },
     {
       headers: {
-        // Shared caches absorb public-feed traffic. A stale response is safe
-        // while one edge request refreshes it in the background.
-        "cache-control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+        // Cache accepted public content only. A private queue response must
+        // never outlive the run's permission in a browser or shared cache.
+        "cache-control": pendingCommunityId !== null
+          ? "private, no-store"
+          : "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
         "access-control-allow-origin": "*",
       },
     },

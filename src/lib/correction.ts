@@ -13,6 +13,7 @@ import { fetchPage, hasImageExtension, isGenericImage } from "./fetchPage";
 import { isPublicHttpUrl } from "./publicUrl";
 import { normalizeImageBase64 } from "./imageData";
 import { validationOptionsForSource } from "./sourcePolicy";
+import { preserveEventHolds } from "./eventHolds";
 
 /** Fields the correction agent may supply, all optional. */
 const CORRECTION_SCHEMA = {
@@ -220,8 +221,12 @@ Return only the missing fields from that page. For a missing image use THIS even
 
   // A corrected event re-enters review exactly like a freshly extracted one:
   // it leaves auto-rejected immediately and carries the same soft "needs
-  // fields" flag if anything non-blocking is still missing.
-  const softIssues = issues.filter((i) => !HARD_ISSUES.has(i));
+  // fields" flag if anything non-blocking is still missing. Filling a field
+  // does not resolve a failed destination duplicate check.
+  const softIssues = preserveEventHolds(
+    issues.filter((i) => !HARD_ISSUES.has(i)),
+    ev.rejectionReason,
+  );
   await db
     .update(events)
     .set({

@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { communities, events, sources } from "@/db/schema";
 import { validateEvent, type ExtractedEvent } from "./contract";
 import { validationOptionsForSource } from "./sourcePolicy";
+import { preserveEventHolds } from "./eventHolds";
 
 /**
  * Recompute a pending event's "needs fields" flag from what is SAVED now.
@@ -69,7 +70,8 @@ export async function refreshPendingFlag(eventId: number) {
       ev.eventType,
     ),
   );
-  const reason = issues.length ? `Missing before publish: ${issues.join(", ")}` : null;
+  const currentIssues = preserveEventHolds(issues, ev.rejectionReason);
+  const reason = currentIssues.length ? `Missing before publish: ${currentIssues.join(", ")}` : null;
   if (reason !== ev.rejectionReason) {
     await db.update(events).set({ rejectionReason: reason }).where(eq(events.id, eventId));
   }

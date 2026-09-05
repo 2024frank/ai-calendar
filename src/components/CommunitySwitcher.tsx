@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 
 /** Lets a reviewer or admin move between the communities they belong to. */
 export function CommunitySwitcher({
@@ -13,6 +13,7 @@ export function CommunitySwitcher({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [refreshing, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   // Nothing to switch between.
@@ -31,7 +32,7 @@ export function CommunitySwitcher({
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || "Could not switch communities.");
       }
-      router.refresh();
+      startTransition(() => router.refresh());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not switch communities.");
     } finally {
@@ -47,10 +48,10 @@ export function CommunitySwitcher({
       <select
         id="community-switcher"
         name="community"
-        aria-busy={busy || undefined}
+        aria-busy={busy || refreshing || undefined}
         className="input"
         value={activeId ?? ""}
-        disabled={busy}
+        disabled={busy || refreshing}
         onChange={(e) => change(Number(e.target.value))}
       >
         {communities.map((c) => (
@@ -59,6 +60,7 @@ export function CommunitySwitcher({
           </option>
         ))}
       </select>
+      {(busy || refreshing) && <span className="sr-only" role="status">Switching community…</span>}
       {error && <div className="muted" role="alert" style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>{error}</div>}
     </div>
   );

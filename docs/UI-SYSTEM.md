@@ -109,3 +109,13 @@ Theme tokens live in `src/app/globals.css`. Components must consume tokens such 
 4. Render `EmptyState` before rendering an empty table or chart.
 5. Put route-only interactive behavior beside the route; promote it to `components/` only after a second consumer appears.
 6. Run `npm run typecheck`, `npm run build`, and desktop/mobile browser checks before shipping.
+
+## Component Verification
+
+`npm run ui:preview` serves the real shell, navigation, theme controls, and run timeline at `http://127.0.0.1:4317/dashboard` with synthetic data. It binds to loopback, bundles in memory, and never connects to the database or production APIs. Stop it with Ctrl+C; restart after editing a component.
+
+The preview reuses self-hosted Plus Jakarta Sans assets from a local Next build. Run `npm run build` first for matching typography; without those assets it uses the system sans fallback and prints a notice.
+
+Use the timeline scenario selector to check completed, queued, waiting-for-results, network-outage, expired-session, and missing-run states. Switching the fixture community changes the pending count from 12 to 3 without changing the URL. At mobile width, check Tab and Shift+Tab stay inside the drawer, Escape returns focus to its opener, and background controls cannot receive focus.
+
+This fixture verifies component behavior and responsive styling. It does not replace authenticated integration checks against the app's real database and publishing services.

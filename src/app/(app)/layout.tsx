@@ -32,7 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         />
         <div className="brand__product">AI Calendar</div>
       </div>
-      <Nav role={session.role} pending={pending} />
+      <Nav key={`${activeId ?? "none"}:${pending}`} role={session.role} pending={pending} />
       <CommunitySwitcher
         communities={communities.map((community) => ({ id: community.id, name: community.name }))}
         activeId={activeId}

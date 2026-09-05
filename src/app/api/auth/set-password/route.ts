@@ -6,6 +6,7 @@ import { loginTokens, users } from "@/db/schema";
 import { createSession } from "@/lib/auth";
 import { hashPassword, passwordProblem } from "@/lib/password";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
+import { readJsonObjectBody } from "@/lib/requestBody";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,9 @@ export async function POST(req: Request) {
   if (!(await rateLimit(`setpw:${clientKey(req)}`, 20, 10 * 60_000))) {
     return NextResponse.json({ error: "Too many attempts. Try again shortly." }, { status: 429 });
   }
-  const body = await req.json().catch(() => ({}));
+  const parsed = await readJsonObjectBody(req, 16 * 1024);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
+  const body = parsed.body;
   const rawToken = String(body.token ?? "");
   const password = String(body.password ?? "");
   if (!rawToken) return NextResponse.json({ error: "Missing link token." }, { status: 400 });

@@ -58,8 +58,17 @@ export async function GET(req: Request) {
   });
 
   // Honor a same-site redirect (e.g. an email digest links straight to /review).
-  // Only relative paths are allowed, so a token link can never bounce off-site.
+  // Check the parsed origin: backslashes and control characters can turn an
+  // apparently relative path into an external URL under WHATWG URL parsing.
   const next = url.searchParams.get("next");
-  const dest = next && /^\/[^/]/.test(next) ? next : "/dashboard";
-  return NextResponse.redirect(new URL(dest, base));
+  const destination = new URL("/dashboard", base);
+  if (next?.startsWith("/")) {
+    try {
+      const candidate = new URL(next, base);
+      if (candidate.origin === destination.origin) return NextResponse.redirect(candidate);
+    } catch {
+      // Malformed redirects fall back to the normal signed-in landing page.
+    }
+  }
+  return NextResponse.redirect(destination);
 }

@@ -4,10 +4,10 @@
 
 AI Calendar should remain a **modular monolith with separate web and worker processes** until its load or team structure proves that a service split is necessary. The web application, worker, and scheduler share one versioned TypeScript codebase and one transactional MySQL database. Public reads are absorbed by the CDN; long-running extraction is handed to a durable database queue; publishing uses an idempotent outbox.
 
-This is the smallest architecture that has the production properties the product needs now:
+This is the target architecture for the pilot. The code implements the following safeguards; deployment topology, monitoring, and recovery timing still need operational verification:
 
-- no event extraction is lost when an HTTP instance terminates;
-- two instances cannot actively extract the same source at once;
+- extraction requests are persisted before dispatch, with bounded stale-run recovery;
+- an active source job has a unique deduplication key and result-ingestion claim;
 - tenant boundaries are enforced in application queries;
 - destination publishing is idempotent;
 - authentication throttles apply across the whole fleet;
@@ -48,7 +48,7 @@ flowchart LR
 | Object storage (next extraction) | Event images and large artifacts | Add before image volume becomes material |
 | Observability | Structured logs, traces, metrics and paging | Managed provider |
 
-The current Vercel deployment may execute a worker immediately with `after()`, but the job is committed first. If that invocation dies, a later call to `/api/internal/jobs` recovers and runs the same durable work. At higher volume, the same endpoint/library is run by dedicated containers without changing the control-plane APIs.
+The current Vercel deployment may execute a worker immediately with `after()`, but the job is committed first. If that invocation dies, a later call to `/api/internal/jobs` recovers unstarted work or closes a started extraction as failed. Started extractions must use a fresh run ID on retry so late results cannot claim a replacement attempt. Provider-side continuation is best-effort, not guaranteed. `vercel.json` currently schedules daily maintenance; the two-minute queue objective below requires a frequent independent worker invocation or dedicated service. Dedicated-container deployment is an evolution path, not a verified current deployment.
 
 ## Component structure
 
@@ -60,7 +60,7 @@ src/
       auth/                 identity endpoints
       sources/              source control plane
       events/               review commands
-      agent/ingest/          legacy signed external-worker callback
+      agent/ingest/          signed per-run candidate callback
       public/events/         legacy public feed
       v1/events/             stable public API alias
       internal/jobs/         private worker entrypoint
@@ -110,17 +110,17 @@ Important invariants:
 1. A run and job are created in one transaction.
 2. `jobs.dedupe_key` is unique while active and cleared only at a terminal state.
 3. A worker owns a job only after a conditional status update succeeds.
-4. A terminated worker leaves a recoverable lease, not lost work.
-5. The model receives no ingest credential; the optional legacy external-worker callback requires a per-run HMAC.
-6. Publishing is protected by `(event_id, destination_id, payload_hash)`.
+4. Lease recovery checks the observed owner, lease timestamp, and attempt count. Unstarted work can be retried; an expired started extraction fails explicitly and requires a fresh run identity.
+5. The provider receives a per-run HMAC for callback delivery, not the signing secret. Callback and returned-output paths share one ingestion claim; callbacks require an active run inside its acceptance deadline. A timeout after dispatch may enter `awaiting_callback`, retaining the active job until delivery or expiry.
+6. Publishing locks the event before examining all submissions for its destination. The payload-level unique key is an additional guard, not permission to repost an edited event.
 
 ### Review and publish
 
 1. The reviewer reads events through a community-scoped query.
-2. Approval updates the local review state.
+2. Approval requests publishing first; failures do not label the event newly approved.
 3. `publishEvent` resolves the source or community destination.
-4. The exact payload is hashed and claimed in `publish_submissions`.
-5. A successful destination response records the remote ID. An ambiguous timeout remains unreconciled and is never blindly retried.
+4. The exact payload is hashed and claimed in `publish_submissions`. A pending or successful submission for that destination blocks a new post even if local edits change the hash.
+5. A successful destination response records the remote ID and local status together. An ambiguous timeout remains unreconciled and is never blindly retried. Local edits after sending do not automatically update a remote post.
 
 For the next reliability increment, approval and outbox creation should be one transaction and a publisher worker should perform the network request. The existing outbox schema already supports that evolution.
 
@@ -130,6 +130,8 @@ For the next reliability increment, approval and outbox creation should be one t
 2. The edge caches each query for 60 seconds and may serve stale data for 300 seconds during refresh.
 3. A cache miss runs an indexed tenant/status/time query against MySQL.
 4. The response contains no run internals, credentials, or reviewer identities.
+
+Pending inventory is a private exception: a valid per-run token must resolve to a live extraction and its active community. Both rows and counts are constrained to that community, and the response is `private, no-store`.
 
 ## API design
 
@@ -151,7 +153,7 @@ For the next reliability increment, approval and outbox creation should be one t
 | POST | `/api/sources/:id/run` | Enqueue extraction; returns `runId`, `jobId` | Admin session |
 | GET | `/api/runs/:id/events?after=` | Incremental run timeline | Tenant session |
 | POST | `/api/events/:id/approve` | Review and publish | Tenant session |
-| POST | `/api/agent/ingest` | Legacy external-worker candidate callback | Per-run HMAC |
+| POST | `/api/agent/ingest` | Bounded per-run candidate callback | Per-run HMAC |
 | POST | `/api/internal/jobs?limit=2` | Recover and drain jobs | Worker bearer secret |
 | GET | `/api/health/live` | Process liveness | Platform |
 | GET | `/api/health/ready` | Config + database readiness | Platform |
@@ -190,7 +192,7 @@ The legacy `/api/public/events` route remains available while consumers migrate 
 | Tables | Purpose |
 | --- | --- |
 | `jobs` | Durable queue, unique active dedupe key, lease and bounded recovery |
-| `publish_submissions` | Destination outbox and payload-level idempotency |
+| `publish_submissions` | Destination outbox, event-scoped claims and payload-level uniqueness |
 | `rate_limit_buckets` | Hashed, fleet-wide authentication counters |
 | `app_settings` | Small platform configuration values |
 
@@ -221,7 +223,7 @@ Do not cache authorization decisions or review queues at the CDN. Do not introdu
 
 ## Operations and SLOs
 
-Initial service objectives:
+Initial service objectives (targets, not measured guarantees):
 
 - public feed availability: 99.9% monthly;
 - private control-plane availability: 99.5% monthly;

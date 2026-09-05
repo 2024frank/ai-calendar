@@ -62,12 +62,17 @@ export function canonicalSourceEventUrl(value: unknown): string | null {
     for (const key of [...url.searchParams.keys()]) {
       if (TRACKING_PARAMS.some((re) => re.test(key))) url.searchParams.delete(key);
     }
+    url.searchParams.sort();
     url.pathname = url.pathname.replace(/\/+$/, "") || "/";
 
     const parts = url.pathname.split("/").filter(Boolean);
     if (!parts.length) return null;
     const last = parts[parts.length - 1]?.toLowerCase() ?? "";
-    if (GENERIC_SOURCE_PATHS.has(last)) return null;
+    // Some providers identify an individual event in the query string.
+    const hasEventId = [...url.searchParams].some(([key, value]) =>
+      /^(id|eid|event_?id|event)$/i.test(key) && value.trim().length > 0,
+    );
+    if (GENERIC_SOURCE_PATHS.has(last) && !hasEventId) return null;
     if (parts.length === 1 && !url.searchParams.size && last.length < 18) return null;
 
     return url.toString();
@@ -91,8 +96,18 @@ export function sourceEventUrlSet(record: SourceUrlRecord): Set<string> {
   );
 }
 
-export function sourceEventUrlsOverlap(a: SourceUrlRecord, b: SourceUrlRecord): boolean {
+export function sourceEventUrlsOverlap(
+  a: SourceUrlRecord,
+  b: SourceUrlRecord,
+  listingUrls: readonly unknown[] = [],
+): boolean {
   const left = sourceEventUrlSet(a);
+  // A configured source/listing page may have an event-looking path while
+  // containing dozens of unrelated events. Its URL alone cannot dedupe them.
+  for (const listing of listingUrls) {
+    const canonical = canonicalSourceEventUrl(listing);
+    if (canonical) left.delete(canonical);
+  }
   if (!left.size) return false;
   for (const url of sourceEventUrlSet(b)) {
     if (left.has(url)) return true;

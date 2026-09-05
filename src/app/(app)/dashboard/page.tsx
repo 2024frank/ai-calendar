@@ -3,6 +3,7 @@ import { isAdmin, requireUser } from "@/lib/auth";
 import { accessibleCommunities, currentCommunityId, dashboardStats, listCommunities } from "@/lib/data";
 import { reapStaleRuns } from "@/lib/retention";
 import { requeueStaleJobs } from "@/lib/jobs";
+import { MODE_LABELS, normalizeMode } from "@/lib/modeLabels";
 import { fmtDate, RunStatus } from "@/components/bits";
 import { ButtonLink, Card, EmptyState, Icon, type IconName, PageHeader, TableShell } from "@/components/ui";
 
@@ -42,11 +43,11 @@ export default async function DashboardPage() {
       />
 
       <section className="kpi-grid" aria-label="Workspace metrics">
-        {admin && <Kpi label="Active Sources" value={stats.activeSources} href="/sources" icon="sources" hint="Currently ingesting" />}
+        {admin && <Kpi label="Active Sources" value={stats.activeSources} href="/sources" icon="sources" hint="Enabled for extraction" />}
         <Kpi label="Pending Review" value={stats.pending} href="/review" icon="review" hint="Needs a decision" />
         <Kpi label="Duplicates" value={stats.duplicate} href="/review?tab=duplicates" icon="inbox" hint="Protected from republishing" />
         <Kpi label="Approved" value={stats.approved} href="/review?tab=approved" icon="check" hint="Reviewer approved" />
-        <Kpi label="Published" value={stats.submitted} href="/review?tab=submitted" icon="arrow-right" hint="Sent downstream" />
+        <Kpi label="Auto-sent" value={stats.submitted} href="/review?tab=submitted" icon="arrow-right" hint="Sent to CommunityHub for review" />
       </section>
 
       {communities.length > 0 && (
@@ -62,7 +63,7 @@ export default async function DashboardPage() {
                 {communities.map((community) => (
                   <tr key={community.id}>
                     <td><strong>{community.name}</strong></td>
-                    <td>{community.defaultMode}</td>
+                    <td>{MODE_LABELS[normalizeMode(community.defaultMode) ?? "needs_approval"].name}</td>
                     <td className="muted">{community.timezone}</td>
                     <td>{community.defaultDestinationId ? "CommunityHub" : "AI Calendar Only"}</td>
                   </tr>
@@ -83,7 +84,7 @@ export default async function DashboardPage() {
           ) : (
             <TableShell label="Recent agent runs">
               <table className="tbl">
-                <thead><tr><th>Run</th><th>Kind</th><th>Status</th><th>Found</th><th>Published</th><th>Started</th><th><span className="sr-only">Open</span></th></tr></thead>
+                <thead><tr><th>Run</th><th>Kind</th><th>Status</th><th>Found</th><th>Sent during run</th><th>Started</th><th><span className="sr-only">Open</span></th></tr></thead>
                 <tbody>
                   {stats.recentRuns.map((run) => (
                     <tr key={run.id}>

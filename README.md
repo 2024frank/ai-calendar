@@ -62,14 +62,24 @@ The production topology, data flows, API boundaries, schema ownership, cache pol
 ## Running it locally
 
 ```bash
-npm install
+npm ci
 cp .env.example .env.local   # fill in your values
 npm run db:migrate            # non-destructive migrations
-node scripts/seed-db.mjs      # first community, destination, admin user
+npm run seed -- --community-slug your-town --community-name "Your Town" --admin-email admin@example.org --timezone America/New_York
 npm run dev
 ```
 
+Use a separate development database. Generate independent signing secrets, for example with `openssl rand -hex 32`, for each blank secret in `.env.local`. The bootstrap creates a community in human-review mode and an initial platform admin, with no external publishing destination or preset password. Open `/login` and use the password-setup action. In development without email credentials, the server logs the setup link. Re-running bootstrap preserves existing settings. The older `scripts/seed-db.mjs` is a historical Oberlin import, not a portable setup command.
+
 `scripts/rebuild-db.mjs` is a destructive local-development reset and must not be used against a populated environment.
+
+### Verification and maintenance
+
+Run `npm run check` for lint, TypeScript, regression tests, and a production build. GitHub's **Quality checks** workflow runs the same gate and the production dependency audit on pushes and pull requests. This workflow does not extract or publish events.
+
+`npm run ui:preview` starts a loopback-only preview of the real interface components with synthetic data. It supports mobile navigation, community switches, completed runs, callback waits, network failures, and expired-session checks without touching a database or publishing a post. It is component verification, not a substitute for the real database and destination acceptance checks in [docs/RELIABILITY.md](docs/RELIABILITY.md).
+
+The configured Vercel cron runs daily. Fast recovery after a killed worker chain requires a separate frequent consumer of `/api/internal/jobs`; the daily schedule alone cannot meet a two-minute queue objective. See the operational requirements and release checks in [docs/RELIABILITY.md](docs/RELIABILITY.md).
 
 ### Environment
 
@@ -78,7 +88,7 @@ npm run dev
 | `DATABASE_HOST` / `PORT` / `USERNAME` / `PASSWORD` / `NAME` | The app's MySQL database |
 | `PERPLEXITY_API_KEY` | The extraction agent |
 | `AUTH_JWT_SECRET` | Signing the session cookie |
-| `AGENT_INGEST_SECRET` | Signs the optional legacy callback used by an external extraction worker |
+| `AGENT_INGEST_SECRET` | Signs per-run callback and scoped pending-inventory tokens; the signing secret itself is never sent to the model |
 | `CRON_SECRET` | Authorizes the daily cron |
 | `APP_URL` | Public base URL, used in sign-in links |
 | `HOSTINGER_EMAIL`, `HOSTINGER_EMAIL_PASSWORD` | The mailbox mail is sent from. `HOSTINGER_SMTP_HOST` and `_PORT` override the defaults |

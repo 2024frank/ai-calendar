@@ -23,14 +23,22 @@ export function Nav({ role, pending = 0 }: { role: string; pending?: number }) {
 
   useEffect(() => {
     let alive = true;
+    let controller: AbortController | null = null;
     const load = async () => {
+      if (controller || document.visibilityState === "hidden") return;
+      controller = new AbortController();
+      const current = controller;
+      const deadline = window.setTimeout(() => current.abort(), 15_000);
       try {
-        const response = await fetch("/api/pending-count", { cache: "no-store" });
+        const response = await fetch("/api/pending-count", { cache: "no-store", signal: controller.signal });
         if (!response.ok) return;
         const data = (await response.json()) as { count?: number };
         if (alive && typeof data.count === "number") setCount(data.count);
       } catch {
         // Preserve the last known count while the network recovers.
+      } finally {
+        window.clearTimeout(deadline);
+        controller = null;
       }
     };
     load();
@@ -38,6 +46,7 @@ export function Nav({ role, pending = 0 }: { role: string; pending?: number }) {
     const timer = window.setInterval(load, 30_000);
     return () => {
       alive = false;
+      controller?.abort();
       window.removeEventListener("focus", load);
       window.clearInterval(timer);
     };

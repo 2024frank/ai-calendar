@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, destinations } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { accessibleCommunities } from "@/lib/data";
 import { flushCommunityInheritors, type FlushResult } from "@/lib/autoPublish";
 import { logActivity } from "@/lib/activity";
 import { MODE_LABELS, normalizeMode, type ReviewMode } from "@/lib/modeLabels";
@@ -19,7 +20,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const communityId = Number(id);
   const allowed =
-    s.role === "platform_admin" || (s.role === "community_admin" && s.communityId === communityId);
+    s.role === "platform_admin" ||
+    (s.role === "community_admin" &&
+      (await accessibleCommunities(s)).some((community) => community.id === communityId));
   if (!allowed) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));

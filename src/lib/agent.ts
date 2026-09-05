@@ -20,6 +20,7 @@ import {
 } from "./extractionPolicy";
 import { canonicalRecipeUrl } from "./recipePolicy";
 import { assertPublicHttpUrl } from "./publicUrl";
+import { claimRunIngestion, completeRunIngestion, failActiveRun, markRunAwaitingCallback } from "./runIngestion";
 
 // Vercel gives the worker 300 seconds. Provider work stops substantially before
 // that ceiling because the no-callback fallback still has to validate, enrich,
@@ -40,12 +41,10 @@ async function loadContext(runId: number) {
   return { run, source, community };
 }
 
-async function fail(runId: number, reason: string) {
-  await emit(runId, "run_failed", reason, { reason });
-  await db
-    .update(runs)
-    .set({ status: "failed", phase: "done", finishedAt: new Date(), errorLog: { reason } })
-    .where(eq(runs.id, runId));
+async function fail(runId: number, reason: string, ownsIngestion = false) {
+  if (await failActiveRun(runId, reason, ownsIngestion)) {
+    await emit(runId, "run_failed", reason, { reason });
+  }
 }
 
 /** Create a run row and return its id. */
@@ -413,6 +412,8 @@ export async function runExtraction(runId: number) {
   const started = Date.now();
   const executionDeadline = started + PROVIDER_PHASE_BUDGET_MS;
   const finalizationDeadline = started + FINALIZATION_DEADLINE_MS;
+  let deliveryRequested = false;
+  let ownsIngestion = false;
   try {
     const { source, community } = await loadContext(runId);
     const recipe = (source.extractionRecipe ?? null) as {
@@ -576,12 +577,9 @@ export async function runExtraction(runId: number) {
       specialInstructions: fillTemplate(source.specialInstructions ?? "", extractionVars),
     });
 
-    // Delivery insurance. The serverless wait dies at the platform's 300s
-    // ceiling, but the agent's own sandbox outlives it. Handing the agent a
-    // per-run token lets it POST the finished payload straight to the ingest
-    // endpoint, so a long extraction completes even after nobody is waiting.
-    // The in-process path below still ingests when the wait survives; the
-    // completed-run check before ingestion settles the race between the two.
+    // Ask the sandbox to deliver independently as well. Delivery after our
+    // request timeout is best-effort, not guaranteed by the provider. Both
+    // paths must claim the run before ingestion; only one may persist it.
     const publicOrigin = process.env.APP_URL ? new URL(process.env.APP_URL).origin : appUrl;
     const deliveryBlock = `
 DELIVERY (do BOTH, in this order):
@@ -615,6 +613,9 @@ ${deliveryBlock}`;
     await emit(runId, "model_turn", "Running the extraction agent (sandbox: read inventories and dedupe)", {
       phase: "extraction",
     });
+    const models = await modelChain();
+    const timeoutMs = remainingProviderBudget(executionDeadline);
+    deliveryRequested = true;
     const res = await llmComplete({
       prompt,
       instructions: systemPrompt,
@@ -625,9 +626,9 @@ ${deliveryBlock}`;
       webSearch: true,
       maxSteps: 40,
       maxTokens: 32000,
-      models: await modelChain(),
+      models,
       runId,
-      timeoutMs: remainingProviderBudget(executionDeadline),
+      timeoutMs,
     });
 
     await emit(
@@ -637,37 +638,18 @@ ${deliveryBlock}`;
       { input: res.usage.input, output: res.usage.output, model: res.model, costUsd: res.usage.costUsd },
     );
 
-    // A legacy/external callback may already have completed this run. The
-    // normal extraction path never receives callback credentials and is
-    // ingested below by this trusted server process.
-    const [afterPost] = await db
-      .select({ status: runs.status })
-      .from(runs)
-      .where(eq(runs.id, runId))
-      .limit(1);
-    if (afterPost?.status === "completed") return;
-
     await emit(runId, "candidates_parsed", "Validating the agent's structured response", {
       serverIngest: true,
     });
     const extracted = extractAgentPayload(res.text);
     const list = [...extracted.events, ...tagAgentDuplicates(extracted.duplicates)];
+    ownsIngestion = await claimRunIngestion(runId, finalizationDeadline);
+    if (!ownsIngestion) return;
     const counts = await ingestEvents(runId, source, community, list, {
       deadlineAt: finalizationDeadline,
     });
 
-    await db
-      .update(runs)
-      .set({
-        status: "completed",
-        phase: "done",
-        finishedAt: new Date(),
-        eventsFound: counts.found,
-        eventsExtracted: counts.inserted,
-        eventsDuplicate: counts.duplicate,
-        eventsInvalid: counts.invalid,
-      })
-      .where(eq(runs.id, runId));
+    if (!(await completeRunIngestion(runId, counts))) return;
 
     await emit(
       runId,
@@ -677,18 +659,17 @@ ${deliveryBlock}`;
     );
   } catch (e) {
     const message = (e as Error).message;
-    if (/aborted due to timeout|execution time budget/i.test(message)) {
-      // Our wait hit the serverless ceiling. The agent keeps working on the
-      // provider's side and delivers through the ingest callback, so the run
-      // stays open for it; the run deadline bounds how long.
-      await emit(
-        runId,
-        "model_turn",
-        "The serverless wait ended; the agent continues remotely and its callback will finish this run.",
-        { handoff: true },
-      );
-      return;
+    if (deliveryRequested && !ownsIngestion && /timeout|timed out|execution time budget/i.test(message)) {
+      if (await markRunAwaitingCallback(runId)) {
+        await emit(
+          runId,
+          "model_turn",
+          "The extraction request timed out. Waiting for a possible agent callback until the run deadline.",
+          { handoff: true, phase: "awaiting_callback" },
+        );
+        return;
+      }
     }
-    await fail(runId, message);
+    await fail(runId, message, ownsIngestion);
   }
 }

@@ -36,3 +36,21 @@ export async function readJsonBodyLimited<T>(req: Request, maxBytes: number): Pr
   }
   return JSON.parse(new TextDecoder().decode(merged)) as T;
 }
+
+/** An HTTP mutation needs an object, not merely syntactically valid JSON. */
+export async function readJsonObjectBody(req: Request, maxBytes: number): Promise<
+  | { ok: true; body: Record<string, unknown> }
+  | { ok: false; error: string; status: 400 | 413 }
+> {
+  try {
+    const body = await readJsonBodyLimited<unknown>(req, maxBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      return { ok: false, error: "A JSON object is required.", status: 400 };
+    }
+    return { ok: true, body: body as Record<string, unknown> };
+  } catch (error) {
+    return error instanceof RequestBodyTooLargeError
+      ? { ok: false, error: "Request body is too large.", status: 413 }
+      : { ok: false, error: "Invalid JSON.", status: 400 };
+  }
+}

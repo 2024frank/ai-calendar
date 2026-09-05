@@ -33,6 +33,7 @@ const TABS = [
 ] as const;
 
 const SHORT_ISSUE: Record<string, string> = {
+  destination_inventory_unavailable: "duplicate check at destination before approval",
   title_missing: "title", title_too_long: "shorter title", description_too_short: "description",
   description_too_long: "shorter description", sponsors_missing: "sponsor", image_missing: "image",
   website_missing: "website", contact_email_missing: "contact email", phone_missing: "phone",

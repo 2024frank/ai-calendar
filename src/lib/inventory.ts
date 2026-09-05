@@ -12,6 +12,14 @@ export type InventoryItem = {
   url: string | null;
 };
 
+export type InventoryResult = {
+  items: InventoryItem[];
+  available: boolean;
+  reason?: string;
+};
+
+const unavailable = (reason: string): InventoryResult => ({ items: [], available: false, reason });
+
 /**
  * What the community's endpoint already holds, approved and pending alike.
  *
@@ -22,9 +30,11 @@ export async function fetchDestinationInventory(
   communityId: number,
   sourceId?: number | null,
   timeoutMs = 25_000,
-): Promise<InventoryItem[]> {
-  const { destination: dest } = await resolveDestination(communityId, sourceId);
-  if (!dest) return [];
+): Promise<InventoryResult> {
+  const { destination: dest, error } = await resolveDestination(communityId, sourceId);
+  if (error) return unavailable("The publishing destination could not be resolved.");
+  if (!dest) return { items: [], available: true };
+  if (timeoutMs < 250) return unavailable("The run had no time left to check the destination inventory.");
 
   let cfg: { inventory_url?: string; api_base?: string };
   try {
@@ -33,9 +43,9 @@ export async function fetchDestinationInventory(
       api_base?: string;
     };
   } catch {
-    return [];
+    return unavailable("The destination configuration is invalid.");
   }
-  if (!cfg?.inventory_url) return [];
+  if (!cfg?.inventory_url) return unavailable("No duplicate-check inventory is configured for this destination.");
 
   // CommunityHub hides two whole classes of post from the default listing, and
   // both are exactly the ones we must not resend:
@@ -64,10 +74,11 @@ export async function fetchDestinationInventory(
       timeoutMs: Math.max(1, Math.min(timeoutMs, 25_000)),
       headers: { accept: "application/json" },
     });
-    if (!res.ok) return [];
+    if (!res.ok) return unavailable("The destination inventory request failed.");
     const body = JSON.parse(new TextDecoder().decode(res.bytes)) as Record<string, unknown>;
-    const posts = Array.isArray(body.posts) ? (body.posts as Record<string, unknown>[]) : [];
-    return posts.map((p) => {
+    if (!Array.isArray(body?.posts)) return unavailable("The destination returned an unexpected inventory response.");
+    const posts = body.posts as Record<string, unknown>[];
+    return { available: true, items: posts.map((p) => {
       const sessions = Array.isArray(p.sessions) ? (p.sessions as Record<string, unknown>[]) : [];
       const loc = p.location as Record<string, unknown> | null | undefined;
       // The public post page is /calendar/post/<numeric id> on the hub site.
@@ -96,9 +107,8 @@ export async function fetchDestinationInventory(
         sourceUrls,
         url: url ?? null,
       };
-    });
+    }) };
   } catch {
-    // The run continues without this check rather than failing outright.
-    return [];
+    return unavailable("The destination inventory is unavailable; check for existing posts before approval.");
   }
 }

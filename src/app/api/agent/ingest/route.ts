@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, runs, sources } from "@/db/schema";
 import { verifyRunToken } from "@/lib/agentToken";
@@ -7,18 +7,15 @@ import { ingestEvents } from "@/lib/ingest";
 import { emit } from "@/lib/runEvents";
 import { readJsonBodyLimited, RequestBodyTooLargeError } from "@/lib/requestBody";
 import { FINALIZATION_DEADLINE_MS } from "@/lib/extractionPolicy";
+import { claimRunIngestion, completeRunIngestion, failActiveRun } from "@/lib/runIngestion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Legacy authenticated callback for an already-running external worker.
- *
- * The normal extraction path now receives structured model output and ingests
- * it in-process, so model prompts never contain this endpoint or a run token.
- * This endpoint remains fail-closed behind a per-run HMAC for compatibility;
- * callers still pass through the same validation and persistence pipeline.
+ * Authenticated sandbox delivery using a per-run HMAC. Callback and returned
+ * model output use the same atomic ingestion claim and validation pipeline.
  */
 export async function POST(req: Request) {
   const deadlineAt = Date.now() + FINALIZATION_DEADLINE_MS;
@@ -61,18 +58,8 @@ export async function POST(req: Request) {
 
   // Claim this callback before ingesting. A leaked or replayed per-run token
   // cannot race a second copy of the same payload into the database.
-  const [claim] = await db
-    .update(runs)
-    .set({ phase: "ingesting" })
-    .where(
-      and(
-        eq(runs.id, runId),
-        eq(runs.status, "running"),
-        or(isNull(runs.phase), ne(runs.phase, "ingesting")),
-      ),
-    );
-  if (Number((claim as { affectedRows?: number }).affectedRows ?? 0) !== 1) {
-    return NextResponse.json({ error: "results are already being ingested" }, { status: 409 });
+  if (!(await claimRunIngestion(runId, deadlineAt))) {
+    return NextResponse.json({ error: "run expired, ended, or results are already being ingested" }, { status: 409 });
   }
 
   try {
@@ -105,6 +92,10 @@ export async function POST(req: Request) {
       deadlineAt,
     });
 
+    if (!(await completeRunIngestion(runId, counts))) {
+      return NextResponse.json({ error: "run ended before ingestion completed" }, { status: 409 });
+    }
+
     await emit(
       runId,
       "run_finished",
@@ -116,26 +107,9 @@ export async function POST(req: Request) {
       },
     );
 
-    // Reflect on the run row so the dashboard shows the outcome.
-    await db
-      .update(runs)
-      .set({
-        status: "completed",
-        phase: "done",
-        finishedAt: new Date(),
-        eventsFound: counts.found,
-        eventsExtracted: counts.inserted,
-        eventsDuplicate: counts.duplicate,
-        eventsInvalid: counts.invalid,
-      })
-      .where(eq(runs.id, runId));
-
     return NextResponse.json({ ok: true, ...counts });
   } catch (error) {
-    await db
-      .update(runs)
-      .set({ phase: "fetching" })
-      .where(and(eq(runs.id, runId), eq(runs.status, "running"), eq(runs.phase, "ingesting")));
+    await failActiveRun(runId, error instanceof Error ? error.message : "Result ingestion failed", true);
     throw error;
   }
 }

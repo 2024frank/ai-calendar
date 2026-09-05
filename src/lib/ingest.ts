@@ -47,6 +47,7 @@ import {
   trustedAgentDuplicate,
 } from "./duplicatePolicy";
 import { validationOptionsForSource } from "./sourcePolicy";
+import { preserveEventHolds } from "./eventHolds";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
@@ -240,12 +241,20 @@ export async function ingestEvents(
     .limit(400);
 
   const existingByKey = new Map(existing.filter((e) => e.dedupKey).map((e) => [e.dedupKey!, e.id]));
+  const sourceListingUrls = [source.url, source.calendarSourceUrl, source.orgWebsite];
 
   // What the endpoint already published, so we never repost it.
   const inventoryBudget = optionalIngestBudget(options.deadlineAt, 25_000);
-  const remoteInventory = inventoryBudget >= 250
-    ? await fetchDestinationInventory(source.communityId, source.id, inventoryBudget)
-    : [];
+  // Resolve local-only destinations even with no network budget. Only an
+  // actual outbound destination needs the unavailable-inventory safety hold.
+  const inventoryResult = await fetchDestinationInventory(source.communityId, source.id, inventoryBudget);
+  const remoteInventory = inventoryResult.items;
+  if (!inventoryResult.available) {
+    await emit(runId, "dedup_outcome", inventoryResult.reason ?? "Destination duplicate check unavailable", {
+      inventoryAvailable: false,
+      automaticPublishingHeld: true,
+    });
+  }
 
   // What WE have already sent to the endpoint, from our own submission records.
   // This does not depend on the hub listing the post back to us, which is
@@ -532,6 +541,9 @@ export async function ingestEvents(
       reportedDuplicate.eventId || reportedDuplicate.url,
     );
     const issues = isTrustedReportedDuplicate ? [] : validateEvent(e, validationOptions);
+    // An unavailable inventory is not an empty calendar. Keep the event for
+    // review and hold automatic publishing until someone can check for copies.
+    if (!inventoryResult.available && !isTrustedReportedDuplicate) issues.push("destination_inventory_unavailable");
     const stillDead =
       (e.calendarSourceUrl && deadLinks.has(e.calendarSourceUrl)) ||
       (e.website && deadLinks.has(e.website));
@@ -575,7 +587,7 @@ export async function ingestEvents(
         const xs = Array.isArray(x.sessions)
           ? (x.sessions as { startTime?: number }[]).map((s) => Number(s.startTime)).filter(Boolean)
           : [];
-        if (sourceEventUrlsOverlap(e, x)) {
+        if (sourceEventUrlsOverlap(e, x, sourceListingUrls)) {
           duplicateOf = x.id;
           dupReason = "same source event URL";
           break;
@@ -626,7 +638,7 @@ export async function ingestEvents(
 
     if (!duplicateOf) {
       for (const r of remoteInventory) {
-        if (sourceEventUrlsOverlap(e, r)) {
+        if (sourceEventUrlsOverlap(e, r, sourceListingUrls)) {
           remoteDup = true;
           dupReason = "already on the endpoint (same source event URL)";
           duplicateOfUrl = r.url ?? duplicateOfUrl;
@@ -711,7 +723,7 @@ export async function ingestEvents(
     const rejectionReason = duplicateOf || remoteDup
       ? (remoteDup ? `Already published: ${dupReason}` : null)
       : hardIssues.length
-        ? `Auto-rejected (incomplete): ${hardIssues.join(", ")}`
+        ? `Auto-rejected (incomplete): ${preserveEventHolds(hardIssues, issues.join(", ")).join(", ")}`
         : issues.length
           ? `Missing before publish: ${issues.join(", ")}`
           : null;

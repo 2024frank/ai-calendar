@@ -36,7 +36,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       <PageHeader
         eyebrow={run.runKind}
         title={`Run #${run.id}`}
-        description={<>Started {fmtDate(run.startedAt, timeZone)}{run.finishedAt ? <> · Finished {fmtDate(run.finishedAt, timeZone)}</> : <> · Updates live</>}</>}
+        description={<>Started {fmtDate(run.startedAt, timeZone)}{run.finishedAt ? <> · Finished {fmtDate(run.finishedAt, timeZone)}</> : run.status === "running" ? <> · Updates live</> : null}</>}
         actions={<><RunStatus status={run.status} phase={run.phase} /><ButtonLink href={backHref} icon="arrow-left">{source?.name || "Dashboard"}</ButtonLink></>}
       />
       <section className="kpi-grid" aria-label="Run metrics">
@@ -54,7 +54,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           </Card>
         ))}
       </section>
-      <Card><LiveTimeline runId={run.id} timeZone={timeZone} /></Card>
+      <Card><LiveTimeline key={run.id} runId={run.id} timeZone={timeZone} initialStatus={run.status} initialPhase={run.phase} initialTokens={{ prompt: run.promptTokens, completion: run.completionTokens }} /></Card>
     </div>
   );
 }

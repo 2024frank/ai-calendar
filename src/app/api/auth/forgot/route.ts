@@ -5,12 +5,15 @@ import { db } from "@/db";
 import { loginTokens, users } from "@/db/schema";
 import { sendPasswordSetup } from "@/lib/email";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
+import { readJsonObjectBody } from "@/lib/requestBody";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
+  const parsed = await readJsonObjectBody(req, 16 * 1024);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
+  const body = parsed.body;
   const email = String(body.email ?? "").trim().toLowerCase();
   if (!email.includes("@")) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });

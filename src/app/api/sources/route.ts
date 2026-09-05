@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { sources } from "@/db/schema";
 import { getSession } from "@/lib/auth";
-import { listSources } from "@/lib/data";
+import { currentCommunityId, listSources } from "@/lib/data";
 import { isPublicHttpUrl } from "@/lib/publicUrl";
 import { valueToCron } from "@/lib/schedule";
 
@@ -55,10 +55,12 @@ export async function POST(req: Request) {
   const lookaheadDays =
     Number.isInteger(lookaheadRaw) && lookaheadRaw >= 1 && lookaheadRaw <= 365 ? lookaheadRaw : null;
   const communityId =
-    s.role === "platform_admin" ? Number(body.communityId) : (s.communityId ?? 0);
+    s.role === "platform_admin" ? Number(body.communityId) : await currentCommunityId(s);
 
   if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
-  if (!communityId) return NextResponse.json({ error: "A community is required." }, { status: 400 });
+  if (!communityId || !Number.isSafeInteger(communityId) || communityId < 1) {
+    return NextResponse.json({ error: "A community is required." }, { status: 400 });
+  }
   if (!url) {
     return NextResponse.json({ error: "A link is required for a web source." }, { status: 400 });
   }

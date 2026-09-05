@@ -67,7 +67,7 @@ html, body { margin: 0; min-height: 100%; padding: 0; }
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans, ui-sans-serif), system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -112,7 +112,7 @@ h3 { font-size: 1rem; }
 .brand__product { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.14em; margin-top: 8px; text-transform: uppercase; }
 .main { min-width: 0; padding: 34px clamp(24px, 4vw, 52px) 56px; width: 100%; }
 .main > * { margin-inline: auto; max-width: 1240px; }
-.mobile-header, .nav-scrim { display: none; }
+.mobile-header, .nav-scrim, .side__drawer-close { display: none; }
 
 /* Navigation */
 .nav { display: flex; flex-direction: column; gap: 3px; }
@@ -292,6 +292,7 @@ table.tbl tbody tr:last-child td { border-bottom: 0; }
   .mobile-brand small { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
   .side { box-shadow: var(--shadow-lg); height: 100dvh; left: 0; max-width: min(310px, 86vw); padding-bottom: calc(14px + env(safe-area-inset-bottom)); position: fixed; top: 0; transform: translateX(-105%); transition: transform 180ms ease; width: 100%; z-index: 60; }
   .shell[data-nav-open="true"] .side { transform: translateX(0); }
+  .side__drawer-close { display: flex; justify-content: flex-end; }
   .nav-scrim { background: rgba(7, 12, 8, 0.48); border: 0; inset: 0; opacity: 0; overscroll-behavior: contain; pointer-events: none; position: fixed; transition: opacity 180ms ease; z-index: 55; }
   .shell[data-nav-open="true"] .nav-scrim { display: block; opacity: 1; pointer-events: auto; }
   .main { padding: 26px 20px 48px; }

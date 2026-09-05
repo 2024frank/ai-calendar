@@ -30,19 +30,20 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   // This used to mark the event approved before sending, and leave it that way
   // when the send failed. The reviewer saw it move to Approved, the tab counted
   // it, and nothing had reached CommunityHub. publishEvent sets the status
-  // itself on success, so a failure now leaves the event exactly where it was,
-  // still waiting, which is the truth.
+  // itself on success, so a failure leaves its existing status intact. That
+  // may already be approved when a reviewer is trying to send later edits.
   const result = await publishEvent(ev.id, "approved");
 
   if (!result.ok) {
+    const conflict = result.state === "skipped" || result.state === "unknown";
     return NextResponse.json(
       {
         ok: false,
         status: ev.status,
         publish: result.state,
-        error: `${result.message} The event has NOT been approved and is still waiting.`,
+        error: `${result.message} This request did not change the event's ${ev.status.replaceAll("_", " ")} status.`,
       },
-      { status: 502 },
+      { status: conflict ? 409 : 502 },
     );
   }
 

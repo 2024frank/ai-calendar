@@ -334,6 +334,7 @@ export function EventReview({
       return;
     }
     setBusy("approve");
+    let approvalRequested = false;
     try {
       // Save only what the reviewer actually touched before approving. Approval
       // must stop here if persistence fails, otherwise stale database values can
@@ -348,12 +349,13 @@ export function EventReview({
         setMsg(
           patchData.error
             ? `Could not save before approval: ${patchData.error}`
-            : "Could not save before approval. Nothing was published.",
+            : "Could not save before approval. Approval was not requested.",
         );
         return;
       }
       initialBody.current = body();
 
+      approvalRequested = true;
       const res = await fetch(`/api/events/${event.id}/approve`, { method: "POST" });
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -366,21 +368,26 @@ export function EventReview({
         // source's events does not mean re-picking the filter after every one.
         setTimeout(() => router.push(backQuery ? `/review?${backQuery}` : "/review?tab=approved"), 1400);
       } else {
-        if (d.publish === "unknown") setNeedsPublishReconciliation(true);
+        if (d.publish === "unknown" || !d.error) setNeedsPublishReconciliation(true);
         // A crash or a platform timeout returns no JSON at all, so d.error is
         // empty and the reviewer used to be told only "Could not approve."
-        // Show the status code instead of nothing; a 504 is a timeout worth
-        // retrying, which is not something a blank message can convey.
+        // The destination might have accepted a request before its response was
+        // lost. Check it before retrying so an uncertain result cannot duplicate it.
         setMsg(
           d.error
             ? `Could not approve: ${d.error}`
             : res.status === 504 || res.status === 408
-              ? "Could not approve: CommunityHub or the image host took too long. Nothing was published. Try again."
-              : `Could not approve (server error ${res.status}). Nothing was published.`,
+              ? "The approval request timed out. Check CommunityHub before retrying; the event may already have been sent."
+              : `The server returned ${res.status} without confirming the result. Check CommunityHub before retrying.`,
         );
       }
     } catch {
-      setMsg("Network error. Nothing was approved or published.");
+      if (approvalRequested) {
+        setNeedsPublishReconciliation(true);
+        setMsg("The connection ended before approval was confirmed. Check CommunityHub before retrying; the event may already have been sent.");
+      } else {
+        setMsg("The connection ended while saving your changes. Approval was not requested. Reload to check what was saved.");
+      }
     } finally {
       setBusy(null);
     }

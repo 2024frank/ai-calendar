@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, publishSubmissions, sources } from "@/db/schema";
 import {
@@ -11,21 +11,17 @@ import { assertPublicHttpUrl, fetchPinnedPublicUrl } from "./publicUrl";
 import { POST_TYPE_IDS } from "./taxonomy";
 import { resolveDestination } from "./destination";
 import {
+  automaticPublishHoldReason,
   buttonsWithRegistration,
   publishedImageUrl,
   storedEventIssues,
-  submissionBlocksRetry,
 } from "./publishPolicy";
 import { INLINE_IMAGE_FAILURE_TEXT, inlineRemoteImage, type InlineImageFailure } from "./inlineImage";
 import { imagePublishToken } from "./imagePublishToken";
-import { hasDatabaseErrorCode } from "./dbError";
+import { claimPublication } from "./publishClaim";
 import { validationOptionsForSource } from "./sourcePolicy";
 
 type EventRow = typeof events.$inferSelect;
-
-function affectedRows(result: unknown): number {
-  return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
-}
 
 export type PublishResult = {
   ok: boolean;
@@ -171,6 +167,8 @@ export async function publishEvent(
 ): Promise<PublishResult> {
   const [ev] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!ev) return { ok: false, state: "failed", message: "Event not found." };
+  const holdReason = automaticPublishHoldReason(ev, finalStatus);
+  if (holdReason) return { ok: false, state: "skipped", message: holdReason };
   const [source] = ev.sourceId
     ? await db
         .select({ slug: sources.slug, communitySlug: communities.slug })
@@ -252,23 +250,19 @@ export async function publishEvent(
   const payload = buildPayload(publishableEvent, process.env.PUBLISH_EMAIL || "", appUrl);
   const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 
-  // Already sent this exact payload? Never send it twice.
-  const [existing] = await db
-    .select()
-    .from(publishSubmissions)
-    .where(
-      and(
-        eq(publishSubmissions.eventId, ev.id),
-        eq(publishSubmissions.destinationId, dest.id),
-        eq(publishSubmissions.payloadHash, payloadHash),
-      ),
-    )
-    .limit(1);
-
-  if (existing?.state === "succeeded") {
-    return { ok: true, state: "succeeded", message: "Already published.", remoteId: existing.externalPostId };
+  const claim = await claimPublication({ eventId: ev.id, destinationId: dest.id, payloadHash, payload });
+  if (claim.kind === "missing") return { ok: false, state: "failed", message: "Event no longer exists." };
+  if (claim.kind === "already_sent") {
+    if (claim.payloadChanged) {
+      return {
+        ok: false, state: "skipped", remoteId: claim.remoteId,
+        message: "This event was already sent. These edits have not been sent to the existing CommunityHub post; review that post before publishing changes.",
+      };
+    }
+    await db.update(events).set({ status: finalStatus }).where(eq(events.id, ev.id));
+    return { ok: true, state: "succeeded", message: "Already published.", remoteId: claim.remoteId };
   }
-  if (submissionBlocksRetry(existing?.state)) {
+  if (claim.kind === "unresolved") {
     return {
       ok: false,
       state: "unknown",
@@ -276,49 +270,7 @@ export async function publishEvent(
     };
   }
 
-  let submissionId: number;
-  if (existing) {
-    const [claimed] = await db
-      .update(publishSubmissions)
-      .set({ state: "sending", error: null })
-      .where(
-        and(
-          eq(publishSubmissions.id, existing.id),
-          inArray(publishSubmissions.state, ["prepared", "failed"]),
-        ),
-      );
-    if (affectedRows(claimed) !== 1) {
-      return {
-        ok: false,
-        state: "unknown",
-        message: "Another publish attempt claimed this event. Refresh before trying again.",
-      };
-    }
-    submissionId = existing.id;
-  } else {
-    try {
-      const [inserted] = await db.insert(publishSubmissions).values({
-        eventId: ev.id,
-        destinationId: dest.id,
-        payloadHash,
-        state: "sending",
-        payload,
-      });
-      submissionId = Number((inserted as { insertId?: number }).insertId);
-      if (!Number.isInteger(submissionId) || submissionId < 1) {
-        throw new Error("Publish claim did not return an id.");
-      }
-    } catch (error) {
-      if (hasDatabaseErrorCode(error, "ER_DUP_ENTRY")) {
-        return {
-          ok: false,
-          state: "unknown",
-          message: "Another publish attempt claimed this event. Refresh before trying again.",
-        };
-      }
-      throw error;
-    }
-  }
+  const submissionId = claim.submissionId;
 
   let res: Response;
   let closeResponse: (() => Promise<void>) | null = null;
@@ -377,15 +329,16 @@ export async function publishEvent(
     /* a non-JSON success body is still a success */
   }
 
-  await db
-    .update(publishSubmissions)
-    .set({ state: "succeeded", externalPostId: remoteId, error: null })
-    .where(eq(publishSubmissions.id, submissionId));
   // The status reflects the PATH, not just "reached the hub". "approved" means
   // a person here read it. "submitted" means nobody here did and it is waiting
   // on CommunityHub. "published" means nobody checked it at either end. All
   // three sit on CommunityHub; only the accountability differs.
-  await db.update(events).set({ status: finalStatus }).where(eq(events.id, ev.id));
+  await db.transaction(async (tx) => {
+    await tx.update(events).set({ status: finalStatus }).where(eq(events.id, ev.id));
+    await tx.update(publishSubmissions)
+      .set({ state: "succeeded", externalPostId: remoteId, error: null })
+      .where(eq(publishSubmissions.id, submissionId));
+  });
 
   return { ok: true, state: "succeeded", message: "Sent to CommunityHub.", remoteId };
 }

@@ -15,6 +15,7 @@ import {
 } from "./jobPolicy";
 
 type EnqueuedRun = { jobId: number; runId: number; deduplicated: boolean };
+type ClaimedJob = Pick<typeof jobs.$inferSelect, "id" | "runId" | "lockedAt" | "attempts">;
 
 function isDuplicateKey(error: unknown) {
   return hasDatabaseErrorCode(error, "ER_DUP_ENTRY");
@@ -22,6 +23,82 @@ function isDuplicateKey(error: unknown) {
 
 function affectedRows(result: unknown) {
   return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
+}
+
+function ownedLease(job: ClaimedJob, workerId: string) {
+  return and(
+    eq(jobs.id, job.id),
+    eq(jobs.status, "running"),
+    eq(jobs.lockedBy, workerId),
+    eq(jobs.attempts, job.attempts),
+    job.lockedAt == null ? isNull(jobs.lockedAt) : eq(jobs.lockedAt, job.lockedAt),
+  );
+}
+
+/** Persist execution start while the exact claim is locked against recovery. */
+async function prepareOwnedJob(job: ClaimedJob, workerId: string) {
+  return db.transaction(async (tx) => {
+    const [owned] = await tx.select({ id: jobs.id }).from(jobs)
+      .where(ownedLease(job, workerId)).limit(1).for("update");
+    if (!owned) return false;
+    // Job then run is the same lock order used by recovery/finalization. Once
+    // this commits, recovery sees started work and can never reuse its run ID.
+    const [prepared] = await tx.update(runs)
+      .set({ phase: "fetching", deadlineAt: new Date(Date.now() + QUEUED_RUN_DEADLINE_MS) })
+      .where(and(eq(runs.id, job.runId), eq(runs.status, "running"), eq(runs.phase, "queued")));
+    return affectedRows(prepared) === 1;
+  });
+}
+
+/** Close both records only while this invocation still owns the job. */
+async function settleOwnedJob(
+  job: ClaimedJob,
+  workerId: string,
+  failureMessage?: string,
+) {
+  return db.transaction(async (tx) => {
+    const ownership = ownedLease(job, workerId);
+    // Lock in job-then-run order, the same order used by lease recovery. An old
+    // invocation must not change a run after another worker has taken over.
+    const [owned] = await tx.select({ id: jobs.id }).from(jobs).where(ownership).limit(1).for("update");
+    if (!owned) return false;
+
+    const [run] = await tx
+      .select({ status: runs.status, errorLog: runs.errorLog, phase: runs.phase, deadlineAt: runs.deadlineAt })
+      .from(runs)
+      .where(eq(runs.id, job.runId))
+      .limit(1)
+      .for("update");
+    const terminal = run ? terminalJobStatus(run.status) : "failed";
+    if (
+      !terminal &&
+      (run?.phase === "awaiting_callback" || run?.phase === "ingesting") &&
+      run.deadlineAt && run.deadlineAt.getTime() > Date.now()
+    ) {
+      // The callback owns delivery now. Retain the job and its dedupe key so a
+      // second extraction cannot overlap the still-active remote delivery.
+      return false;
+    }
+    const succeeded = terminal === "succeeded";
+    const message = failureMessage || JSON.stringify(run?.errorLog ?? { reason: "Extraction ended without completing the run." });
+
+    if (run?.status === "running") {
+      await tx.update(runs).set({
+        status: "failed",
+        phase: "done",
+        finishedAt: new Date(),
+        errorLog: { reason: message.slice(0, 4000) },
+      }).where(and(eq(runs.id, job.runId), eq(runs.status, "running")));
+    }
+    await tx.update(jobs).set({
+      status: succeeded ? "succeeded" : "failed",
+      dedupeKey: null,
+      lockedAt: null,
+      lockedBy: null,
+      lastError: succeeded ? null : message.slice(0, 4000),
+    }).where(ownership);
+    return succeeded;
+  });
 }
 
 /**
@@ -75,7 +152,7 @@ export async function enqueueExtraction(
 }
 
 /** Claim and execute one job. A conditional update is the distributed lock. */
-export async function processJob(jobId: number, workerId = randomUUID()): Promise<boolean> {
+export async function processJob(jobId: number, workerId: string = randomUUID()): Promise<boolean> {
   const now = new Date();
   const [claim] = await db
     .update(jobs)
@@ -96,101 +173,33 @@ export async function processJob(jobId: number, workerId = randomUUID()): Promis
 
   if (affectedRows(claim) !== 1) return false;
 
-  const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
+  const [job] = await db.select().from(jobs)
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, "running"), eq(jobs.lockedBy, workerId), eq(jobs.lockedAt, now)))
+    .limit(1);
   if (!job) return false;
 
-  // A run can be closed by stale-run recovery between the queue claim and this
-  // read. Never revive or execute a terminal run just because its old job row
-  // was still queued.
-  const [activeRun] = await db
-    .select({ status: runs.status })
-    .from(runs)
-    .where(eq(runs.id, job.runId))
-    .limit(1);
-  if (activeRun?.status !== "running") {
-    await db
-      .update(jobs)
-      .set({
-        status: "failed",
-        dedupeKey: null,
-        lockedAt: null,
-        lockedBy: null,
-        lastError: "Run is no longer active.",
-      })
-      .where(and(eq(jobs.id, job.id), eq(jobs.lockedBy, workerId)));
-    return false;
-  }
-
-  await db
-    .update(runs)
-    .set({ phase: "fetching", deadlineAt: new Date(Date.now() + 60 * 60_000) })
-    .where(eq(runs.id, job.runId));
-
+  let failureMessage: string | undefined;
   try {
-    await runExtraction(job.runId);
-    const [run] = await db
-      .select({ status: runs.status, errorLog: runs.errorLog })
-      .from(runs)
-      .where(eq(runs.id, job.runId))
-      .limit(1);
-
-    if (run?.status === "completed") {
-      await db
-        .update(jobs)
-        .set({ status: "succeeded", dedupeKey: null, lockedAt: null, lockedBy: null })
-        .where(and(eq(jobs.id, job.id), eq(jobs.lockedBy, workerId)));
-      return true;
+    if (await prepareOwnedJob(job, workerId)) {
+      await runExtraction(job.runId);
     }
-
-    const message = JSON.stringify(run?.errorLog ?? { message: "Run did not complete." }).slice(0, 4000);
-    await db
-      .update(jobs)
-      .set({
-        status: "failed",
-        dedupeKey: null,
-        lockedAt: null,
-        lockedBy: null,
-        lastError: message,
-      })
-      .where(and(eq(jobs.id, job.id), eq(jobs.lockedBy, workerId)));
-    return false;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Worker failed";
-    await db.transaction(async (tx) => {
-      await tx
-        .update(jobs)
-        .set({
-          status: "failed",
-          dedupeKey: null,
-          lockedAt: null,
-          lockedBy: null,
-          lastError: message.slice(0, 4000),
-        })
-        .where(and(eq(jobs.id, job.id), eq(jobs.lockedBy, workerId)));
-      await tx
-        .update(runs)
-        .set({
-          status: "failed",
-          phase: "done",
-          finishedAt: new Date(),
-          errorLog: { reason: message },
-        })
-        .where(eq(runs.id, job.runId));
-    });
-    return false;
+    failureMessage = error instanceof Error ? error.message : "Worker failed";
   }
+  return settleOwnedJob(job, workerId, failureMessage);
 }
 
 /**
- * Make jobs abandoned by a terminated serverless invocation runnable again.
- * The same run id is reused, keeping its timeline and publish idempotency keys.
+ * Recover claims abandoned before extraction started. Once execution starts,
+ * close an expired worker's run instead: its sandbox may still possess that
+ * run's callback token. A later retry must receive a new run ID and token.
  */
 export async function requeueStaleJobs(now = new Date()) {
   // A queued job is allowed to wait, but not forever. If no worker has claimed
   // it within six hours, close both records and clear the active dedupe key so
   // an admin or the next scheduler tick can start a fresh run.
   const expiredQueued = await db
-    .select({ id: jobs.id, runId: jobs.runId })
+    .select({ id: jobs.id, runId: jobs.runId, availableAt: jobs.availableAt })
     .from(jobs)
     .where(
       and(
@@ -210,7 +219,7 @@ export async function requeueStaleJobs(now = new Date()) {
           lockedBy: null,
           lastError: "No worker claimed this job within six hours.",
         })
-        .where(and(eq(jobs.id, job.id), eq(jobs.status, "queued")));
+        .where(and(eq(jobs.id, job.id), eq(jobs.status, "queued"), eq(jobs.availableAt, job.availableAt)));
       if (!affectedRows(result)) return;
       expired += 1;
       await tx
@@ -236,8 +245,10 @@ export async function requeueStaleJobs(now = new Date()) {
       and(
         eq(jobs.status, "running"),
         or(
+          inArray(runs.status, ["completed", "failed", "stopped"]),
           isNull(jobs.lockedAt),
           lt(jobs.lockedAt, new Date(now.getTime() - STALE_JOB_LEASE_MS)),
+          and(inArray(runs.phase, ["awaiting_callback", "ingesting"]), lte(runs.deadlineAt, now)),
         ),
       ),
     );
@@ -247,62 +258,59 @@ export async function requeueStaleJobs(now = new Date()) {
   let orphaned = 0;
   for (const row of stale) {
     const job = row.job;
-    const terminal = terminalJobStatus(row.runStatus);
-    if (terminal) {
-      const [result] = await db
-        .update(jobs)
-        .set({
-          status: terminal,
-          dedupeKey: null,
-          lockedAt: null,
-          lockedBy: null,
-          lastError:
-            terminal === "succeeded" ? null : "Run ended while its worker lease was active.",
-        })
-        .where(and(eq(jobs.id, job.id), eq(jobs.status, "running")));
-      orphaned += affectedRows(result);
-    } else if (job.attempts >= job.maxAttempts) {
-      await db.transaction(async (tx) => {
-        await tx
-          .update(jobs)
-          .set({
-            status: "failed",
-            dedupeKey: null,
-            lockedAt: null,
-            lockedBy: null,
-            lastError: "Worker lease expired too many times.",
-          })
-          .where(and(eq(jobs.id, job.id), eq(jobs.status, "running")));
-        await tx
-          .update(runs)
-          .set({
-            status: "failed",
-            phase: "done",
-            finishedAt: now,
-            errorLog: { reason: "Worker lease expired too many times." },
-          })
-          .where(eq(runs.id, job.runId));
-      });
-      failed += 1;
-    } else {
-      await db.transaction(async (tx) => {
-        const [result] = await tx
-          .update(jobs)
-          .set({ status: "queued", lockedAt: null, lockedBy: null, availableAt: now })
-          .where(and(eq(jobs.id, job.id), eq(jobs.status, "running")));
-        const recovered = affectedRows(result);
-        if (recovered) {
-          await tx
-            .update(runs)
-            .set({
-              phase: "queued",
-              deadlineAt: new Date(now.getTime() + QUEUED_RUN_DEADLINE_MS),
-            })
-            .where(and(eq(runs.id, job.runId), eq(runs.status, "running")));
-        }
-        requeued += recovered;
-      });
-    }
+    // Recovery can overlap across workers. Match the exact lease read above,
+    // not merely a running job that might already have a different owner.
+    const observedLease = and(
+      eq(jobs.id, job.id),
+      eq(jobs.status, "running"),
+      eq(jobs.attempts, job.attempts),
+      job.lockedBy == null ? isNull(jobs.lockedBy) : eq(jobs.lockedBy, job.lockedBy),
+      job.lockedAt == null ? isNull(jobs.lockedAt) : eq(jobs.lockedAt, job.lockedAt),
+    );
+    const outcome = await db.transaction(async (tx) => {
+      const [owned] = await tx.select({ id: jobs.id }).from(jobs).where(observedLease).limit(1).for("update");
+      if (!owned) return null;
+      // Re-read under lock: a callback may have claimed or completed ingestion
+      // since the candidate scan, even if the worker lease did not change.
+      const [run] = await tx.select({ status: runs.status, phase: runs.phase, deadlineAt: runs.deadlineAt })
+        .from(runs).where(eq(runs.id, job.runId)).limit(1).for("update");
+      if (!run) return null;
+      const terminal = terminalJobStatus(run.status);
+      if (terminal) {
+        await tx.update(jobs).set({
+          status: terminal, dedupeKey: null, lockedAt: null, lockedBy: null,
+          lastError: terminal === "succeeded" ? null : "Run ended while its worker lease was active.",
+        }).where(observedLease);
+        return "orphaned";
+      }
+
+      const deliveryActive = run.phase === "awaiting_callback" || run.phase === "ingesting";
+      if (deliveryActive && run.deadlineAt && run.deadlineAt.getTime() > now.getTime()) return null;
+      const executionStarted = run.phase !== "queued";
+      if (executionStarted || job.attempts >= job.maxAttempts) {
+        const reason = deliveryActive
+          ? "Result delivery did not finish before its deadline. Start a new run to retry."
+          : executionStarted
+            ? "The extraction worker expired after starting. Start a new run to retry safely."
+            : "Worker lease expired too many times.";
+        await tx.update(jobs).set({
+          status: "failed", dedupeKey: null, lockedAt: null, lockedBy: null, lastError: reason,
+        }).where(observedLease);
+        await tx.update(runs).set({
+          status: "failed", phase: "done", finishedAt: now, errorLog: { reason },
+        }).where(and(eq(runs.id, job.runId), eq(runs.status, "running")));
+        return "failed";
+      }
+      await tx.update(jobs).set({ status: "queued", lockedAt: null, lockedBy: null, availableAt: now })
+        .where(observedLease);
+      await tx.update(runs).set({
+        phase: "queued", deadlineAt: new Date(now.getTime() + QUEUED_RUN_DEADLINE_MS),
+      }).where(and(eq(runs.id, job.runId), eq(runs.status, "running")));
+      return "requeued";
+    });
+    if (outcome === "orphaned") orphaned += 1;
+    if (outcome === "failed") failed += 1;
+    if (outcome === "requeued") requeued += 1;
   }
   return { requeued, failed, orphaned, expired };
 }
