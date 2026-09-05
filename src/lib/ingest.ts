@@ -48,6 +48,7 @@ import {
 } from "./duplicatePolicy";
 import { validationOptionsForSource } from "./sourcePolicy";
 import { preserveEventHolds } from "./eventHolds";
+import { apolloAnnouncementsMatch, isApolloSource } from "./apolloDuplicatePolicy";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
@@ -176,6 +177,16 @@ export async function ingestEvents(
   rawEvents: Record<string, unknown>[],
   options: { deadlineAt?: number } = {},
 ): Promise<IngestCounts> {
+  const apollo = isApolloSource(source, community);
+  if (apollo && rawEvents.some((raw) =>
+    (raw._agentDuplicateOf || raw._agentDuplicateOfId) &&
+    (raw.eventType !== "an" || typeof raw.description !== "string" ||
+      !raw.description.trim() || !Array.isArray(raw.sessions) || !raw.sessions.length),
+  )) {
+    // A title/reference is not evidence of a movie lineup. Fail the run before
+    // writing anything instead of silently suppressing an unauditable result.
+    throw new Error("Apollo duplicate reports must include complete announcement descriptions and sessions; return full candidates in events.");
+  }
   const counts: IngestCounts = {
     found: rawEvents.length,
     inserted: 0,
@@ -218,6 +229,7 @@ export async function ingestEvents(
   const existing = await db
     .select({
       id: events.id,
+      eventType: events.eventType,
       title: events.title,
       location: events.location,
       description: events.description,
@@ -263,6 +275,7 @@ export async function ingestEvents(
   const publishedByUs = await db
     .select({
       id: events.id,
+      eventType: events.eventType,
       title: events.title,
       location: events.location,
       description: events.description,
@@ -286,7 +299,8 @@ export async function ingestEvents(
       .filter((url): url is string => Boolean(url)),
   );
   const trustedDuplicateFor = (raw: Record<string, unknown>) =>
-    trustedAgentDuplicate(raw, knownEventIds, knownRemoteUrls);
+    // Apollo always takes the independently verified film/window path below.
+    apollo ? { eventId: null, url: null } : trustedAgentDuplicate(raw, knownEventIds, knownRemoteUrls);
 
   let imageFetches = 0;
   // Each event needs its OWN picture. One URL reused across events is site
@@ -570,7 +584,9 @@ export async function ingestEvents(
     );
 
     // 1) exact same-source signature
-    let duplicateOf: number | null = existingByKey.get(dedupKey) ?? null;
+    // Saved hashes can be stale after a reviewer edit. They must not bypass
+    // Apollo's current-content check, even when the signatures are identical.
+    let duplicateOf: number | null = apollo ? null : existingByKey.get(dedupKey) ?? null;
     let dupReason = duplicateOf ? "identical title and date signature" : "";
 
     // The agent judged this a duplicate of an event in this calendar. The agent
@@ -584,6 +600,15 @@ export async function ingestEvents(
     // location + short description.
     if (!duplicateOf) {
       for (const x of existing) {
+        if (apollo) {
+          const match = apolloAnnouncementsMatch(e, x);
+          if (match.match) {
+            duplicateOf = x.id;
+            dupReason = match.reason;
+            break;
+          }
+          continue;
+        }
         const xs = Array.isArray(x.sessions)
           ? (x.sessions as { startTime?: number }[]).map((s) => Number(s.startTime)).filter(Boolean)
           : [];
@@ -620,6 +645,15 @@ export async function ingestEvents(
     // four Allen Memorial exhibitions went out twice.
     if (!duplicateOf && !remoteDup) {
       for (const x of publishedByUs) {
+        if (apollo) {
+          const match = apolloAnnouncementsMatch(e, x);
+          if (match.match) {
+            duplicateOf = x.id;
+            dupReason = `we already sent this to CommunityHub (${match.reason})`;
+            break;
+          }
+          continue;
+        }
         const xs = Array.isArray(x.sessions)
           ? (x.sessions as { startTime?: number }[]).map((s2) => Number(s2.startTime)).filter(Boolean)
           : [];
@@ -638,6 +672,16 @@ export async function ingestEvents(
 
     if (!duplicateOf) {
       for (const r of remoteInventory) {
+        if (apollo) {
+          const match = apolloAnnouncementsMatch(e, r);
+          if (match.match) {
+            remoteDup = true;
+            dupReason = `already on the endpoint (${match.reason})`;
+            duplicateOfUrl = r.url;
+            break;
+          }
+          continue;
+        }
         if (sourceEventUrlsOverlap(e, r, sourceListingUrls)) {
           remoteDup = true;
           dupReason = "already on the endpoint (same source event URL)";
@@ -676,7 +720,7 @@ export async function ingestEvents(
     // matches the stored row on title and venue, so it would be filed as a
     // duplicate and those new dates thrown away. Fold them into the stored row
     // instead: same event, more of its dates known.
-    if (duplicateOf && e.sessions.length) {
+    if (!apollo && duplicateOf && e.sessions.length) {
       const [stored] = await db
         .select({ sessions: events.sessions, status: events.status })
         .from(events)
@@ -811,8 +855,9 @@ export async function ingestEvents(
     // event arriving in the same run could only be caught if their hashes
     // matched to the byte. Two identical opera listings differing solely by an
     // image size word therefore both landed in the queue.
-    existing.unshift({
+    if (!apollo || status === "pending") existing.unshift({
       id: newId,
+      eventType: e.eventType,
       title: e.title,
       location: e.location ?? null,
       description: e.description,

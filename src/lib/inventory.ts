@@ -3,8 +3,10 @@ import { fetchPublicBytes } from "./fetchPage";
 import { resolveDestination } from "./destination";
 
 export type InventoryItem = {
+  eventType: string | null;
   title: string;
   startTimes: number[];
+  sessions: { startTime: number; endTime: number }[];
   location: string | null;
   description: string | null;
   sourceUrls: string[];
@@ -99,9 +101,15 @@ export async function fetchDestinationInventory(
         ...buttons.map((button) => button.link),
       ].filter((v): v is string => typeof v === "string" && v.trim().length > 0);
       return {
+        eventType: typeof p.eventType === "string" ? p.eventType : null,
         // CommunityHub calls the title "name".
         title: String(p.name ?? p.title ?? ""),
         startTimes: sessions.map((s) => Number(s.start)).filter((n) => Number.isFinite(n) && n > 0),
+        // End times are required to prove a rolling announcement is already
+        // covered. Missing bounds are not fabricated into duplicate evidence.
+        sessions: sessions.map((s) => ({ startTime: Number(s.start), endTime: Number(s.end) }))
+          .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0 &&
+            Number.isFinite(s.endTime) && s.endTime >= s.startTime),
         location: (loc?.address ?? loc?.name ?? null) as string | null,
         description: (typeof p.description === "string" && p.description) || (typeof p.excerpt === "string" && p.excerpt) || null,
         sourceUrls,

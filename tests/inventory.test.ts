@@ -35,6 +35,38 @@ describe("destination inventory availability", () => {
     assert.equal((await inventory({ message: "login required" })).available, false);
   });
 
+  it("preserves announcement kind and full display bounds for Apollo duplicate proof", async () => {
+    const result = await inventory({ posts: [{
+      id: 42,
+      name: "Playing Now at the Apollo",
+      eventType: "an",
+      description: "The Dog Stars: Sep 1 to Sep 10",
+      sessions: [{ start: "1788235200", end: "1789099140" }],
+    }] });
+    assert.equal(result.available, true);
+    assert.deepEqual(result.items[0], {
+      eventType: "an",
+      title: "Playing Now at the Apollo",
+      description: "The Dog Stars: Sep 1 to Sep 10",
+      startTimes: [1788235200],
+      sessions: [{ startTime: 1788235200, endTime: 1789099140 }],
+      location: null,
+      sourceUrls: [],
+      url: "https://hub.example/calendar/post/42",
+    });
+  });
+
+  it("does not invent missing announcement kinds or session end times", async () => {
+    const result = await inventory({ posts: [{
+      name: "Playing Now at the Apollo",
+      sessions: [{ start: 1788235200 }, { start: 1788235200, end: "invalid" }],
+    }] });
+    const item = result.items[0] as { eventType: unknown; sessions: unknown[]; startTimes: number[] };
+    assert.equal(item.eventType, null);
+    assert.deepEqual(item.sessions, []);
+    assert.deepEqual(item.startTimes, [1788235200, 1788235200]);
+  });
+
   it("does not require a remote inventory for a local-only calendar", async () => {
     assert.equal((await inventory(null, false)).available, true);
   });

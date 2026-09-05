@@ -2,7 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, runs, sources } from "@/db/schema";
-import { buildSystemPrompt, builtInSourceInstructions, EVENTS_SCHEMA } from "./contract";
+import { buildSystemPrompt, builtInSourceInstructions, extractionSchema } from "./contract";
 import { fetchPage } from "./fetchPage";
 import { ingestEvents } from "./ingest";
 import { runToken } from "./agentToken";
@@ -564,6 +564,8 @@ export async function runExtraction(runId: number) {
     // System prompt: the agentic template, every value filled from this source.
     const systemPrompt = buildSystemPrompt({
       sourceName: source.name,
+      sourceSlug: source.slug,
+      communitySlug: community.slug,
       urls: [target, ...secondary],
       calendarSourceName: source.calendarSourceName ?? source.orgName ?? source.name,
       communityHubInventoryUrl: destCfg.inventory_url ?? null,
@@ -619,7 +621,7 @@ ${deliveryBlock}`;
     const res = await llmComplete({
       prompt,
       instructions: systemPrompt,
-      schema: EVENTS_SCHEMA as unknown as Record<string, unknown>,
+      schema: extractionSchema({ sourceSlug: source.slug, communitySlug: community.slug }) as unknown as Record<string, unknown>,
       schemaName: "extracted_events",
       sandbox: true,
       fetchUrls: 10,
