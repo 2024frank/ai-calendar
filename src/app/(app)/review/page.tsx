@@ -6,6 +6,8 @@ import { ButtonLink, Card, EmptyState, PageHeader, StatusBadge, TableShell } fro
 import { EVENT_TYPES } from "@/lib/taxonomy";
 import { ReviewFilters } from "./ReviewFilters";
 import { FixAllButton } from "./FixAllButton";
+import { RecheckHoldsButton } from "./RecheckHoldsButton";
+import { hasDestinationInventoryHold } from "@/lib/eventHolds";
 import { db } from "@/db";
 import { communities } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -122,6 +124,9 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
 
       {tab === "rejected" && isAdmin(session) && (
         <FixAllButton initialCount={rows.filter((r) => r.status === "auto_rejected").length} />
+      )}
+      {tab === "pending" && isAdmin(session) && rows.some((r) => hasDestinationInventoryHold(r.rejectionReason)) && (
+        <RecheckHoldsButton count={rows.filter((r) => hasDestinationInventoryHold(r.rejectionReason)).length} />
       )}
 
       <Card className="surface--flush">
