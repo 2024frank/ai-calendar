@@ -25,6 +25,9 @@ function sample(sourceId: number) {
 export function EvaluationWorkspace({ sources, evaluations }: { sources: { id: number; name: string }[]; evaluations: { id: number; title: string; createdAt: string }[] }) {
   const router = useRouter();
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? 0);
+  const [periodStart, setPeriodStart] = useState(() => new Date().toISOString().slice(0, 10));
+  const [periodEnd, setPeriodEnd] = useState(() => new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10));
+  const [draftNotes, setDraftNotes] = useState<string[]>([]);
   const [json, setJson] = useState("");
   const [scopeConfirmed, setScopeConfirmed] = useState(false);
   const [matchesConfirmed, setMatchesConfirmed] = useState(false);
@@ -43,12 +46,32 @@ export function EvaluationWorkspace({ sources, evaluations }: { sources: { id: n
     finally { setBusy(false); }
   }
 
+  // Pull the organization's own CommunityHub posts and our records for the
+  // same period, with proposed pairs. The person still checks every pair.
+  async function draft() {
+    setError(""); setBusy(true); setDraftNotes([]);
+    try {
+      const query = new URLSearchParams({ sourceId: String(sourceId), start: periodStart, end: periodEnd });
+      const response = await fetch(`/api/evaluations/draft?${query}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not draft a comparison");
+      const { notes, ...snapshot } = body as { notes: string[] } & Record<string, unknown>;
+      setDraftNotes(Array.isArray(notes) ? notes : []);
+      setJson(JSON.stringify(snapshot, null, 2));
+      setScopeConfirmed(false); setMatchesConfirmed(false);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft a comparison"); }
+    finally { setBusy(false); }
+  }
+
   async function save() {
     setError(""); setBusy(true);
     try {
       if (!scopeConfirmed || !matchesConfirmed) throw new Error("Confirm the scope, independent reference and matches first.");
       if (new TextEncoder().encode(json).byteLength > MAX_EVALUATION_BYTES) throw new Error("File exceeds 1 MB.");
-      const input = validateEvaluation(JSON.parse(json));
+      // The two checkboxes are the confirmation; a drafted snapshot carries
+      // them as false until the person has actually checked the pairs.
+      const parsed = JSON.parse(json) as { scope?: Record<string, unknown> };
+      const input = validateEvaluation({ ...parsed, scope: { ...(parsed.scope ?? {}), confirmed: true }, humanConfirmedMatches: true });
       if (input.sourceId !== sourceId) throw new Error("JSON sourceId must match the selected source.");
       const response = await fetch("/api/evaluations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
       const body = await response.json();
@@ -72,6 +95,17 @@ export function EvaluationWorkspace({ sources, evaluations }: { sources: { id: n
             {sources.map((source) => <option key={source.id} value={source.id}>{source.name} (ID {source.id})</option>)}
           </select>
         </label>
+        <div className="row" style={{ flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+          <label style={{ minWidth: 0 }}><span className="label">Period start</span>
+            <input className="input" type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} disabled={busy} />
+          </label>
+          <label style={{ minWidth: 0 }}><span className="label">Period end (excluded)</span>
+            <input className="input" type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} disabled={busy} />
+          </label>
+          <Button variant="primary" disabled={!sourceId || busy} loading={busy} onClick={draft}>Draft from CommunityHub and our records</Button>
+        </div>
+        <p className="muted">The draft takes the organization&apos;s own posts on CommunityHub as the reference and the importer&apos;s records for this source as the extraction, then proposes pairs by title and date. Read every pair before confirming below.</p>
+        {draftNotes.length > 0 && <Alert tone="warning" title="About this draft"><ul style={{ margin: 0, paddingLeft: 18 }}>{draftNotes.map((note) => <li key={note}>{note}</li>)}</ul></Alert>}
         <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
           <Button disabled={!sourceId || busy} onClick={() => { setJson(sample(sourceId)); setScopeConfirmed(false); setMatchesConfirmed(false); }}>Load synthetic sample</Button>
           <a download="evaluation-sample.json" href={`data:application/json;charset=utf-8,${encodeURIComponent(sample(sourceId))}`}>Download sample JSON</a>
