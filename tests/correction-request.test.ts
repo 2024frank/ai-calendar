@@ -15,7 +15,7 @@ function fixture(t: TestContext, options: { authenticated?: boolean; scoped?: bo
   const lease = loadRoute<typeof import("../src/lib/correctionLease")>(new URL("../src/lib/correctionLease.ts",import.meta.url),bounds);
   let modelCalls = 0;
   const correction = loadRoute<typeof import("../src/lib/correction")>(new URL("../src/lib/correction.ts", import.meta.url), {
-    ...bounds, "./correctionLease":lease, "./ingest": { HARD_ISSUES }, "./models": { modelChain: async () => ["test"] },
+    ...bounds, "./correctionLease":lease, "./ingest": { HARD_ISSUES }, "./learningAgent": { lessonsFor: async () => "" }, "./models": { modelChain: async () => ["test"] },
     "./llm": { llmComplete: async () => {
       modelCalls++; await options.duringModel?.(sql.store);
       if (options.fail) throw new Error("Provider unavailable");

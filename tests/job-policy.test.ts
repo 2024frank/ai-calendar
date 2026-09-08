@@ -11,6 +11,8 @@ import {
   shouldContinueWorkerChain,
   terminalJobStatus,
   workerRecoveryAttempt,
+  workerChainCount,
+  WORKER_PARALLEL_CHAINS,
 } from "../src/lib/jobPolicy";
 import { hasDatabaseErrorCode } from "../src/lib/dbError";
 
@@ -52,6 +54,14 @@ describe("job policy", () => {
     assert.equal(shouldContinueWorkerChain(0, 1), false);
     assert.equal(shouldContinueWorkerChain(1, 0), false);
     assert.equal(shouldContinueWorkerChain(0, 0), false);
+  });
+
+  it("starts several short chains for a larger queue and one for recovery", () => {
+    assert.equal(workerChainCount(0), 1);
+    assert.equal(workerChainCount(1), 1);
+    assert.equal(workerChainCount(2), 2);
+    assert.equal(workerChainCount(12), WORKER_PARALLEL_CHAINS);
+    assert.equal(workerChainCount(Number.NaN), 1);
   });
 
   it("bounds worker-chain recovery attempts", () => {

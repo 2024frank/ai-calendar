@@ -15,6 +15,7 @@ import { normalizeImageBase64 } from "./imageData";
 import { validationOptionsForSource } from "./sourcePolicy";
 import { preserveEventHolds } from "./eventHolds";
 import { claimCorrection, failCorrection, persistCorrection } from "./correctionLease";
+import { lessonsFor } from "./learningAgent";
 
 /** Fields the correction agent may supply, all optional. */
 const CORRECTION_SCHEMA = {
@@ -101,13 +102,18 @@ export async function correctOne(
       ? `\nHOW THIS SITE HANDLES IMAGES (from the source's own recipe, follow it):\n${imageLines}\n`
       : "";
 
+  // What reviewers have already taught this source applies to a repair as
+  // much as to a fresh extraction; without it a correction repeats old mistakes.
+  const lessons = (await lessonsFor(source.id).catch(() => "")).slice(0, 1500);
+  const taught = lessons ? `\nWHAT REVIEWERS HAVE TAUGHT US ABOUT THIS SOURCE:\n${lessons}\n` : "";
+
   const prompt = `One event is missing a field. Open its page, find the field, return it. Invent nothing.
 
 EVENT: ${ev.title}
 MISSING: ${missing}
 ${options.request ? `REVIEWER REQUEST (only description, extended description, contact email, phone, location, website, or a missing image): ${options.request}` : ""}
 PAGE: ${pageUrl}
-${access}${imagery}
+${access}${imagery}${taught}
 Return only the missing fields from that page. For a missing image use THIS event's own photo in imageCdnUrl, or imageB64 if the host blocks downloads. Never a logo, and never a picture of the venue: a hall interior or a building exterior taken from the listing page belongs to every event there, not to this one, and will be refused. If this event has no picture of its own, leave the image null rather than substituting one. If a field truly is not on the page, leave it null and set found=false. One page, no crawling.`;
 
   let patch: Record<string, unknown> = {};
@@ -185,18 +191,20 @@ Return only the missing fields from that page. For a missing image use THIS even
   );
   const correctedDescription =
     (typeof patch.description === "string" && patch.description) || ev.description;
+  const correctedExtendedDescription =
+    (typeof patch.extendedDescription === "string" ? patch.extendedDescription : null) ??
+    ev.extendedDescription;
   const candidate = {
     ...ev,
     // Same scrub the ingest path runs. Apollo announcements are the one
     // exception because their short description is intentionally a film/date
-    // schedule; long descriptions still use the ordinary rule below.
+    // schedule, and every announcement keeps its real dates in the long one.
     description: validationOptions.allowDateInDescription
       ? correctedDescription
       : stripDateSentences(correctedDescription) ?? ev.description,
-    extendedDescription: stripDateSentences(
-      (typeof patch.extendedDescription === "string" ? patch.extendedDescription : null) ??
-        ev.extendedDescription,
-    ),
+    extendedDescription: validationOptions.allowDateInExtendedDescription
+      ? correctedExtendedDescription
+      : stripDateSentences(correctedExtendedDescription),
     contactEmail:
       (typeof patch.contactEmail === "string" && patch.contactEmail) || ev.contactEmail,
     phone: (typeof patch.phone === "string" && patch.phone) || ev.phone,

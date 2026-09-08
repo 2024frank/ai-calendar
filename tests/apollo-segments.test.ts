@@ -63,6 +63,10 @@ describe("Apollo current and upcoming segmentation", () => {
         movies: ["The Next 3"],
       },
     ]);
+    assert.deepEqual(
+      announcements.map((announcement) => announcement.title),
+      ["Now Playing at the Apollo", "Coming Soon to the Apollo"],
+    );
   });
 
   it("keeps a tracked current film current across a closed run date", () => {

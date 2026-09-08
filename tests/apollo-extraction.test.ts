@@ -47,6 +47,15 @@ describe("Apollo full-candidate extraction contract", () => {
     }
   });
 
+  it("names the announcements the way the team decided on July 16, 2026", () => {
+    const prompt = buildSystemPrompt(context);
+    assert.ok(prompt.includes("Now Playing at the Apollo"));
+    assert.ok(prompt.includes("Coming Soon to the Apollo"));
+    for (const old of ["Playing Now at the Apollo", "Coming Soon at the Apollo"]) {
+      assert.ok(!prompt.includes(old), `prompt still says: ${old}`);
+    }
+  });
+
   it("keeps the authoritative Apollo policy ahead of a saved access recipe that contains obsolete grouping advice", () => {
     const savedRecipe = `1. Fetch https://tickets.example.test/apollo/sessions with HTTP/1.1.
 2. Treat every film as Playing Now until there is a gap in the schedule.`;

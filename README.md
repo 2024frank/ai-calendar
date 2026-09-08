@@ -39,6 +39,10 @@ An admin can pick which AI model runs extraction for every source (Claude, Gemin
 
 Sign-ins and the actions that change something are written to an activity log, so who did what is always answerable.
 
+The pilot's research question needs more than counts. The evaluations page drafts a comparison for any source: the organization's own posts on CommunityHub on one side, the importer's records for the same period on the other, with pairs proposed by title and date. A person checks the pairs and retains the result, which then shows what the importer found that the organization never posted, what the organization posted that the importer missed, and how each matched pair differs field by field.
+
+Sources are read in order: organizations first, aggregators such as the college's Localist calendar last, so an event already taken from the organization that runs it is recognized as the copy when the aggregator repeats it.
+
 The app sends four emails: a sign-in link, a password setup or reset, an invite to a community, and a digest to reviewers when a run brings in new events. They share one frame, so a change to it changes all four. Each goes out with a plain-text version alongside the HTML and a preheader line, which is the grey text an inbox shows next to the subject.
 
 ## Words the code uses

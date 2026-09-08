@@ -1,0 +1,47 @@
+name: Worker tick
+
+# The hosting plan allows one cron a day, and its serverless worker chains
+# have died part-way through the queue, leaving sources unclaimed until they
+# expired. This kick starts a fresh chain every quarter hour through the
+# morning. It sends one authenticated request and returns; the work itself
+# runs in the app. Nothing here reads or prints the queue's contents.
+on:
+  schedule:
+    - cron: "*/15 6-15 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: worker-tick
+  cancel-in-progress: false
+
+jobs:
+  kick:
+    if: github.repository == '2024frank/ai-calendar'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Start a worker chain
+        env:
+          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+          AI_CALENDAR_WORKER_URL: ${{ secrets.AI_CALENDAR_WORKER_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WORKER_SECRET:-}" ] || [ -z "${AI_CALENDAR_WORKER_URL:-}" ]; then
+            echo "WORKER_SECRET and AI_CALENDAR_WORKER_URL must be configured as repository secrets."
+            exit 1
+          fi
+          case "$AI_CALENDAR_WORKER_URL" in
+            https://*/api/internal/jobs) ;;
+            *) echo "AI_CALENDAR_WORKER_URL must be an HTTPS /api/internal/jobs endpoint."; exit 1 ;;
+          esac
+          umask 077
+          printf 'header = "Authorization: Bearer %s"\n' "$WORKER_SECRET" > "$RUNNER_TEMP/auth.cfg"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST \
+            -K "$RUNNER_TEMP/auth.cfg" \
+            -H 'x-ai-calendar-worker-chain: 1' \
+            "$AI_CALENDAR_WORKER_URL?limit=1")
+          rm -f "$RUNNER_TEMP/auth.cfg"
+          echo "Worker responded with HTTP $code"
+          test "$code" = "202"

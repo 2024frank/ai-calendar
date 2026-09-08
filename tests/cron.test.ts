@@ -36,7 +36,9 @@ it("continues scheduling and dispatches good jobs when one source fails to enque
   const f = fixture();
   const response = await f.run();
   assert.deepEqual(f.enqueued, [1, 3]);
-  assert.equal(await f.dispatches(), 1);
+  // Two new jobs plus one recovered job: one chain each, so a dead chain
+  // cannot leave the rest of the queue unclaimed.
+  assert.equal(await f.dispatches(), 3);
   const body = await response.json();
   assert.equal(response.status, 503);
   assert.equal(body.ok, false);
@@ -51,4 +53,16 @@ it("dispatches recovered jobs even when the scheduled-source query fails", async
   assert.equal(await f.dispatches(), 1);
   assert.equal(response.status, 503);
   assert.deepEqual((await response.json()).failedSteps, ["dueScheduledSources"]);
+});
+
+it("reads aggregator calendars after the organizations they repost", async () => {
+  const f = fixture(async () => [
+    { id: 1, communityId: 1, sourceKind: "aggregator" },
+    { id: 3, communityId: 1, sourceKind: "original_org" },
+    { id: 4, communityId: 1 },
+  ]);
+  const response = await f.run();
+  assert.equal(response.status, 200);
+  assert.deepEqual(f.enqueued, [3, 4, 1]);
+  assert.equal((await response.json()).workerChainsScheduled, 3);
 });

@@ -142,7 +142,7 @@ export function buildApolloAnnouncements(
         .map(r => `${r.title}: ${fmt(openingDay(r))} to ${fmt(r.end)}`)
         .join(' · ');
       out.push({
-        kind: 'showing_now', title: 'Playing Now at the Apollo', description,
+        kind: 'showing_now', title: 'Now Playing at the Apollo', description,
         startTime: etEpoch(fromNum(ws), false), endTime: etEpoch(fromNum(we), true),
         movies: lineup.map(r => ({ title: r.title, rating: r.rating })),
       });
@@ -160,7 +160,7 @@ export function buildApolloAnnouncements(
       .sort((a, b) => a.title.localeCompare(b.title));
     const displayDay = fromNum(nextOpening);
     out.push({
-      kind: 'coming_soon', title: 'Coming Soon at the Apollo',
+      kind: 'coming_soon', title: 'Coming Soon to the Apollo',
       description: lineup.map(r => `${r.title}: opens ${fmt(openingDay(r))}`).join(' · '),
       startTime: etEpoch(displayDay, false), endTime: etEpoch(displayDay, true),
       movies: lineup.map(r => ({ title: r.title, rating: r.rating })),

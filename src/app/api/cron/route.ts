@@ -3,6 +3,8 @@ import { getSession } from "@/lib/auth";
 import { enqueueExtraction, requeueStaleJobs } from "@/lib/jobs";
 import { sweepRateLimitBuckets } from "@/lib/rateLimit";
 import { dueScheduledSources, reapStaleRuns, sweepExpiredEvents } from "@/lib/retention";
+import { workerChainCount } from "@/lib/jobPolicy";
+import { extractionOrder } from "@/lib/sourcePolicy";
 import { dispatchWorker } from "@/lib/workerDispatch";
 
 export const runtime = "nodejs";
@@ -57,7 +59,10 @@ async function runCron(requestOrigin: string) {
   // The hosting plan allows a single daily cron, so this one tick starts every
   // source that is due. Each run is still bounded by the platform's per-request
   // limit; a source that needs longer is run manually until that limit lifts.
-  const due = await step("dueScheduledSources", dueScheduledSources, []);
+  // An aggregator such as the college's Localist calendar reposts other
+  // organizations' events, so it is read last: an event already taken from the
+  // organization itself is then recognized as the copy.
+  const due = extractionOrder(await step("dueScheduledSources", dueScheduledSources, []));
   const started: { sourceId: number; runId: number; jobId: number; deduplicated: boolean }[] = [];
   for (const s of due) {
     const queued = await step(
@@ -67,9 +72,11 @@ async function runCron(requestOrigin: string) {
     );
     if (queued) started.push({ sourceId: s.id, ...queued });
   }
-  // Start a sequential serverless worker chain. Each extraction gets its own
-  // invocation and the final worker dispatches the next, so all due sources are
-  // serviced without running a dozen model jobs in one function.
+  // Start serverless worker chains. Each extraction gets its own invocation and
+  // the final worker dispatches the next, so all due sources are serviced
+  // without running a dozen model jobs in one function. A few chains run side
+  // by side because a single chain has not reliably outlived four hops.
+  const chains = workerChainCount(started.length + recoveredJobs.requeued);
   after(async () => {
     // Dispatch against the public app origin, never this request's own origin.
     // Vercel invokes the cron on the deployment's generated URL, which sits
@@ -79,8 +86,10 @@ async function runCron(requestOrigin: string) {
     const publicOrigin = process.env.APP_URL
       ? new URL(process.env.APP_URL).origin
       : requestOrigin;
-    const dispatched = await dispatchWorker(0, publicOrigin);
-    if (!dispatched) console.error("Cron could not start the job worker", { publicOrigin });
+    const outcomes = await Promise.all(
+      Array.from({ length: chains }, () => dispatchWorker(0, publicOrigin)),
+    );
+    if (!outcomes.some(Boolean)) console.error("Cron could not start the job worker", { publicOrigin });
   });
 
   return NextResponse.json({
@@ -92,6 +101,7 @@ async function runCron(requestOrigin: string) {
     expiredRateLimitsDeleted,
     scheduledRunsStarted: started.length,
     workerDispatchScheduled: true,
+    workerChainsScheduled: chains,
     started,
   }, { status: failedSteps.length ? 503 : 200 });
 }

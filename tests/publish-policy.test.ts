@@ -155,7 +155,26 @@ describe("stored event publish validation", () => {
     );
   });
 
-  it("still blocks dates in Apollo long descriptions and cannot be bypassed by display name", () => {
+  it("lets every announcement keep its real dates in the long description, but not an event", () => {
+    // An announcement's sessions are only its display window, so the class
+    // dates or show run can live nowhere but the text (June 8 and June 29, 2026).
+    const dated = { ...dateBearingAnnouncement, extendedDescription: "Classes run August 7 to August 28, Thursdays at 6 PM." };
+    assert.deepEqual(
+      storedEventIssues(
+        { ...dated, description: "Register now for a four-week pottery class." },
+        validationOptionsForSource({ slug: "fava-gallery" }, { slug: "oberlin" }, "an"),
+      ),
+      [],
+    );
+    assert.ok(
+      storedEventIssues(
+        { ...dated, eventType: "ot", description: "A four-week pottery class." },
+        validationOptionsForSource({ slug: "fava-gallery" }, { slug: "oberlin" }, "ot"),
+      ).includes("long_description_contains_date"),
+    );
+  });
+
+  it("cannot be bypassed by display name", () => {
     const options = validationOptionsForSource(
       { slug: "apollo-theater" },
       { slug: "oberlin" },
@@ -169,7 +188,7 @@ describe("stored event publish validation", () => {
       },
       options,
     );
-    assert.deepEqual(issues, ["long_description_contains_date"]);
+    assert.deepEqual(issues, []);
     assert.ok(
       storedEventIssues({ ...dateBearingAnnouncement, calendarSourceName: "Apollo Theater" })
         .includes("description_contains_date"),

@@ -9,6 +9,7 @@ import {
   publishSubmissions,
   runs,
   sources,
+  userCommunities,
   users,
 } from "@/db/schema";
 import {
@@ -519,7 +520,9 @@ export async function ingestEvents(
     if (!validationOptions.allowDateInDescription) {
       e.description = stripDateSentences(e.description) ?? e.description;
     }
-    e.extendedDescription = stripDateSentences(e.extendedDescription);
+    if (!validationOptions.allowDateInExtendedDescription) {
+      e.extendedDescription = stripDateSentences(e.extendedDescription);
+    }
 
     // A dead link is repointed at the nearest page above it that still exists,
     // so the reviewer gets somewhere they can find the event rather than a 404.
@@ -971,16 +974,30 @@ async function notifyReviewers(
   events: { title: string; when: string }[],
 ) {
   try {
-    const recipients = await db
+    const reviewerRoles = ["reviewer", "community_admin"] as const;
+    const direct = await db
       .select({ id: users.id, email: users.email })
       .from(users)
       .where(
         and(
           eq(users.status, "active"),
           eq(users.communityId, community.id),
-          inArray(users.role, ["reviewer", "community_admin"]),
+          inArray(users.role, [...reviewerRoles]),
         ),
       );
+    // A reviewer can belong to several communities; membership rows count too.
+    const linked = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .innerJoin(userCommunities, eq(userCommunities.userId, users.id))
+      .where(
+        and(
+          eq(users.status, "active"),
+          eq(userCommunities.communityId, community.id),
+          inArray(users.role, [...reviewerRoles]),
+        ),
+      );
+    const recipients = [...new Map([...direct, ...linked].map((r) => [r.id, r])).values()];
     const appUrl = process.env.APP_URL || "https://ai-calendar.uhurued.com";
     for (const r of recipients) {
       if (!r.email) continue;

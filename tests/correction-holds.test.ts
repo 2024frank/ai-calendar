@@ -30,6 +30,7 @@ describe("automatic correction publishing holds", () => {
       "server-only": {}, "@/db": { db }, "@/db/schema": schema,
       "./correctionLease":lease,
       "./ingest": { HARD_ISSUES },
+      "./learningAgent": { lessonsFor: async () => "" },
       "./llm": { llmComplete: async () => ({ text: JSON.stringify({ found: true, description: "Neighbors can learn printmaking techniques from local artists." }) }) },
       "./models": { modelChain: async () => ["test-model"] },
       "./runEvents": { emit: async () => undefined },

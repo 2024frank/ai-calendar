@@ -503,6 +503,8 @@ export function sessionsWithinLookahead(
 export type EventValidationOptions = {
   /** Allow a date in the short description while keeping the long-description rule. */
   allowDateInDescription?: boolean;
+  /** Announcements carry their real dates in the long description; see sourcePolicy. */
+  allowDateInExtendedDescription?: boolean;
 };
 
 /** Deterministic validation. Hard failures block publishing (event goes to review). */
@@ -549,7 +551,8 @@ export function validateEvent(
     Boolean(s) && DATEISH.some((re) => re.test(s as string));
   if (!options.allowDateInDescription && hasDateish(e.description))
     issues.push("description_contains_date");
-  if (hasDateish(e.extendedDescription)) issues.push("long_description_contains_date");
+  if (!options.allowDateInExtendedDescription && hasDateish(e.extendedDescription))
+    issues.push("long_description_contains_date");
   return issues;
 }
 
