@@ -37,7 +37,7 @@ function chConfig(host, chCommunityId, extra = {}) {
     submit_url: `${base}/api/legacy/calendar/post/submit`,
     edit_url_tmpl: `${base}/api/legacy/calendar/post/{id}/submit`,
     patch_url_tmpl: `${base}/api/legacy/calendar/post/{id}/submit`,
-    inventory_url: `${base}/api/legacy/calendar/posts?limit=10000&page=0&filter=future&tab=main-feed&isJobs=false&order=ASC&postType=All&allPosts`,
+    inventory_url: `${base}/api/legacy/calendar/posts?limit=10000&page=0&filter=future&tab=main-feed&isJobs=false&order=ASC&postType=All&allPosts=true`,
     ch_community_id: chCommunityId,
     timezone: "America/New_York",
     taxonomy: TAXONOMY,

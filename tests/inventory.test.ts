@@ -3,23 +3,25 @@ import { describe, it } from "node:test";
 import { loadRoute } from "./helpers/load-route";
 
 describe("destination inventory availability", () => {
-  async function inventory(response: unknown, configured = true, timeoutMs = 25_000) {
+  async function inventory(response: unknown, configured = true, timeoutMs = 25_000, inventoryUrl = "https://hub.example/api/posts") {
     let requests = 0;
+    const urls: string[] = [];
     const mod = loadRoute<{ fetchDestinationInventory(id: number, sourceId?: number, timeoutMs?: number): Promise<{
       available: boolean; items: unknown[]; reason?: string;
     }> }>(new URL("../src/lib/inventory.ts", import.meta.url), {
       "server-only": {},
       "./destination": { resolveDestination: async () => ({ destination: configured ? {
-        config: { inventory_url: "https://hub.example/api/posts", api_base: "https://hub.example" },
+        config: { inventory_url: inventoryUrl, api_base: "https://hub.example" },
       } : null }) },
-      "./fetchPage": { fetchPublicBytes: async () => {
+      "./fetchPage": { fetchPublicBytes: async (url: string) => {
         requests++;
+        urls.push(url);
         if (response instanceof Error) throw response;
         return { ok: true, bytes: new TextEncoder().encode(JSON.stringify(response)) };
       } },
     });
     const result = await mod.fetchDestinationInventory(7, undefined, timeoutMs);
-    return { ...result, requests };
+    return { ...result, requests, urls };
   }
 
   it("distinguishes a destination outage from an empty calendar", async () => {
@@ -29,6 +31,19 @@ describe("destination inventory availability", () => {
     const empty = await inventory({ posts: [] });
     assert.equal(empty.available, true);
     assert.equal(empty.items.length, 0);
+  });
+
+  it("asks for the upcoming feed with moderation-pending posts included, whatever the stored URL says", async () => {
+    // A bare "&allPosts" is read as off by the hub, and filter=all takes the
+    // hub about 47 s to build, which is past this fetch's budget.
+    const stored = "https://hub.example/api/posts?limit=10000&page=0&filter=all&tab=main-feed&allPosts";
+    const { urls } = await inventory({ posts: [] }, true, 25_000, stored);
+    assert.equal(urls.length, 1);
+    const requested = new URL(urls[0]);
+    assert.equal(requested.searchParams.get("filter"), "future");
+    assert.equal(requested.searchParams.get("allPosts"), "true");
+    assert.equal(requested.searchParams.get("limit"), "10000");
+    assert.equal(requested.searchParams.get("tab"), "main-feed");
   });
 
   it("does not trust an unexpected success response as an empty inventory", async () => {
@@ -53,6 +68,8 @@ describe("destination inventory availability", () => {
       location: null,
       sourceUrls: [],
       url: "https://hub.example/calendar/post/42",
+      sponsors: [],
+      ingestedPostUrl: null,
     });
   });
 

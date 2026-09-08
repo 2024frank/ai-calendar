@@ -52,7 +52,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     api_base: apiBase,
     submit_url: `${apiBase}/api/legacy/calendar/post/submit`,
     patch_url_tmpl: `${apiBase}/api/legacy/calendar/post/{id}/submit`,
-    inventory_url: `${apiBase}/api/legacy/calendar/posts?limit=10000&page=0&filter=future&tab=main-feed&isJobs=false&order=ASC&postType=All&allPosts`,
+    inventory_url: `${apiBase}/api/legacy/calendar/posts?limit=10000&page=0&filter=future&tab=main-feed&isJobs=false&order=ASC&postType=All&allPosts=true`,
   };
 
   // One endpoint per community: update the existing row, or create it.

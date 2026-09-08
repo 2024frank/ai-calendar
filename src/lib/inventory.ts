@@ -12,6 +12,10 @@ export type InventoryItem = {
   sourceUrls: string[];
   // The post's own page on CommunityHub, so a duplicate can link to what it duplicates.
   url: string | null;
+  /** Sponsor names as CommunityHub shows them, so a post can be traced to its organization. */
+  sponsors: string[];
+  /** Our review link, present only on posts the importer sent. */
+  ingestedPostUrl: string | null;
 };
 
 export type InventoryResult = {
@@ -49,20 +53,25 @@ export async function fetchDestinationInventory(
   }
   if (!cfg?.inventory_url) return unavailable("No duplicate-check inventory is configured for this destination.");
 
-  // CommunityHub hides two whole classes of post from the default listing, and
-  // both are exactly the ones we must not resend:
-  //   * filter=future drops long-running items. An exhibition opening 22 Aug
-  //     and closing next July is simply absent from the "future" feed.
-  //   * without allPosts, anything still awaiting a hub moderator is absent
-  //     too, and every post we submit sits unapproved until they act on it.
-  // So the feed we deduped against showed 21 posts while the hub held 1,344,
-  // and four Allen Memorial exhibitions were published twice. Ask for
-  // everything and do the date filtering ourselves.
+  // Two things about the CommunityHub listing decide whether this check works.
+  //
+  //   * allPosts must be literally "true". The hub reads a bare "&allPosts"
+  //     as off, and without it every post still awaiting a hub moderator is
+  //     missing, which is every post we submit until they act on it. That is
+  //     how four Allen Memorial exhibitions were sent twice in August.
+  //   * filter=future is the right feed, and it must stay. It keeps every post
+  //     with a session that has not ended yet, long-running exhibitions
+  //     included (measured 8 Sep 2026: the future feed held all 50 posts with
+  //     an upcoming session, 25 of them already open, and answered in 1.7 s).
+  //     filter=all returns the whole archive instead, 1,400 posts and 3 MB,
+  //     and the hub takes about 47 s to build it. That is past the 25 s budget
+  //     below, so asking for it made this fetch time out on every run from
+  //     12 Aug to 8 Sep and left the destination check silently empty.
   const inventoryUrl = (() => {
     try {
       const u = new URL(cfg.inventory_url!);
-      u.searchParams.set("filter", "all");
-      if (!u.searchParams.has("allPosts")) u.searchParams.set("allPosts", "true");
+      u.searchParams.set("filter", "future");
+      u.searchParams.set("allPosts", "true");
       return u.toString();
     } catch {
       return cfg.inventory_url!;
@@ -71,7 +80,7 @@ export async function fetchDestinationInventory(
 
   try {
     const res = await fetchPublicBytes(inventoryUrl, {
-      // The full listing is far larger than the filtered one it replaced.
+      // The upcoming feed is about 100 KB today; leave room for it to grow.
       maxBytes: 24 * 1024 * 1024,
       timeoutMs: Math.max(1, Math.min(timeoutMs, 25_000)),
       headers: { accept: "application/json" },
@@ -100,6 +109,11 @@ export async function fetchDestinationInventory(
         p.urlLink,
         ...buttons.map((button) => button.link),
       ].filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+      const sponsors = Array.isArray(p.sponsors)
+        ? (p.sponsors as Record<string, unknown>[])
+          .map((sponsor) => (typeof sponsor?.name === "string" ? sponsor.name.trim() : ""))
+          .filter(Boolean)
+        : [];
       return {
         eventType: typeof p.eventType === "string" ? p.eventType : null,
         // CommunityHub calls the title "name".
@@ -114,6 +128,8 @@ export async function fetchDestinationInventory(
         description: (typeof p.description === "string" && p.description) || (typeof p.excerpt === "string" && p.excerpt) || null,
         sourceUrls,
         url: url ?? null,
+        sponsors,
+        ingestedPostUrl: typeof p.ingestedPostUrl === "string" && p.ingestedPostUrl.trim() ? p.ingestedPostUrl.trim() : null,
       };
     }) };
   } catch {
