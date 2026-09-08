@@ -49,7 +49,7 @@ import {
 } from "./duplicatePolicy";
 import { validationOptionsForSource } from "./sourcePolicy";
 import { preserveEventHolds } from "./eventHolds";
-import { apolloAnnouncementsMatch, isApolloSource } from "./apolloDuplicatePolicy";
+import { apolloAnnouncementExtends, apolloAnnouncementsMatch, isApolloSource } from "./apolloDuplicatePolicy";
 
 // Feeds and APIs rarely embed an image, so we fetch each imageless event's own
 // detail page and read its og:image. Bounded so a large run can't fan out.
@@ -634,6 +634,67 @@ export async function ingestEvents(
       }
     }
 
+    // Apollo's rolling schedule: the page shows about twelve days, so a film's
+    // visible end moves later every day while nothing about the lineup changed.
+    // A pending announcement is carried forward to the new dates and the
+    // candidate filed as its duplicate. One already sent to CommunityHub is
+    // not touched; the candidate becomes an update proposal for a reviewer,
+    // who can then use "Update existing post".
+    let apolloExtensionProposal: number | null = null;
+    if (apollo && !duplicateOf && !reportedDuplicate.url && e.sessions.length) {
+      // Pending and approved rows first, then what we already sent: a
+      // published announcement is not in the review inventory but is exactly
+      // the one a rolled schedule must not be posted beside.
+      const seen = new Set<number>();
+      const extendable = [...existing, ...publishedByUs].filter((x) => !seen.has(x.id) && seen.add(x.id));
+      for (const x of extendable) {
+        const extension = apolloAnnouncementExtends(e, x);
+        if (!extension.extends) continue;
+        const outcome = await db.transaction(async (tx) => {
+          const [stored] = await tx
+            .select({ status: events.status })
+            .from(events)
+            .where(and(eq(events.id, x.id), eq(events.communityId, source.communityId)))
+            .limit(1)
+            .for("update");
+          if (!stored) return null;
+          const [sent] = await tx
+            .select({ id: publishSubmissions.id })
+            .from(publishSubmissions)
+            .where(and(
+              eq(publishSubmissions.eventId, x.id),
+              inArray(publishSubmissions.state, ["sending", "accepted_unreconciled", "succeeded"]),
+            ))
+            .limit(1)
+            .for("update");
+          if (stored.status === "pending" && !sent) {
+            await tx
+              .update(events)
+              .set({
+                description: e.description,
+                sessions: e.sessions,
+                startTimeMax: maxStartTime(e),
+              })
+              .where(and(eq(events.id, x.id), eq(events.status, "pending")));
+            return "updated" as const;
+          }
+          if (sent || ["approved", "submitted", "published"].includes(stored.status)) return "proposal" as const;
+          return null;
+        });
+        if (outcome === "updated") {
+          duplicateOf = x.id;
+          dupReason = `${extension.reason}; announcement #${x.id} carried forward to the new dates`;
+          await emit(runId, "dedup_outcome", `Carried "${e.title}" #${x.id} forward to the new dates instead of duplicating it`, {
+            eventId: x.id,
+            reason: extension.reason,
+          });
+        } else if (outcome === "proposal") {
+          apolloExtensionProposal = x.id;
+        }
+        if (outcome) break;
+      }
+    }
+
     // 3) already published on the community's endpoint
     let remoteDup = Boolean(reportedDuplicate.url);
     let duplicateOfUrl: string | null = reportedDuplicate.url;
@@ -723,7 +784,7 @@ export async function ingestEvents(
     // matches the stored row on title and venue, so it would be filed as a
     // duplicate and those new dates thrown away. Unsent review rows may merge;
     // sent or ambiguous rows require a separate, never-auto-published proposal.
-    let proposedUpdateOfEventId: number | null = null;
+    let proposedUpdateOfEventId: number | null = apolloExtensionProposal;
     if (!apollo && duplicateOf && e.sessions.length) {
       const originalId = duplicateOf;
       await db.transaction(async tx => {
@@ -778,7 +839,9 @@ export async function ingestEvents(
     if (!duplicateOf && hardIssues.length) counts.autoRejected++;
 
     const rejectionReason = proposedUpdateOfEventId
-      ? `New recurrence dates require review on existing event #${proposedUpdateOfEventId}; no update has been sent.`
+      ? apollo
+        ? `The film run was extended on the announcement already sent as #${proposedUpdateOfEventId}; compare the two, save the new dates there and use Update existing post. No update has been sent.`
+        : `New recurrence dates require review on existing event #${proposedUpdateOfEventId}; no update has been sent.`
       : duplicateOf || remoteDup
       ? (remoteDup ? `Already published: ${dupReason}` : null)
       : hardIssues.length

@@ -593,7 +593,7 @@ export function EventReview({
         {event.proposedUpdateOfEventId && (
           <div className="card" style={{borderColor:"var(--warn)"}}>
             <div className="label">{proposalResolvedAt ? "Proposal resolved" : "New recurrence dates need review"}</div>
-            <p>This proposal was not merged or published. Compare its dates with <a href={`/review/${event.proposedUpdateOfEventId}`}>the existing event #{event.proposedUpdateOfEventId}</a>, save the dates you accept there, then use Update existing post. Mark this proposal resolved after reviewing it; do not create a second post.</p>
+            <p>This proposal was not merged or published. Compare its dates and description with <a href={`/review/${event.proposedUpdateOfEventId}`}>the existing event #{event.proposedUpdateOfEventId}</a>, save what you accept there, then use Update existing post. Mark this proposal resolved after reviewing it; do not create a second post.</p>
           </div>
         )}
         {hasPublishedPost && !canUpdatePublished && (

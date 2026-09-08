@@ -308,6 +308,50 @@ describe("Apollo ingestion duplicate regression", () => {
     assert.equal(saved.duplicate_of_url, null);
   });
 
+  it("carries a pending Now Playing announcement forward when the visible end dates rolled", async (t) => {
+    const f = fixture(t);
+    const before = "Dog Stars: Sep 1 to Sep 9 · Coyote vs. Acme: Sep 1 to Sep 9";
+    const after = "Dog Stars: Sep 1 to Sep 9 · Coyote vs. Acme: Sep 1 to Sep 17";
+    f.seedEvent({ status: "pending", description: before, sessions: window("2026-09-05T04:00:00Z", "2026-09-10T03:59:59Z") });
+    const rolled = window("2026-09-06T04:00:00Z", "2026-09-10T03:59:59Z");
+
+    await f.runIngest([f.candidate({ title: "Now Playing at the Apollo", description: after, sessions: rolled })]);
+
+    const rows = f.allEvents();
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].id, 1797);
+    assert.equal(rows[0].status, "pending");
+    assert.equal(rows[0].description, after);
+    assert.deepEqual(JSON.parse(rows[0].sessions), rolled);
+    assert.equal(rows[1].status, "duplicate");
+    assert.equal(rows[1].duplicate_of_event_id, 1797);
+  });
+
+  it("proposes an update instead when the extended announcement was already sent", async (t) => {
+    const f = fixture(t);
+    const before = "Dog Stars: Sep 1 to Sep 9 · Coyote vs. Acme: Sep 1 to Sep 9";
+    f.seedEvent({ status: "published", description: before, sessions: window("2026-09-05T04:00:00Z", "2026-09-10T03:59:59Z") });
+    f.store.prepare(`
+      INSERT INTO publish_submissions (id, event_id, destination_id, payload_hash, state)
+      VALUES (1, 1797, 7, 'published-payload', 'succeeded')
+    `).run();
+
+    await f.runIngest([f.candidate({
+      title: "Now Playing at the Apollo",
+      description: "Dog Stars: Sep 1 to Sep 9 · Coyote vs. Acme: Sep 1 to Sep 17",
+      sessions: window("2026-09-06T04:00:00Z", "2026-09-10T03:59:59Z"),
+    })]);
+
+    const rows = f.allEvents();
+    assert.equal(rows[0].description, before);
+    const saved = rows[1];
+    assert.equal(saved.status, "pending");
+    assert.equal(saved.duplicate_of_event_id, null);
+    const proposal = f.store.prepare("SELECT proposed_update_of_event_id AS of, rejection_reason AS why FROM events WHERE id = ?").get(saved.id) as { of: number; why: string };
+    assert.equal(proposal.of, 1797);
+    assert.match(proposal.why, /Update existing post/);
+  });
+
   it("saves a full duplicate candidate when its unchanged lineup is already covered", async (t) => {
     const f = fixture(t);
     f.seedEvent();

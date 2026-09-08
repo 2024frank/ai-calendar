@@ -305,6 +305,57 @@ function noMatch(reason: string): { match: false; reason: string } {
   return { match: false, reason };
 }
 
+/**
+ * The Veezi page shows about twelve days, so a film's visible end date moves
+ * later every day while the lineup itself has not changed. A candidate
+ * extends an existing Now Playing announcement when it names the same films
+ * with the same openings, no film ends earlier, and something reaches later:
+ * a film's end or the display window. Yesterday's record is then carried
+ * forward instead of a copy being filed beside it (reviewer request, June 29).
+ */
+export function apolloAnnouncementExtends(
+  candidate: ApolloAnnouncementLike,
+  existing: ApolloAnnouncementLike,
+): { extends: boolean; reason: string } {
+  const no = (reason: string) => ({ extends: false, reason });
+  if (candidate.eventType !== "an" || existing.eventType !== "an") return no("both records must be announcements");
+  if (typeof candidate.title !== "string" || typeof existing.title !== "string") return no("both records need recognized Apollo titles");
+  if (announcementKind(candidate.title) !== "playing" || announcementKind(existing.title) !== "playing") {
+    return no("only Now Playing announcements roll forward");
+  }
+  if (typeof candidate.description !== "string" || typeof existing.description !== "string") {
+    return no("both records need complete schedule descriptions");
+  }
+  const candidateSessions = sessionsOf(candidate.sessions);
+  const existingSessions = sessionsOf(existing.sessions);
+  if (!candidateSessions || !existingSessions) return no("both records need valid display sessions");
+  if (candidateSessions[0].start < existingSessions[0].start) return no("candidate window starts earlier");
+
+  const candidateSchedules = parseSchedules(candidate.description, candidateSessions, "playing");
+  const existingSchedules = parseSchedules(existing.description, existingSessions, "playing");
+  if (!candidateSchedules || !existingSchedules) return no("schedule descriptions are incomplete or ambiguous");
+  if (candidateSchedules.size !== existingSchedules.size) return no("film lineups differ");
+
+  let laterEnd = false;
+  for (const [film, schedule] of candidateSchedules) {
+    const before = existingSchedules.get(film);
+    if (!before || before.kind !== schedule.kind) return no("film lineups differ");
+    if (schedule.start !== before.start) return no("a film's opening date differs");
+    if (schedule.kind === "range" && before.kind === "range") {
+      if (schedule.end < before.end) return no("a film now ends earlier");
+      if (schedule.end > before.end) laterEnd = true;
+    }
+  }
+  const windowExtends = !sessionsCovered(candidateSessions, existingSessions);
+  if (!laterEnd && !windowExtends) return no("nothing reaches later than the existing announcement");
+  return {
+    extends: true,
+    reason: laterEnd
+      ? "same lineup and openings; a film's visible end date moved later"
+      : "same lineup and openings; the display window reaches later",
+  };
+}
+
 export function apolloAnnouncementsMatch(
   candidate: ApolloAnnouncementLike,
   existing: ApolloAnnouncementLike,

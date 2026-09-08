@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  apolloAnnouncementExtends,
   apolloAnnouncementsMatch,
   isApolloSource,
   type ApolloAnnouncementLike,
@@ -24,6 +25,52 @@ describe("Apollo source identity", () => {
     assert.equal(isApolloSource({ slug: "another-source" }, { slug: "oberlin" }), false);
     assert.equal(isApolloSource(null, { slug: "oberlin" }), false);
     assert.equal(isApolloSource({ slug: "apollo-theater" }, undefined), false);
+  });
+});
+
+describe("Apollo rolling-window extension", () => {
+  const yesterday = playing(
+    "Dog Stars: Sep 1 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 9",
+    window("2026-09-07T04:00:00Z", "2026-09-10T03:59:59Z"),
+  );
+
+  it("extends when a film's visible end moved later and nothing else changed", () => {
+    const today = playing(
+      "The Dog Stars: Sep 1 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 17",
+      window("2026-09-08T04:00:00Z", "2026-09-10T03:59:59Z"),
+      "Now Playing at the Apollo",
+    );
+    const result = apolloAnnouncementExtends({ ...today, description: "Dog Stars: Sep 1 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 17" }, yesterday);
+    assert.equal(result.extends, true);
+    assert.match(result.reason, /end date moved later/);
+  });
+
+  it("extends when only the display window reaches later within the same film runs", () => {
+    const earlierWindow = playing(
+      "Dog Stars: Sep 1 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 9",
+      window("2026-09-06T04:00:00Z", "2026-09-08T03:59:59Z"),
+    );
+    const result = apolloAnnouncementExtends(
+      playing("Dog Stars: Sep 1 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 9", window("2026-09-08T04:00:00Z", "2026-09-10T03:59:59Z")),
+      earlierWindow,
+    );
+    assert.equal(result.extends, true);
+    assert.match(result.reason, /display window reaches later/);
+  });
+
+  it("does not extend across a changed lineup, a different opening, an earlier end, or an earlier window", () => {
+    assert.equal(apolloAnnouncementExtends(playing("Coyote vs. Acme: Sep 1 to Sep 17", window("2026-09-10T04:00:00Z", "2026-09-18T03:59:59Z")), yesterday).extends, false);
+    assert.equal(apolloAnnouncementExtends(playing("Dog Stars: Sep 2 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 17", window("2026-09-08T04:00:00Z", "2026-09-10T03:59:59Z")), yesterday).extends, false);
+    assert.equal(apolloAnnouncementExtends(playing("Dog Stars: Sep 1 to Sep 8 . Coyote vs. Acme: Sep 1 to Sep 17", window("2026-09-08T04:00:00Z", "2026-09-09T03:59:59Z")), yesterday).extends, false);
+    assert.equal(apolloAnnouncementExtends(playing("Dog Stars: Sep 1 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 17", window("2026-09-05T04:00:00Z", "2026-09-10T03:59:59Z")), yesterday).extends, false);
+    assert.equal(apolloAnnouncementExtends(playing("Dog Stars: opens Sep 1", window("2026-09-08T04:00:00Z", "2026-09-10T03:59:59Z"), "Coming Soon to the Apollo"), yesterday).extends, false);
+  });
+
+  it("is not an extension when the existing record already covers everything", () => {
+    assert.equal(apolloAnnouncementExtends(
+      playing("Dog Stars: Sep 1 to Sep 9 . Coyote vs. Acme: Sep 1 to Sep 9", window("2026-09-08T04:00:00Z", "2026-09-10T03:59:59Z")),
+      yesterday,
+    ).extends, false);
   });
 });
 
