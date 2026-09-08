@@ -119,15 +119,32 @@ describe("scheduledSourceIsDue", () => {
     );
   });
 
-  it("runs weekly schedules only on Monday in the community timezone", () => {
+  it("runs weekly schedules on Monday in the community timezone", () => {
     const mondayEarlyUtc = Date.parse("2026-08-03T02:00:00.000Z");
+    // Sunday evening in New York, a week after the last success: not yet.
     assert.equal(
-      scheduledSourceIsDue("0 6 * * 1", null, mondayEarlyUtc, "America/New_York"),
+      scheduledSourceIsDue("0 6 * * 1", new Date(mondayEarlyUtc - 6 * 24 * hour), mondayEarlyUtc, "America/New_York"),
       false,
     );
     assert.equal(
-      scheduledSourceIsDue("0 6 * * 1", null, mondayEarlyUtc, "Asia/Tokyo"),
+      scheduledSourceIsDue("0 6 * * 1", new Date(mondayEarlyUtc - 8 * 24 * hour), mondayEarlyUtc, "Asia/Tokyo"),
       true,
+    );
+  });
+
+  it("retries a weekly source on later days when its Monday run did not complete", () => {
+    const tuesdayNoonUtc = Date.parse("2026-09-08T12:00:00.000Z");
+    // Never completed: due right away, whatever the weekday.
+    assert.equal(scheduledSourceIsDue("0 6 * * 1", null, tuesdayNoonUtc, "America/New_York"), true);
+    // Last success two weeks ago: Monday was missed, so Tuesday is due.
+    assert.equal(
+      scheduledSourceIsDue("0 6 * * 1", new Date(tuesdayNoonUtc - 15 * 24 * hour), tuesdayNoonUtc, "America/New_York"),
+      true,
+    );
+    // Last success yesterday, on Monday: wait for next Monday.
+    assert.equal(
+      scheduledSourceIsDue("0 6 * * 1", new Date(tuesdayNoonUtc - 30 * hour), tuesdayNoonUtc, "America/New_York"),
+      false,
     );
   });
 

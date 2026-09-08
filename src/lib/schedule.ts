@@ -9,6 +9,8 @@ export const SCHEDULE_OPTIONS = [
 
 export type ScheduleValue = (typeof SCHEDULE_OPTIONS)[number]["value"];
 
+/** A weekly source whose last success is older than this missed its Monday. */
+const MISSED_WEEKLY_RETRY_SECS = 8 * 24 * 3600;
 const MIN_INTERVAL_SECS: Record<string, number> = {
   daily: 22 * 3600,
   weekdays: 22 * 3600,
@@ -71,11 +73,16 @@ export function scheduledSourceIsDue(
     new Date(nowMs),
   );
   if (schedule === "weekdays" && (weekday === "Sat" || weekday === "Sun")) return false;
-  if (schedule === "weekly" && weekday !== "Mon") return false;
+  const lastMs = lastCompletedAt ? new Date(lastCompletedAt).getTime() : Number.NaN;
+  const hasHistory = Number.isFinite(lastMs);
+  // A weekly source runs on Monday. If Monday's run failed, or never happened,
+  // it is tried again on the following days rather than waiting a whole week:
+  // five weekly sources sat idle for weeks that way in August and September.
+  if (schedule === "weekly" && weekday !== "Mon") {
+    return !hasHistory || nowMs - lastMs >= MISSED_WEEKLY_RETRY_SECS * 1000;
+  }
 
-  if (!lastCompletedAt) return true;
-  const lastMs = new Date(lastCompletedAt).getTime();
-  if (!Number.isFinite(lastMs)) return true;
+  if (!hasHistory) return true;
   const interval = MIN_INTERVAL_SECS[schedule] ?? 22 * 3600;
   return nowMs - lastMs >= interval * 1000;
 }
