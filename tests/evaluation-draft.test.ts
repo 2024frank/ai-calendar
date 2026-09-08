@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildEvaluationDraft, organizationPosts, titleSimilarity } from "../src/lib/evaluationDraft";
+import { buildEvaluationDraft, organizationPosts, sameOrganization, titleSimilarity } from "../src/lib/evaluationDraft";
 import { validateEvaluation } from "../src/lib/evaluation";
 
 const period = { start: new Date("2026-09-01T00:00:00Z"), end: new Date("2026-10-01T00:00:00Z") };
@@ -22,6 +22,16 @@ describe("evaluation draft from CommunityHub and importer records", () => {
       post(3, "Farm Fridays", "2026-09-11T15:00:00Z", { sponsors: ["City Fresh"] }),
     ], ["Oberlin Public Library"]);
     assert.deepEqual(kept.map((p) => p.url), ["https://hub.example/calendar/post/1"]);
+  });
+
+  it("recognizes an organization whose name drifts between the two systems", () => {
+    assert.equal(sameOrganization("Oberlin Library", "Oberlin Public Library"), true);
+    assert.equal(sameOrganization("FAVA Gallery", "FAVA Gallery"), true);
+    assert.equal(sameOrganization("Oberlin College", "Oberlin College's Department of Theater"), true);
+    assert.equal(sameOrganization("Oberlin Library", "Oberlin Heritage Center"), false);
+    assert.equal(sameOrganization("POWER", "Oberlin College"), false);
+    const kept = organizationPosts([post(1, "Storytime", "2026-09-11T15:00:00Z")], ["Oberlin Library"]);
+    assert.equal(kept.length, 1);
   });
 
   it("proposes one-to-one pairs by date and title, and lists misses in both directions", () => {

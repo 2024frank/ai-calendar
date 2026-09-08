@@ -91,13 +91,31 @@ function firstSession(sessions: unknown): { start: number; end: number | null } 
   return { start: starts[0].start, end: Number.isFinite(starts[0].end) && starts[0].end >= starts[0].start ? starts[0].end : null };
 }
 
+/**
+ * Does a sponsor name on the hub mean this organization? Names drift between
+ * systems ("Oberlin Library" here, "Oberlin Public Library" there), so one name
+ * counts when every word of the shorter one appears in the longer one.
+ */
+export function sameOrganization(a: string | null | undefined, b: string | null | undefined): boolean {
+  const na = normalizedName(a);
+  const nb = normalizedName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const wa = new Set(na.split(" "));
+  const wb = new Set(nb.split(" "));
+  const [small, large] = wa.size <= wb.size ? [wa, wb] : [wb, wa];
+  if (small.size < 2) return false;
+  for (const w of small) if (!large.has(w)) return false;
+  return true;
+}
+
 /** Posts the organization submitted itself: under its own name, not sent by us. */
 export function organizationPosts(posts: readonly HubPostLike[], organizationNames: readonly string[]): HubPostLike[] {
-  const wanted = new Set(organizationNames.map(normalizedName).filter(Boolean));
-  if (!wanted.size) return [];
+  const wanted = organizationNames.filter((name) => normalizedName(name));
+  if (!wanted.length) return [];
   return posts.filter((post) => {
     if (post.ingestedPostUrl) return false;
-    return (post.sponsors ?? []).some((name) => wanted.has(normalizedName(name)));
+    return (post.sponsors ?? []).some((sponsor) => wanted.some((name) => sameOrganization(sponsor, name)));
   });
 }
 
