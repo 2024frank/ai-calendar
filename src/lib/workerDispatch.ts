@@ -1,5 +1,6 @@
 import "server-only";
 import { WORKER_DISPATCH_ATTEMPTS } from "./jobPolicy";
+import { ownWorkerSecret } from "./workerAuth";
 
 /**
  * Start one isolated serverless worker invocation.
@@ -12,7 +13,7 @@ export async function dispatchWorker(
   recoveryAttempt = 0,
   requestOrigin?: string,
 ): Promise<boolean> {
-  const secret = process.env.WORKER_SECRET || process.env.CRON_SECRET;
+  const secret = ownWorkerSecret();
   if (!secret || !requestOrigin) return false;
 
   let endpoint: URL;

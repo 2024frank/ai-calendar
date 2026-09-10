@@ -215,7 +215,7 @@ Do not cache authorization decisions or review queues at the CDN. Do not introdu
 - Session cookies are HTTP-only, secure in production, and signed with a configured secret.
 - Readiness fails when production secrets are missing or weak.
 - Authentication throttles use HMAC-hashed keys and a shared database counter.
-- Private worker operations require `WORKER_SECRET` (or `CRON_SECRET` during transition).
+- Private worker operations require one of the comma-separated `WORKER_SECRET` values (or `CRON_SECRET` during transition).
 - The UI never receives provider keys or destination credentials.
 - Source content is treated as untrusted data in model prompts.
 - Database credentials should be least-privilege; CommunityHub inventory credentials remain read-only.

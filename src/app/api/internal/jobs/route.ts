@@ -5,6 +5,7 @@ import {
   shouldContinueWorkerChain,
   workerRecoveryAttempt,
 } from "@/lib/jobPolicy";
+import { authorizedWorkerBearer } from "@/lib/workerAuth";
 import { dispatchWorker } from "@/lib/workerDispatch";
 
 export const runtime = "nodejs";
@@ -12,8 +13,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 function authorized(req: Request) {
-  const expected = process.env.WORKER_SECRET || process.env.CRON_SECRET;
-  return Boolean(expected && req.headers.get("authorization") === `Bearer ${expected}`);
+  return authorizedWorkerBearer(req.headers.get("authorization"));
 }
 
 /** Private worker entrypoint. Safe to invoke concurrently from multiple workers. */
