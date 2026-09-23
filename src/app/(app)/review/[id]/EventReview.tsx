@@ -11,6 +11,7 @@ import {
   POST_TYPE_IDS,
   REJECT_REASONS,
   humanizeIssues,
+  ENUM_DEFAULTS,
 } from "@/lib/taxonomy";
 import { fromLocalInput, toLocalInput } from "./eventTime";
 
@@ -166,17 +167,17 @@ export function EventReview({
   const router = useRouter();
 
   const [f, setF] = useState({
-    eventType: supportedValue(event.eventType, EVENT_TYPES, "ot"),
+    eventType: supportedValue(event.eventType, EVENT_TYPES, ENUM_DEFAULTS.eventType),
     title: event.title ?? "",
     description: event.description ?? "",
     extendedDescription: event.extendedDescription ?? "",
-    locationType: supportedValue(event.locationType, LOCATION_TYPES, "ne"),
+    locationType: supportedValue(event.locationType, LOCATION_TYPES, ENUM_DEFAULTS.locationType),
     location: event.location ?? "",
     placeName: event.placeName ?? "",
     roomNum: event.roomNum ?? "",
-    geoScope: supportedValue(event.geoScope, GEO_SCOPES, "city_wide"),
+    geoScope: supportedValue(event.geoScope, GEO_SCOPES, ENUM_DEFAULTS.geoScope),
     urlLink: event.urlLink ?? "",
-    displayType: supportedValue(event.displayType, DISPLAY_TYPES, "all"),
+    displayType: supportedValue(event.displayType, DISPLAY_TYPES, ENUM_DEFAULTS.displayType),
     website: event.website ?? "",
     registrationUrl: event.registrationUrl ?? "",
     imageCdnUrl: event.imageCdnUrl ?? "",

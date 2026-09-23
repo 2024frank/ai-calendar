@@ -1,7 +1,8 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { events, fieldEditLog, runs, sources } from "@/db/schema";
+import { activityLog, events, fieldEditLog, runEvents, runs, sources } from "@/db/schema";
+import { REVIEWER_ONLY_FIELDS } from "./taxonomy";
 import { activeModel } from "./models";
 
 /** Minutes we estimate it takes a person to find and hand-enter one event. */
@@ -17,11 +18,14 @@ export type SourceMetric = {
 
 export type PilotMetrics = {
   sourcesConnected: number;
-  eventsGathered: number; // complete events handed to review (not counting caught duplicates)
-  duplicatesCaught: number;
+  eventsGathered: number; // lifetime: every record the system handed to review
+  duplicatesCaught: number; // lifetime: every incoming event judged a duplicate
+  reviewerApproved: number; // lifetime: events whose latest reviewer decision is approve
+  reviewerRejected: number; // lifetime: events whose latest reviewer decision is reject
+  approvalRatePct: number | null;
   filteredIncomplete: number; // events the system caught as incomplete before a person saw them
   currentUnflaggedPct: number | null; // mutable operational state, not arrival accuracy
-  approvedAsIsPct: number | null; // reviewer-attributed approvals with no recorded field edits
+  approvedAsIsPct: number | null; // lifetime approvals with no reviewer correction before approving
   approvedTotal: number;
   totalReviewerEdits: number;
   estimatedHoursSaved: number;
@@ -71,21 +75,59 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
       eventsEdited: sql<number>`count(distinct ${fieldEditLog.eventId})`,
     })
     .from(fieldEditLog)
+    .where(sql`${fieldEditLog.fieldName} not in (${sql.join([...REVIEWER_ONLY_FIELDS].map((f) => sql`${f}`), sql`, `)})`)
     .groupBy(fieldEditLog.sourceId);
   const editsBySource = new Map(editRows.map((r) => [r.sourceId, r]));
-  const editedEventIds = await db
-    .select({ id: fieldEditLog.eventId })
-    .from(fieldEditLog)
-    .groupBy(fieldEditLog.eventId);
-  const editedSet = new Set(editedEventIds.map((r) => r.id));
 
-  // Submitted status alone is not evidence of human approval.
-  const approvedRows = await db
-    .select({ id: events.id, status: events.status })
-    .from(events)
-    .where(sql`${events.status} in ('approved','submitted') and ${events.publishedVia} = 'reviewer'`);
-  const approvedTotal = approvedRows.length;
-  const approvedAsIs = approvedRows.filter((e) => !editedSet.has(e.id)).length;
+  // Reviewer decisions come from the audit log, never from the events table.
+  // The nightly sweep deletes an event once its date has passed, and its
+  // approval or rejection went with it: this page once showed 43 approvals
+  // when reviewers had made 101, and no rejections at all. activity_log has no
+  // foreign key to events, so it keeps every decision. An event decided twice
+  // (rejected, then approved) counts once, by its latest decision.
+  const decisions = await db
+    .select({ logId: activityLog.id, id: activityLog.targetId, action: activityLog.action })
+    .from(activityLog)
+    .where(sql`${activityLog.action} in ('approve','reject') and ${activityLog.targetType} = 'event'`);
+  const latest = new Map<number, { logId: number; action: string }>();
+  for (const d of decisions) {
+    if (d.id == null) continue;
+    const seen = latest.get(d.id);
+    if (!seen || Number(d.logId) > seen.logId) latest.set(d.id, { logId: Number(d.logId), action: d.action });
+  }
+  const approvals = [...latest].filter(([, d]) => d.action === "approve");
+  const reviewerApproved = approvals.length;
+  const reviewerRejected = latest.size - reviewerApproved;
+  const approvedTotal = reviewerApproved;
+
+  // "Approved without edits" means the reviewer corrected nothing the agent
+  // produced before approving. Read from the audit log too, since field_edit_log
+  // loses its event link when the sweep deletes the event. Fields the agent is
+  // never asked to produce are not corrections of its work.
+  const editLog = await db
+    .select({ logId: activityLog.id, id: activityLog.targetId, detail: activityLog.detail })
+    .from(activityLog)
+    .where(sql`${activityLog.action} = 'edit' and ${activityLog.targetType} = 'event'`);
+  const correctedBefore = new Map<number, number[]>();
+  for (const r of editLog) {
+    if (r.id == null) continue;
+    const detail = (typeof r.detail === "string" ? JSON.parse(r.detail) : r.detail) as { fields?: string[] } | null;
+    const fields = (detail?.fields ?? []).filter((f) => !REVIEWER_ONLY_FIELDS.has(f));
+    if (!fields.length) continue;
+    correctedBefore.set(r.id, [...(correctedBefore.get(r.id) ?? []), Number(r.logId)]);
+  }
+  const approvedAsIs = approvals.filter(
+    ([id, d]) => !(correctedBefore.get(id) ?? []).some((logId) => logId < d.logId),
+  ).length;
+
+  // Lifetime intake, from the run timeline. Runs are never deleted, so these
+  // outcomes survive the sweep that removes the events themselves.
+  const [intake] = await db
+    .select({
+      sent: sql<number>`sum(case when ${runEvents.kind} = 'queue_outcome' and ${runEvents.label} like 'Sent to review%' then 1 else 0 end)`,
+      dups: sql<number>`sum(case when ${runEvents.kind} = 'dedup_outcome' and ${runEvents.label} like 'Duplicate%' then 1 else 0 end)`,
+    })
+    .from(runEvents);
 
   const [runRow] = await db
     .select({
@@ -171,19 +213,28 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     s.editsNeeded = n(editsBySource.get(sid)?.edits);
   }
 
+  const lifetimeGathered = Math.max(n(intake?.sent), eventsGathered);
+  const lifetimeDuplicates = Math.max(n(intake?.dups), duplicatesCaught);
+
   return {
     sourcesConnected: srcRows.filter((s) => s.active).length,
-    eventsGathered,
-    duplicatesCaught,
+    eventsGathered: lifetimeGathered,
+    duplicatesCaught: lifetimeDuplicates,
+    reviewerApproved,
+    reviewerRejected,
+    approvalRatePct:
+      reviewerApproved + reviewerRejected
+        ? Math.round((reviewerApproved / (reviewerApproved + reviewerRejected)) * 100)
+        : null,
     filteredIncomplete,
     currentUnflaggedPct: eventsGathered ? Math.round((currentUnflagged / eventsGathered) * 100) : null,
     approvedAsIsPct: approvedTotal ? Math.round((approvedAsIs / approvedTotal) * 100) : null,
     approvedTotal,
     totalReviewerEdits: editRows.reduce((a, r) => a + n(r.edits), 0),
-    estimatedHoursSaved: Math.round((eventsGathered * MINUTES_PER_MANUAL_EVENT) / 60),
+    estimatedHoursSaved: Math.round((lifetimeGathered * MINUTES_PER_MANUAL_EVENT) / 60),
     runsCompleted: n(runRow?.completed),
     totalSpendUsd,
-    costPerEventUsd: eventsGathered ? totalSpendUsd / eventsGathered : 0,
+    costPerEventUsd: lifetimeGathered ? totalSpendUsd / lifetimeGathered : 0,
     correctedCount: n(corrRow?.total),
     correctedAccepted: n(corrRow?.accepted),
     byModel,

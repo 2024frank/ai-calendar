@@ -9,7 +9,15 @@ import { recordFieldEdits, type FieldChange } from "@/lib/learning";
 import { learnFromCorrection } from "@/lib/learningAgent";
 import { logActivity } from "@/lib/activity";
 import { isPublicHttpUrl } from "@/lib/publicUrl";
-import { DISPLAY_TYPES, EVENT_TYPES, GEO_SCOPES, LOCATION_TYPES, POST_TYPE_IDS } from "@/lib/taxonomy";
+import {
+  DISPLAY_TYPES,
+  ENUM_DEFAULTS,
+  EVENT_TYPES,
+  GEO_SCOPES,
+  LOCATION_TYPES,
+  POST_TYPE_IDS,
+  REVIEWER_ONLY_FIELDS,
+} from "@/lib/taxonomy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,7 +114,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const prev = (ev as Record<string, unknown>)[f] as string | null;
     if ((prev ?? "") !== (next ?? "")) {
       patch[f] = next;
-      changes.push({ field: f, oldValue: prev ?? null, newValue: next });
+      // The form shows a safe default for a missing enum and saves it, because
+      // publishing needs a value. Nobody chose it, so it is stored but not
+      // recorded as a correction. Logging it made every approval look edited
+      // and taught the agent lessons about fields it never produces.
+      const defaults = ENUM_DEFAULTS as Record<string, string>;
+      const prevSupported = Boolean(prev && ENUM_FIELDS[f]?.has(prev));
+      const defaultFill = f in defaults && next === defaults[f] && !prevSupported;
+      if (!defaultFill) changes.push({ field: f, oldValue: prev ?? null, newValue: next });
     }
   }
 
@@ -219,7 +234,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // Learn from it in the background: the reviewer should not wait on an agent,
   // and a lesson failing to be written must never fail their save.
   after(async () => {
-    for (const ch of changes.filter((c) => (c.oldValue ?? "") !== (c.newValue ?? ""))) {
+    for (const ch of changes.filter(
+      (c) => (c.oldValue ?? "") !== (c.newValue ?? "") && !REVIEWER_ONLY_FIELDS.has(c.field),
+    )) {
       await learnFromCorrection({
         eventId: ev.id,
         sourceId: ev.sourceId,

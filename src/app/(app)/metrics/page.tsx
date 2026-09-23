@@ -60,12 +60,21 @@ export default async function MetricsPage() {
         <Stat
           value={String(m.eventsGathered)}
           label="Events gathered"
-          note="Current pending, approved and submitted records; this count can change after review or retention."
+          note="Every record the system has handed to review since the pilot began, including events that have since happened and been cleared."
         />
         <Stat
           value={String(m.duplicatesCaught)}
-          label="Flagged as duplicates"
-          note="Current duplicate classifications. Their correctness has not been independently verified by this count."
+          label="Duplicates caught"
+          note="Every incoming event the system judged already present, since the pilot began. Their correctness has not been independently verified by this count."
+        />
+        <Stat
+          value={`${m.reviewerApproved} / ${m.reviewerRejected}`}
+          label="Approved / rejected by reviewers"
+          note={
+            m.approvalRatePct === null
+              ? "No reviewer decisions yet."
+              : `${m.approvalRatePct}% of reviewed events were approved. Counted from the permanent audit log by each event's latest decision, so events that have already happened still count.`
+          }
         />
         <Stat
           value={m.currentUnflaggedPct === null ? "—" : `${m.currentUnflaggedPct}%`}
@@ -74,11 +83,11 @@ export default async function MetricsPage() {
         />
         <Stat
           value={m.approvedAsIsPct === null ? "—" : `${m.approvedAsIsPct}%`}
-          label="Human approvals without recorded edits"
+          label="Approved without corrections"
           note={
             m.approvedAsIsPct === null
               ? `No reviewer-attributed approvals yet. Automatic submissions are excluded. Reviewers have recorded ${m.totalReviewerEdits} field edits in total.`
-              : `Of ${m.approvedTotal} currently approved/submitted records explicitly attributed to a reviewer, the share with no field-edit log. This is not proof that every field was correct. Reviewers recorded ${m.totalReviewerEdits} field edits in total.`
+              : `Of ${m.approvedTotal} reviewer approvals, the share where the reviewer corrected nothing the agent produced before approving. Filling in a field the agent is never asked for does not count as a correction. This is not proof that every field was correct.`
           }
         />
         <Stat
@@ -94,7 +103,7 @@ export default async function MetricsPage() {
         <Stat
           value={money(m.costPerEventUsd)}
           label="Cost per event gathered"
-          note="Recorded AI spend divided by the current gathered-event count; not a cost per independently verified event."
+          note="Recorded AI spend divided by every event gathered since the pilot began; not a cost per independently verified event."
         />
         <Stat
           value={String(m.correctedCount)}

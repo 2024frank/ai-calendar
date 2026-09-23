@@ -4,19 +4,33 @@ import { drizzle } from "drizzle-orm/mysql-proxy";
 import * as schema from "../src/db/schema";
 import { loadRoute } from "./helpers/load-route";
 
-it("uses reviewer attribution in both human-approval denominators and labels current completeness honestly", async () => {
+it("counts reviewer decisions from the audit log, so swept events still count", async () => {
   const queries: string[] = [];
   const db = drizzle(async (sql) => {
     queries.push(sql);
     if (sql.includes("`events`.`source_id`") && sql.includes("group by")) return { rows: [[7, "pending", 1, 2]] };
-    if (sql.startsWith("select `id`, `status`")) return { rows: sql.includes("published_via") ? [[1, "approved"]] : [[1, "approved"], [2, "submitted"]] };
+    // Decisions: event 1 rejected then approved (latest wins), event 2 rejected,
+    // event 3 approved. Events 2 and 3 no longer exist in the events table.
+    if (sql.includes("activity_log") && sql.includes("'approve','reject'"))
+      return { rows: [[5, 1, "reject"], [10, 1, "approve"], [11, 2, "reject"], [12, 3, "approve"]] };
+    // Edits: event 1 had only a geoScope default fill before approval (not a
+    // correction); event 3 had a real title correction before approval.
+    if (sql.includes("activity_log") && sql.includes("'edit'"))
+      return { rows: [[8, 1, JSON.stringify({ fields: ["geoScope"] })], [9, 3, JSON.stringify({ fields: ["title"] })]] };
+    if (sql.includes("run_events")) return { rows: [[40, 25]] };
     return { rows: [] };
   });
   const lib = loadRoute<{ pilotMetrics(): Promise<Record<string, unknown>> }>(new URL("../src/lib/metrics.ts", import.meta.url), {
     "server-only": {}, "@/db": { db }, "@/db/schema": schema, "./models": { activeModel: async () => "test" },
+    "./taxonomy": await import("../src/lib/taxonomy"),
   });
   const result = await lib.pilotMetrics();
-  assert.equal(result.approvedTotal, 1, "automatic submitted records must not count as human approvals");
+  assert.equal(result.reviewerApproved, 2, "latest decision per event, including events already swept");
+  assert.equal(result.reviewerRejected, 1);
+  assert.equal(result.approvalRatePct, 67);
+  assert.equal(result.approvedAsIsPct, 50, "a geoScope default fill is not a correction; a title fix is");
+  assert.equal(result.eventsGathered, 40, "lifetime intake from the run timeline, not the current table");
+  assert.equal(result.duplicatesCaught, 25);
   assert.equal(result.currentUnflaggedPct, 50);
   assert.equal("completeOnArrivalPct" in result, false);
   const correctionQuery = queries.find((sql) => sql.includes("corrected_at"))!;

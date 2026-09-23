@@ -47,6 +47,29 @@ export const GEO_SCOPES = [
   { value: "regional", label: "Regional" },
 ] as const;
 
+/**
+ * What the review form shows for an enum the record does not have. Saving that
+ * shown value persists it, which publishing needs, but it is not a reviewer
+ * correcting the agent: nobody chose it. Shared so the form and the server
+ * agree on exactly what a default fill looks like.
+ */
+export const ENUM_DEFAULTS = {
+  eventType: "ot",
+  locationType: "ne",
+  geoScope: "city_wide",
+  displayType: "all",
+} as const;
+
+/**
+ * Fields a reviewer can set that the extraction agent is never asked to
+ * produce. Setting one is not a correction of the agent's work, so it must not
+ * count against extraction accuracy and must not become a lesson the agent
+ * cannot act on. Every geoScope "edit" on record was the form filling its
+ * default, and those produced 27 lessons about a field the agent has no way to
+ * output.
+ */
+export const REVIEWER_ONLY_FIELDS: ReadonlySet<string> = new Set(["geoScope"]);
+
 /** Plain English for every validation code, so no reviewer sees raw jargon. */
 export const ISSUE_LABELS: Record<string, string> = {
   destination_inventory_unavailable:
