@@ -205,6 +205,23 @@ export function EventReview({
   const [showErrors, setShowErrors] = useState(false);
   const [showPayload, setShowPayload] = useState(false);
   const [brokenPreview, setBrokenPreview] = useState<string | null>(null);
+  const [imageUpload, setImageUpload] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const uploadImage = async (file: File | undefined) => {
+    if (!file) return;
+    setImageUpload({ busy: true, error: null });
+    const body = new FormData();
+    body.append("file", file);
+    const res = await fetch(`/api/events/${event.id}/image`, { method: "POST", body }).catch(() => null);
+    const json = (await res?.json().catch(() => null)) as { imageCdnUrl?: string; error?: string } | null;
+    if (!res?.ok || !json?.imageCdnUrl) {
+      setImageUpload({ busy: false, error: json?.error ?? "Upload failed. Try again." });
+      return;
+    }
+    setBrokenPreview(null);
+    setF((prev) => ({ ...prev, imageCdnUrl: json.imageCdnUrl ?? "" }));
+    setImageUpload({ busy: false, error: null });
+    router.refresh();
+  };
   const [needsPublishReconciliation, setNeedsPublishReconciliation] = useState(
     unresolvedPublish,
   );
@@ -756,6 +773,25 @@ export function EventReview({
         <Section title="Contact and media">
           <Field label="Event image" required missing={m("imageCdnUrl")}>
             <input className="input" value={f.imageCdnUrl} onChange={set("imageCdnUrl")} placeholder="https://…/photo.jpg" />
+            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 13 }}>
+              <label className="btn" style={{ cursor: imageUpload.busy ? "wait" : "pointer" }}>
+                {imageUpload.busy ? "Uploading..." : "Upload image from computer"}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  hidden
+                  disabled={imageUpload.busy}
+                  onChange={(e) => {
+                    void uploadImage(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <span className="muted">Use this when the image host blocks us: save the picture, then upload it.</span>
+            </div>
+            {imageUpload.error && (
+              <div style={{ marginTop: 6, fontSize: 13, color: "var(--danger, #b42318)" }}>{imageUpload.error}</div>
+            )}
             {(f.imageCdnUrl.trim() || event.hasImageData) &&
             brokenPreview !== (f.imageCdnUrl.trim() || `/api/events/${event.id}/image.jpg`) ? (
               // eslint-disable-next-line @next/next/no-img-element
