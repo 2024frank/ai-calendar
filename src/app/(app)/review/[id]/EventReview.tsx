@@ -772,7 +772,18 @@ export function EventReview({
 
         <Section title="Contact and media">
           <Field label="Event image" required missing={m("imageCdnUrl")}>
-            <input className="input" value={f.imageCdnUrl} onChange={set("imageCdnUrl")} placeholder="https://…/photo.jpg" />
+            <input
+              className="input"
+              value={f.imageCdnUrl}
+              onChange={set("imageCdnUrl")}
+              onPaste={(e) => {
+                const file = [...e.clipboardData.files].find((item) => item.type.startsWith("image/"));
+                if (!file) return;
+                e.preventDefault();
+                void uploadImage(file);
+              }}
+              placeholder="https://…/photo.jpg, or paste a copied picture"
+            />
             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 13 }}>
               <label className="btn" style={{ cursor: imageUpload.busy ? "wait" : "pointer" }}>
                 {imageUpload.busy ? "Uploading..." : "Upload image from computer"}
@@ -787,7 +798,7 @@ export function EventReview({
                   }}
                 />
               </label>
-              <span className="muted">Use this when the image host blocks us: save the picture, then upload it.</span>
+              <span className="muted">Image host blocking us? Right-click the picture, choose Copy Image, then click the box above and paste.</span>
             </div>
             {imageUpload.error && (
               <div style={{ marginTop: 6, fontSize: 13, color: "var(--danger, #b42318)" }}>{imageUpload.error}</div>
