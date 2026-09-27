@@ -1,6 +1,7 @@
 import "server-only";
 import { fetchPublicBytes } from "./fetchPage";
 import { fitInlineImage } from "./mergePosters";
+import { s3OriginalFor } from "./imageMirror";
 
 /**
  * Fetch a remote picture and shrink it into the inline column, so the event's
@@ -19,7 +20,7 @@ export type InlineImageFailure =
 
 export const INLINE_IMAGE_FAILURE_TEXT: Record<InlineImageFailure, string> = {
   unreachable:
-    "The image host did not serve the picture to us. Replace the image with one on a reachable host.",
+    "The image host blocks our server, even though your browser can show the picture. Right-click the picture, choose Copy Image, then paste it into the Event image box (or use Upload image from computer).",
   not_an_image:
     "That image link does not return a picture; it returns a web page. Open the link, right-click the picture itself, and use its direct image address.",
   vector_image:
@@ -31,6 +32,16 @@ export const INLINE_IMAGE_FAILURE_TEXT: Record<InlineImageFailure, string> = {
 export async function inlineRemoteImage(
   url: string,
   timeoutMs = 20_000,
+): Promise<{ imageData: string } | { failure: InlineImageFailure }> {
+  const result = await inlineFrom(url, timeoutMs);
+  if (!("failure" in result) || result.failure !== "unreachable") return result;
+  const original = s3OriginalFor(url);
+  return original ? inlineFrom(original, timeoutMs) : result;
+}
+
+async function inlineFrom(
+  url: string,
+  timeoutMs: number,
 ): Promise<{ imageData: string } | { failure: InlineImageFailure }> {
   try {
     const fetched = await fetchPublicBytes(url, {
