@@ -123,13 +123,15 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
 
   // Lifetime intake per source, from the run timeline. Runs are never deleted,
   // so these outcomes survive the sweep that removes finished events. Every
-  // queue_outcome is one new calendar event, whatever happened next (sent to
-  // review, auto-published, or left for review after a failed send); counting
-  // only "Sent to review" missed every auto-published event.
+  // queue_outcome for a new event that reached the calendar counts, whatever
+  // happened next (sent to review, auto-published, or left for review after a
+  // failed send); counting only "Sent to review" missed every auto-published
+  // event. Duplicates, auto-rejections and new-date proposals on an existing
+  // event write the same kind but never reached the calendar as new events.
   const intakeRows = await db
     .select({
       sourceId: runs.sourceId,
-      sent: sql<number>`count(distinct case when ${runEvents.kind} = 'queue_outcome' then json_extract(${runEvents.data}, '$.eventId') end)`,
+      sent: sql<number>`count(distinct case when ${runEvents.kind} = 'queue_outcome' and ${runEvents.label} not like 'Kept as duplicate%' and ${runEvents.label} not like 'Auto-rejected%' and ${runEvents.label} not like 'New dates kept%' then json_extract(${runEvents.data}, '$.eventId') end)`,
       dups: sql<number>`sum(case when ${runEvents.kind} = 'dedup_outcome' and ${runEvents.label} like 'Duplicate%' then 1 else 0 end)`,
     })
     .from(runEvents)
