@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement or a new capability.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who runs into this, and what gets in their way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered

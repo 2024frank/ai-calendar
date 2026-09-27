@@ -1,5 +1,13 @@
 # AI Calendar
 
+[![Quality checks](https://github.com/2024frank/ai-calendar/actions/workflows/quality.yml/badge.svg)](https://github.com/2024frank/ai-calendar/actions/workflows/quality.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+An open-source, multi-tenant platform that finds a community's events across many websites, cleans and de-duplicates them with AI agents, lets people review them, and publishes them to one shared calendar.
+
+**[Documentation](docs/README.md)** · [Getting started](docs/GETTING-STARTED.md) · [User guide](docs/USER-GUIDE.md) · [API](docs/API.md) · [Contributing](CONTRIBUTING.md)
+
 In a town like Oberlin, there is always something happening: a concert at the Conservatory, a show at the Apollo, storytime at the library, a workshop at FAVA. The problem is that no one place lists all of it. Every organization keeps its own calendar, on its own website, in its own format, and almost none of them cross-post. To actually know what is going on that week, you would have to check a dozen sites, and most people never do. Events get missed, and the town feels less connected than it is.
 
 ## Why this exists
@@ -65,6 +73,8 @@ The production topology, data flows, API boundaries, schema ownership, cache pol
 
 ## Running it locally
 
+The full walkthrough, with prerequisites and troubleshooting, is in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md). The short version:
+
 ```bash
 npm ci
 cp .env.example .env.local   # fill in your values
@@ -93,6 +103,8 @@ The pilot's [acceptance and research protocol](docs/PILOT-ACCEPTANCE.md) covers 
 
 ### Environment
 
+The full reference, including optional settings, is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
 | Variable | For |
 | --- | --- |
 | `DATABASE_HOST` / `PORT` / `USERNAME` / `PASSWORD` / `NAME` | The app's MySQL database |
@@ -106,6 +118,22 @@ The pilot's [acceptance and research protocol](docs/PILOT-ACCEPTANCE.md) covers 
 | `HOSTINGER_EMAIL`, `HOSTINGER_EMAIL_PASSWORD` | The mailbox mail is sent from. `HOSTINGER_SMTP_HOST` and `_PORT` override the defaults |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional fallback if the mailbox is unset or refuses. With neither, links get logged in development instead of emailed |
 | `DATABASE_SSL`, `DATABASE_CA_CERT`, `DB_POOL_SIZE` | Database TLS (required and certificate-verified in production), the required DigitalOcean cluster CA, and the pool size |
+
+## Documentation
+
+| | |
+| --- | --- |
+| [Getting started](docs/GETTING-STARTED.md) | Local setup, first community and source |
+| [User guide](docs/USER-GUIDE.md) | Sources, review modes, the review queue |
+| [Configuration](docs/CONFIGURATION.md) | Every environment variable |
+| [Deployment](docs/DEPLOYMENT.md) | Production checklist, workers, upgrades |
+| [HTTP API](docs/API.md) | Public event feed and other endpoints |
+| [Data model](docs/DATA-MODEL.md) | Event lifecycle and tables |
+| [Architecture](docs/ARCHITECTURE.md) | Topology, data flow, security, scaling |
+
+## Contributing
+
+Contributions are welcome, from bug reports to running AI Calendar for your own town. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
