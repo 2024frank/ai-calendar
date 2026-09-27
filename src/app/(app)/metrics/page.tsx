@@ -174,7 +174,7 @@ export default async function MetricsPage() {
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>By organization</h3>
         <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-          Current source-level status and review counts. The unflagged share can change after corrections and approval.
+          Events gathered and duplicates are lifetime totals from the run log, including events that already happened and were cleared away. The unflagged share covers only the events still stored.
         </div>
         <table className="tbl">
           <thead>
@@ -192,8 +192,8 @@ export default async function MetricsPage() {
                 <td style={{ fontWeight: 600 }}>{r.name}</td>
                 <td>{r.gathered}</td>
                 <td>
-                  {r.gathered
-                    ? `${Math.round((r.currentUnflagged / r.gathered) * 100)}%`
+                  {r.current
+                    ? `${Math.round((r.currentUnflagged / r.current) * 100)}%`
                     : "—"}
                 </td>
                 <td className="muted">{r.duplicatesCaught}</td>

@@ -17,7 +17,9 @@ it("counts reviewer decisions from the audit log, so swept events still count", 
     // correction); event 3 had a real title correction before approval.
     if (sql.includes("activity_log") && sql.includes("'edit'"))
       return { rows: [[8, 1, JSON.stringify({ fields: ["geoScope"] })], [9, 3, JSON.stringify({ fields: ["title"] })]] };
-    if (sql.includes("run_events")) return { rows: [[40, 25]] };
+    // Lifetime intake per source: source 7 still has one stored event, source 9
+    // has had every event swept after its date passed.
+    if (sql.includes("run_events")) return { rows: [[7, 38, 25], [9, 2, 0]] };
     return { rows: [] };
   });
   const lib = loadRoute<{ pilotMetrics(): Promise<Record<string, unknown>> }>(new URL("../src/lib/metrics.ts", import.meta.url), {
@@ -31,6 +33,12 @@ it("counts reviewer decisions from the audit log, so swept events still count", 
   assert.equal(result.approvedAsIsPct, 50, "a geoScope default fill is not a correction; a title fix is");
   assert.equal(result.eventsGathered, 40, "lifetime intake from the run timeline, not the current table");
   assert.equal(result.duplicatesCaught, 25);
+  const bySource = result.bySource as { gathered: number; current: number }[];
+  assert.deepEqual(
+    bySource.map((s) => [s.gathered, s.current]),
+    [[38, 2], [2, 0]],
+    "per-organization counts are lifetime, and a fully swept source still appears",
+  );
   assert.equal(result.currentUnflaggedPct, 50);
   assert.equal("completeOnArrivalPct" in result, false);
   const correctionQuery = queries.find((sql) => sql.includes("corrected_at"))!;
