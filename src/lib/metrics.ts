@@ -14,6 +14,8 @@ export type SourceMetric = {
   current: number; // records still stored (finished events are swept away)
   currentUnflagged: number; // of `current`, those with no stored rejection reason
   duplicatesCaught: number;
+  accepted: number; // reviewer approvals, latest decision per event
+  reviewed: number; // events a reviewer approved or rejected
   editsNeeded: number; // reviewer field edits recorded
 };
 
@@ -100,6 +102,30 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   const reviewerApproved = approvals.length;
   const reviewerRejected = latest.size - reviewerApproved;
   const approvedTotal = reviewerApproved;
+
+  // Which source each decided event came from. The sweep deletes the event, so
+  // the run log (every new event's queue_outcome names its id, and the run
+  // names its source) is the lasting record; stored events fill any gap.
+  const origins = await db
+    .selectDistinct({
+      sourceId: runs.sourceId,
+      eventId: sql<number>`cast(json_extract(${runEvents.data}, '$.eventId') as unsigned)`,
+    })
+    .from(runEvents)
+    .innerJoin(runs, sql`${runs.id} = ${runEvents.runId}`)
+    .where(sql`${runEvents.kind} = 'queue_outcome'`);
+  const sourceOfEvent = new Map<number, number>();
+  for (const o of origins) if (o.eventId != null && o.sourceId != null) sourceOfEvent.set(Number(o.eventId), o.sourceId);
+  const stored = await db.select({ id: events.id, sourceId: events.sourceId }).from(events);
+  for (const e of stored) if (e.sourceId != null) sourceOfEvent.set(e.id, e.sourceId);
+  const decisionsBySource = new Map<number, { accepted: number; reviewed: number }>();
+  for (const [eventId, d] of latest) {
+    const sid = sourceOfEvent.get(eventId) ?? -1;
+    const tally = decisionsBySource.get(sid) ?? { accepted: 0, reviewed: 0 };
+    tally.reviewed += 1;
+    if (d.action === "approve") tally.accepted += 1;
+    decisionsBySource.set(sid, tally);
+  }
 
   // "Approved without edits" means the reviewer corrected nothing the agent
   // produced before approving. Read from the audit log too, since field_edit_log
@@ -201,7 +227,7 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   for (const r of rows) {
     const sid = r.sourceId ?? -1;
     const name = nameOf.get(sid) ?? "Unknown";
-    const s = perSource.get(sid) ?? { name, gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, editsNeeded: 0 };
+    const s = perSource.get(sid) ?? { name, gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, accepted: 0, reviewed: 0, editsNeeded: 0 };
     const total = n(r.total);
     const flagged = n(r.flagged);
 
@@ -219,9 +245,9 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   }
 
   // Sources whose events have all been swept still count for what they gathered.
-  for (const sid of intakeBySource.keys()) {
+  for (const sid of [...intakeBySource.keys(), ...decisionsBySource.keys()]) {
     if (!perSource.has(sid)) {
-      perSource.set(sid, { name: nameOf.get(sid) ?? "Unknown", gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, editsNeeded: 0 });
+      perSource.set(sid, { name: nameOf.get(sid) ?? "Unknown", gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, accepted: 0, reviewed: 0, editsNeeded: 0 });
     }
   }
   // Lifetime per source; the stored rows are a floor for events older than the
@@ -232,6 +258,8 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     const intake = intakeBySource.get(sid);
     s.gathered = Math.max(n(intake?.sent), s.current);
     s.duplicatesCaught = Math.max(n(intake?.dups), s.duplicatesCaught);
+    s.accepted = decisionsBySource.get(sid)?.accepted ?? 0;
+    s.reviewed = decisionsBySource.get(sid)?.reviewed ?? 0;
     s.editsNeeded = n(editsBySource.get(sid)?.edits);
     lifetimeGathered += s.gathered;
     lifetimeDuplicates += s.duplicatesCaught;

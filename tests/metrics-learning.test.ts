@@ -19,6 +19,9 @@ it("counts reviewer decisions from the audit log, so swept events still count", 
       return { rows: [[8, 1, JSON.stringify({ fields: ["geoScope"] })], [9, 3, JSON.stringify({ fields: ["title"] })]] };
     // Lifetime intake per source: source 7 still has one stored event, source 9
     // has had every event swept after its date passed.
+    // Which source each event came from: events 1 and 2 from source 7, event 3
+    // (already swept) from source 9.
+    if (sql.includes("run_events") && sql.includes("select distinct")) return { rows: [[7, 1], [7, 2], [9, 3]] };
     if (sql.includes("run_events")) return { rows: [[7, 38, 25], [9, 2, 0]] };
     return { rows: [] };
   });
@@ -33,10 +36,10 @@ it("counts reviewer decisions from the audit log, so swept events still count", 
   assert.equal(result.approvedAsIsPct, 50, "a geoScope default fill is not a correction; a title fix is");
   assert.equal(result.eventsGathered, 40, "lifetime intake from the run timeline, not the current table");
   assert.equal(result.duplicatesCaught, 25);
-  const bySource = result.bySource as { gathered: number; current: number }[];
+  const bySource = result.bySource as { gathered: number; current: number; accepted: number; reviewed: number }[];
   assert.deepEqual(
-    bySource.map((s) => [s.gathered, s.current]),
-    [[38, 2], [2, 0]],
+    bySource.map((s) => [s.gathered, s.current, s.accepted, s.reviewed]),
+    [[38, 2, 1, 2], [2, 0, 1, 1]],
     "per-organization counts are lifetime, and a fully swept source still appears",
   );
   assert.equal(result.currentUnflaggedPct, 50);

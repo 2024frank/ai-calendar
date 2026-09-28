@@ -174,16 +174,17 @@ export default async function MetricsPage() {
       <div className="card">
         <h3 style={{ marginBottom: 4 }}>By organization</h3>
         <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-          Events gathered and duplicates are lifetime totals from the run log, including events that already happened and were cleared away. The unflagged share covers only the events still stored.
+          Lifetime totals for the whole pilot, including events that already happened and were cleared away. Accepted counts reviewer approvals; the acceptance rate is approvals out of every event a reviewer decided. The duplicate rate is duplicates out of everything the agent found for that organization.
         </div>
         <table className="tbl">
           <thead>
             <tr>
               <th>Organization</th>
               <th>Events gathered</th>
-              <th>Currently unflagged</th>
-              <th>Flagged duplicates</th>
-              <th>Reviewer edits</th>
+              <th>Accepted</th>
+              <th>Acceptance rate</th>
+              <th>Duplicates caught</th>
+              <th>Duplicate rate</th>
             </tr>
           </thead>
           <tbody>
@@ -191,18 +192,21 @@ export default async function MetricsPage() {
               <tr key={r.name}>
                 <td style={{ fontWeight: 600 }}>{r.name}</td>
                 <td>{r.gathered}</td>
+                <td>{r.accepted}</td>
                 <td>
-                  {r.current
-                    ? `${Math.round((r.currentUnflagged / r.current) * 100)}%`
+                  {r.reviewed ? `${Math.round((r.accepted / r.reviewed) * 100)}% of ${r.reviewed}` : "—"}
+                </td>
+                <td>{r.duplicatesCaught}</td>
+                <td className="muted">
+                  {r.gathered + r.duplicatesCaught
+                    ? `${Math.round((r.duplicatesCaught / (r.gathered + r.duplicatesCaught)) * 100)}%`
                     : "—"}
                 </td>
-                <td className="muted">{r.duplicatesCaught}</td>
-                <td className="muted">{r.editsNeeded}</td>
               </tr>
             ))}
             {m.bySource.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted" style={{ padding: 16 }}>
+                <td colSpan={6} className="muted" style={{ padding: 16 }}>
                   No events gathered yet.
                 </td>
               </tr>
