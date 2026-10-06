@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Alert, Button, Card } from "@/components/ui";
+import { safeNextPath } from "@/lib/safeNext";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -28,7 +29,10 @@ export default function LoginPage() {
       });
       const data = await response.json();
       if (response.ok) {
-        router.push("/dashboard");
+        // Honor ?next= (same-origin paths only), e.g. the Studios sign-in handoff.
+        const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
+        if (next.startsWith("/api/")) window.location.assign(next);
+        else router.push(next);
         return;
       }
       if (data.needsPassword) setNeedsPassword(true);

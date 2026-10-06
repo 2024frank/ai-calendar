@@ -15,6 +15,8 @@ AI Calendar reads all configuration from environment variables. Locally, put the
 | `DATABASE_NAME` | Database name. Use a separate one for development. |
 | `APP_URL` | Public base URL, e.g. `https://calendar.example.org`. Used in sign-in links, reviewer record links and the agent's callback URL. Must be HTTPS in production. |
 | `AUTH_JWT_SECRET` | Signs the session cookie. 32+ characters. |
+| `STUDIOS_SSO_SECRET` | Signs the 120 second token that hands a signed-in user to CH Studios (`/api/sso/studios`). Must equal the Studios value. 32+ characters. Without it the endpoint returns 503. |
+| `STUDIOS_RETURN_URLS` | Optional. Comma separated extra Studios callback URLs, matched exactly. The three production Studios callbacks are always allowed. |
 | `AGENT_INGEST_SECRET` | Signs the per-run callback tokens handed to the extraction agent and the short-lived image-publish tokens. The secret itself is never sent to a model. 32+ characters. |
 | `CRON_SECRET` | Bearer secret for `/api/cron`. 32+ characters. |
 | `PERPLEXITY_API_KEY` | The [Perplexity Agent API](https://docs.perplexity.ai/docs/agent-api), which runs the extraction, correction and learning agents in a managed sandbox. |
