@@ -8,16 +8,24 @@ import { loadRoute } from "./helpers/load-route";
 for (const action of ["login", "request", "forgot", "set-password"]) {
   describe(`authentication input: ${action}`, () => {
     async function submit(body: string) {
-      const query = { from: () => query, where: () => query, limit: async () => [] };
+      const query = { from: () => query, leftJoin: () => query, where: () => query, limit: async () => [] };
       const transaction = { select: () => query };
+      const db = { ...transaction, transaction: async (callback: (tx: typeof transaction) => unknown) => callback(transaction) };
+      const rateLimit = { clientKey: () => "test", rateLimit: async () => true };
       const { POST } = loadRoute<{ POST(req: Request): Promise<Response> }>(
         new URL(`../src/app/api/auth/${action}/route.ts`, import.meta.url),
         {
-          "@/db": { db: { ...transaction, transaction: async (callback: (tx: typeof transaction) => unknown) => callback(transaction) } },
+          "@/db": { db },
           "@/db/schema": schema,
           "@/lib/auth": { createSession: async () => undefined },
           "@/lib/password": password,
-          "@/lib/rateLimit": { clientKey: () => "test", rateLimit: async () => true },
+          "@/lib/passwordLogin": loadRoute(new URL("../src/lib/passwordLogin.ts", import.meta.url), {
+            "@/db": { db },
+            "@/db/schema": schema,
+            "@/lib/password": password,
+            "@/lib/rateLimit": rateLimit,
+          }),
+          "@/lib/rateLimit": rateLimit,
           "@/lib/email": {},
           "@/lib/requestBody": requestBody,
         },
