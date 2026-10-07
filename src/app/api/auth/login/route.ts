@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { users } from "@/db/schema";
 import { createSession } from "@/lib/auth";
-import { verifyPassword } from "@/lib/password";
-import { clientKey, rateLimit } from "@/lib/rateLimit";
+import { checkPasswordLogin } from "@/lib/passwordLogin";
+import { clientKey } from "@/lib/rateLimit";
 import { readJsonObjectBody } from "@/lib/requestBody";
 
 export const runtime = "nodejs";
@@ -14,35 +11,21 @@ export async function POST(req: Request) {
   const parsed = await readJsonObjectBody(req, 16 * 1024);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
   const body = parsed.body;
-  const email = String(body.email ?? "").trim().toLowerCase();
-  const password = String(body.password ?? "");
-  if (!email || !password || password.length > 128) {
-    return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
-  }
-  // Per-IP and per-account throttles: the account bucket blunts a distributed
-  // spray that rotates IPs to dodge the per-IP limit.
-  const throttled =
-    !(await rateLimit(`login:${clientKey(req)}:${email}`, 8, 10 * 60_000)) ||
-    !(await rateLimit(`login-acct:${email}`, 20, 15 * 60_000));
-  if (throttled) {
-    return NextResponse.json(
-      { error: "Too many attempts. Wait a few minutes and try again." },
-      { status: 429 },
-    );
-  }
-
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.email, email), eq(users.status, "active")))
-    .limit(1);
-
-  // Uniform failure for wrong password, unknown account, and not-yet-set
-  // password, so login can't be used to enumerate who has an account.
-  if (!user || !user.passwordHash || user.mustSetPassword || !verifyPassword(password, user.passwordHash)) {
+  const result = await checkPasswordLogin({ email: body.email, password: body.password, clientId: clientKey(req) });
+  if (!result.ok) {
+    if (result.reason === "bad_request") {
+      return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
+    }
+    if (result.reason === "rate_limited") {
+      return NextResponse.json(
+        { error: "Too many attempts. Wait a few minutes and try again." },
+        { status: 429 },
+      );
+    }
     return NextResponse.json({ error: "Email or password is incorrect." }, { status: 401 });
   }
 
+  const { user } = result;
   await createSession({
     uid: user.id,
     email: user.email,
