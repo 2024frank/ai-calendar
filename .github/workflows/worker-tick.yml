@@ -25,7 +25,8 @@ jobs:
       - name: Start a worker chain
         env:
           WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
-          AI_CALENDAR_WORKER_URL: ${{ secrets.AI_CALENDAR_WORKER_URL }}
+          # Call the production deployment directly; do not follow redirects with credentials.
+          AI_CALENDAR_WORKER_URL: https://ai-calendar-pi.vercel.app/api/internal/jobs
         run: |
           set -euo pipefail
           if [ -z "${WORKER_SECRET:-}" ] || [ -z "${AI_CALENDAR_WORKER_URL:-}" ]; then
