@@ -42,6 +42,18 @@ describe("shared extraction instructions", () => {
     assert.match(prompt, /BOTH description and extendedDescription/);
     assert.doesNotMatch(prompt, /More info and videos/);
   });
+
+  it("classifies classes with meeting times as events, never registration windows", () => {
+    const prompt = buildSystemPrompt({
+      sourceName: "Example Gallery",
+      urls: ["https://example.com/classes"],
+      calendarSourceName: "Example Gallery",
+    });
+    assert.match(prompt, /class, workshop, lesson or course with stated meeting dates and times is an EVENT/i);
+    assert.match(prompt, /registration window .* is never a session/i);
+    assert.match(prompt, /Never use today, the current time/);
+    assert.match(prompt, /roomNum is the specific room or space/);
+  });
 });
 
 describe("lookahead enforcement", () => {

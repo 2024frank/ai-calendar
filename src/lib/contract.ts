@@ -60,9 +60,11 @@ THE THREE TYPES (decide this first, the rest of the record depends on it)
 - ANNOUNCEMENT ("an"): an OPPORTUNITY with no single moment of attendance. Registration open, a call for volunteers or applications, a drive, a program running across a period. Its session is the window to display it, open to close. Its title names the action: "Register for Summer Art Camp", not "Summer Art Camp".
 - JOB ("jp"): a paid or stipended position someone is hired for. Its session is the posting window, now to the deadline.
 Test: ATTENDS at a time -> event. ACTS within a window (register, apply, donate, drop off) -> announcement. Is HIRED -> job.
+- A class, workshop, lesson or course with stated meeting dates and times is an EVENT, even when the page is a registration page and registration is required: people ATTEND each meeting. Its sessions are the meetings themselves, one per meeting date, each with the stated start and end clock times. The registration window (today until the first meeting) is never a session. A class is an announcement ONLY when the source states no meeting dates or times at all.
 
 DATES (this is the most common mistake, read it twice)
 - In each session, write start and end as the date and time EXACTLY as the page states them, in ISO wall-clock form "YYYY-MM-DDThh:mm" (24-hour), for example "2026-07-27T18:30". Copy the calendar date and clock time shown.
+- A session start is a time stated on the page. Never use today, the current time, or a registration-open date as the start of an event session.
 - Do NOT convert to a number, a Unix timestamp, or another timezone. The server does that. Never compute or do arithmetic on dates.
 - Always write a four-digit year. If the page shows only month and day, use the next occurrence that is today or later.
 - Always take the stated end time. If an event gives a start but no end, use the start for both; the server then sets the end to two hours after the start. Never invent any other duration yourself.
@@ -85,7 +87,7 @@ FIELDS
 - THE SAME EVENT ON SEVERAL DATES IS ONE EVENT with one { start, end } session per date. This covers every shape of repeat: a weekly program (Storytime every Friday), a performance run (a play staged four nights, an opera on several dates, RENT all weekend), a multi-day tournament, a monthly open house, or the same listing appearing on several dates. Group by title + venue: if the title and venue match, it is the same event; add its dates to sessions and move on. NEVER create one event per date. One image covers all sessions. Separate events are only for genuinely different programs.
 - A TITLE NEVER CARRIES A DATE. No month, no day, no year, no season, no "Part 2" numbering of the same programme. Write "Frank Lloyd Wright Open House", never "Frank Lloyd Wright Open House / September 2026" and never "... - October". Putting the month in the title is how one event gets torn into several: the titles stop matching, so the grouping rule above no longer sees them as the same event. If a source lists an event under a month heading, that heading is a date and belongs in sessions, not in the title.
 - locationType: "ph2" physical, "on" online, "bo" both, "ne" neither. ph2/bo need location; on/bo need urlLink.
-- location, placeName, roomNum: the venue when physical.
+- location, placeName, roomNum: the venue when physical. roomNum is the specific room or space the page names (a hall, studio, classroom, chapel, or room number); look for it on the detail page, including any "when & where" or registration block. A street address alone is incomplete when the page names a room.
 - display: "all".
 - postTypeId: one or more ids from this list, nothing else:
 ${POST_TYPE_IDS.map((id) => `  ${id} = ${POST_TYPES[id]}`).join("\n")}
