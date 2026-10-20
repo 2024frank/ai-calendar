@@ -376,6 +376,21 @@ function clean(s: unknown): string {
     .trim();
 }
 
+/**
+ * Drop a phone extension before the number can reach CommunityHub.
+ *
+ * Every payload CommunityHub has accepted carries a plain number; the only
+ * three it answered with a 500 all carried "(440) 775-1711 ext. 1" from a
+ * church office listing. The extension is worth less than a publishable
+ * event, so it never leaves this app.
+ */
+export function normalizePhone(value: unknown): string | null {
+  const cleaned = clean(value)
+    .replace(/[\s,;]*(?:ext\.?|extension|x)\s*\d+\s*$/i, "")
+    .trim();
+  return cleaned || null;
+}
+
 function cleanHttpUrl(value: unknown): string | null {
   const normalized = clean(value);
   return normalized && isPublicHttpUrl(normalized) ? normalized : null;
@@ -456,7 +471,7 @@ export function normalizeEvent(
     registrationUrl: cleanHttpUrl(raw.registrationUrl),
     imageCdnUrl: cleanHttpUrl(raw.imageCdnUrl),
     contactEmail: clean(raw.contactEmail) || null,
-    phone: clean(raw.phone) || null,
+    phone: normalizePhone(raw.phone),
     cost: clean(raw.cost) || null,
     calendarSourceUrl: cleanHttpUrl(raw.calendarSourceUrl),
     imageData: (() => {

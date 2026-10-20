@@ -6,7 +6,7 @@ import { communities, events, publishSubmissions, sources } from "@/db/schema";
 import {
   readResponseTextPrefix,
 } from "./fetchPage";
-import { HARD_ISSUES } from "./contract";
+import { HARD_ISSUES, normalizePhone } from "./contract";
 import { assertPublicHttpUrl, fetchPinnedPublicUrl } from "./publicUrl";
 import { POST_TYPE_IDS } from "./taxonomy";
 import { resolveDestination } from "./destination";
@@ -100,7 +100,7 @@ export function buildPayload(ev: EventRow, publishEmail: string, appUrl: string)
   if (buttons.length) payload.buttons = buttons;
   if (ev.website) payload.website = ev.website;
   if (ev.contactEmail) payload.contactEmail = ev.contactEmail;
-  if (ev.phone) payload.phone = ev.phone;
+  if (ev.phone) payload.phone = normalizePhone(ev.phone) ?? ev.phone;
   if (image) payload.image_cdn_url = image;
   if (ev.calendarSourceName) payload.calendarSourceName = ev.calendarSourceName;
   if (ev.calendarSourceUrl) payload.calendarSourceUrl = ev.calendarSourceUrl;
