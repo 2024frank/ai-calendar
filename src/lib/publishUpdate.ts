@@ -6,7 +6,7 @@ import { acknowledgedCommunityHubPostId, buildPayload, type PublishResult } from
 import { claimPublication } from "./publishClaim";
 import { resolveDestination } from "./destination";
 import { assertPublicHttpUrl, fetchPinnedPublicUrl } from "./publicUrl";
-import { readResponseBytesLimited } from "./fetchPage";
+import { readResponseTextPrefix } from "./fetchPage";
 import { storedEventIssues } from "./publishPolicy";
 import { HARD_ISSUES } from "./contract";
 import { inlineRemoteImage, INLINE_IMAGE_FAILURE_TEXT } from "./inlineImage";
@@ -76,7 +76,7 @@ export async function publishUpdate(eventId: number): Promise<PublishResult> {
     return fail("The update outcome is unknown. Verify the post's content in CommunityHub before retrying.", "unknown");
   }
   let body = "";
-  try { body = new TextDecoder().decode(await readResponseBytesLimited(response, 256 * 1024)); }
+  try { body = await readResponseTextPrefix(response, 256 * 1024); }
   catch { body = "Response could not be read."; }
   finally {
     if (response.body && !response.bodyUsed) await response.body.cancel().catch(() => undefined);

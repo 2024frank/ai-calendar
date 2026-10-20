@@ -16,8 +16,7 @@ function fixture(t: TestContext, options: { response?: number | "timeout"; authe
   const responseReader = async (response: Response, limit: number) => {
     if (options.readFailure) throw new Error("Response stream failed");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length > limit) throw new Error("Response too large");
-    return bytes;
+    return new TextDecoder().decode(bytes.subarray(0, limit));
   };
   const publicBoundary = { assertPublicHttpUrl: async () => undefined, fetchPinnedPublicUrl: async (url: string, init: RequestInit) => {
     network.push({ url, method: init.method!, payload: JSON.parse(String(init.body)) });
@@ -30,7 +29,7 @@ function fixture(t: TestContext, options: { response?: number | "timeout"; authe
   const destinationResolver=loadRoute<typeof import("../src/lib/destination")>(new URL("../src/lib/destination.ts",import.meta.url),bounds);
   const claim = loadRoute<typeof import("../src/lib/publishClaim")>(new URL("../src/lib/publishClaim.ts", import.meta.url), bounds);
   const publication = loadRoute<typeof import("../src/lib/publishEvent")>(new URL("../src/lib/publishEvent.ts", import.meta.url), {
-    ...bounds, "./fetchPage": {readResponseBytesLimited:responseReader}, "./publicUrl": publicBoundary, "./destination": options.realDestination ? destinationResolver : {resolveDestination:async()=>({destination:options.createConfigured ? destination : null,error:null})}, "./inlineImage": {}, "./publishClaim": claim,
+    ...bounds, "./fetchPage": {readResponseTextPrefix:responseReader}, "./publicUrl": publicBoundary, "./destination": options.realDestination ? destinationResolver : {resolveDestination:async()=>({destination:options.createConfigured ? destination : null,error:null})}, "./inlineImage": {}, "./publishClaim": claim,
     "./imagePublishToken": { imagePublishToken: () => "test-token" },
   });
   const file = new URL("../src/lib/publishUpdate.ts", import.meta.url);
@@ -39,7 +38,7 @@ function fixture(t: TestContext, options: { response?: number | "timeout"; authe
     ...bounds, "./publishEvent": publication, "./publishClaim": claim,
     "./inlineImage": {inlineRemoteImage:async()=>({imageData:"new-image-bytes"}),INLINE_IMAGE_FAILURE_TEXT:{}},
     "./destination": options.realDestination ? destinationResolver : { resolveDestination: async () => ({ destination, error: null }) },
-    "./fetchPage": { readResponseBytesLimited: responseReader },
+    "./fetchPage": { readResponseTextPrefix: responseReader },
     "./publicUrl": publicBoundary,
   });
   const routeFile = new URL("../src/app/api/events/[id]/update-published/route.ts", import.meta.url);

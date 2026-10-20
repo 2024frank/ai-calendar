@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, events, publishSubmissions, sources } from "@/db/schema";
 import {
-  readResponseBytesLimited,
+  readResponseTextPrefix,
 } from "./fetchPage";
 import { HARD_ISSUES } from "./contract";
 import { assertPublicHttpUrl, fetchPinnedPublicUrl } from "./publicUrl";
@@ -317,11 +317,13 @@ export async function publishEvent(
     return { ok: false, state: "unknown", message: `Could not reach CommunityHub: ${message}` };
   }
 
+  // Prefix, not all-or-nothing: an oversized 500 page still names its error
+  // in the first bytes, and that is what the reviewer message is built from.
   let body: string;
   try {
-    body = new TextDecoder().decode(await readResponseBytesLimited(res, 256 * 1024));
+    body = await readResponseTextPrefix(res, 256 * 1024);
   } catch {
-    body = "Response body exceeded 256 KB.";
+    body = "Response body could not be read.";
   } finally {
     if (res.body && !res.bodyUsed) await res.body.cancel().catch(() => undefined);
     await closeResponse?.();

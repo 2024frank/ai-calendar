@@ -115,6 +115,46 @@ export async function readResponseBytesLimited(
   return merged;
 }
 
+/**
+ * Read the first `maxBytes` of a response as text, for error reporting.
+ *
+ * The all-or-nothing reader above is right for content we act on, but wrong
+ * for a failure body: CommunityHub's 500 page runs past 256 KB, so the whole
+ * body was thrown away and a reviewer was told only "Response body exceeded
+ * 256 KB" while the actual error sat in the first line. Keep the head, drop
+ * the rest. Never throws on size; a broken stream returns what arrived.
+ */
+export async function readResponseTextPrefix(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
+  if (!response.body || maxBytes <= 0) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const room = maxBytes - total;
+      chunks.push(value.byteLength > room ? value.subarray(0, room) : value);
+      total += Math.min(value.byteLength, room);
+    }
+  } catch {
+    // A partial error body still beats none.
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
 export type PublicBytesResponse = {
   ok: boolean;
   status: number;
