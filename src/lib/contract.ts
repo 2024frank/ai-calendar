@@ -400,7 +400,16 @@ export function normalizeEvent(
       if (!endTime || endTime <= startTime) endTime = startTime + 2 * 3600;
       return { startTime, endTime };
     })
-    .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0);
+    .filter((s) => Number.isFinite(s.startTime) && s.startTime > 0)
+    // One list, in order, no repeats. The agent sometimes returns the same
+    // occurrence twice (a listing and its detail page) or out of order;
+    // everything downstream (queue date, dedup hash, merges) reads the
+    // first session as the earliest, so make that true here.
+    .sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime)
+    .filter(
+      (s, i, all) =>
+        i === 0 || s.startTime !== all[i - 1].startTime || s.endTime !== all[i - 1].endTime,
+    );
 
   const postTypeId = (Array.isArray(raw.postTypeId) ? raw.postTypeId : [])
     .map((n) => Number(n))
@@ -529,6 +538,25 @@ export function validateEvent(
     if (!Number.isInteger(s.startTime) || s.startTime <= 0) issues.push("session_start_invalid");
     if (s.endTime < s.startTime) issues.push("session_end_before_start");
     // end == start no longer occurs: normalization shifts it to start + 2h.
+  }
+  {
+    // Two sessions starting at the same instant are one occurrence read
+    // twice, not two occurrences: a weekly class arrived with two windows
+    // both starting at the run time and ending hours apart on the first
+    // meeting day. And an ATTENDED session running longer than a day is
+    // almost always a registration or display window misread as a session
+    // (a one-evening class shown as running nine days). Announcement and
+    // job windows legitimately span days, so only events are checked.
+    // Both are soft: a multi-day festival stays approvable by a person,
+    // but nothing auto-publishes and the queue names the problem.
+    const starts = e.sessions.map((s) => s.startTime);
+    if (new Set(starts).size !== starts.length) issues.push("sessions_overlap");
+    if (
+      e.eventType === "ot" &&
+      e.sessions.some((s) => s.endTime - s.startTime > 24 * 3600)
+    ) {
+      issues.push("session_too_long");
+    }
   }
   if ((e.locationType === "ph2" || e.locationType === "bo") && !e.location)
     issues.push("location_required");
