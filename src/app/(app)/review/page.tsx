@@ -42,6 +42,7 @@ const SHORT_ISSUE: Record<string, string> = {
   post_type_missing: "category", post_type_invalid: "category", sessions_missing: "dates",
   session_start_invalid: "date", session_end_before_start: "end time", location_required: "location",
   sessions_overlap: "duplicate session start", session_too_long: "session over a day long",
+  event_location_missing: "venue or online link",
   url_link_required: "online link", missing_registration_required_text: "registration note",
   description_contains_url: "URL removed from description", description_is_title: "full description",
   long_description_contains_url: "URL removed from long description", long_description_ambiguous_location: "venue name",

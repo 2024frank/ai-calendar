@@ -562,6 +562,13 @@ export function validateEvent(
     issues.push("location_required");
   if ((e.locationType === "on" || e.locationType === "bo") && !e.urlLink)
     issues.push("url_link_required");
+  // An event is attended at a set time, so "no location" means the venue
+  // was never found, not that there is none: youth-orchestra concerts sat
+  // in the queue with a dash for a location and nothing marking them
+  // incomplete. Soft, because a reviewer may know the venue is genuinely
+  // to-be-announced; announcements and jobs may have nowhere to attend.
+  if (e.eventType === "ot" && e.locationType === "ne")
+    issues.push("event_location_missing");
   if (e.description && /https?:\/\//i.test(e.description)) issues.push("description_contains_url");
   {
     // A description that is just the title restated (with or without junk
