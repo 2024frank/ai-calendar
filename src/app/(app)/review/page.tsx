@@ -58,8 +58,13 @@ function needsList(reason: string | null): string | null {
 
 function firstSessionDate(sessions: unknown, timeZone: string): string {
   if (!Array.isArray(sessions) || sessions.length === 0) return "—";
-  const start = (sessions[0] as { startTime?: number })?.startTime;
-  if (!start) return "—";
+  // Stored rows predate session sorting, so take the earliest start rather
+  // than trusting the order they were saved in.
+  const starts = sessions
+    .map((s) => (s as { startTime?: number })?.startTime)
+    .filter((n): n is number => typeof n === "number" && n > 0);
+  if (!starts.length) return "—";
+  const start = Math.min(...starts);
   try {
     return new Intl.DateTimeFormat("en-US", {
       timeZone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",

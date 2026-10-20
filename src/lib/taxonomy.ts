@@ -88,6 +88,12 @@ export const ISSUE_LABELS: Record<string, string> = {
   sessions_missing: "No date or time was found",
   session_start_invalid: "The start date is not a real date",
   session_end_before_start: "The end time comes before the start time",
+  sessions_overlap:
+    "Two sessions have the same start time, so one occurrence was probably read twice. Keep one session per real occurrence",
+  session_too_long:
+    "A session runs longer than a day. That is usually a registration or display window, not a meeting time; check the real start and end against the source",
+  event_location_missing:
+    "This event has no venue and no online link, so there is nowhere to attend it. Find the venue (and room) or the join link on the source page",
   end_equals_start: "The end time is the same as the start time, so it still needs a real end time",
   location_required: "An in-person event needs a street address",
   url_link_required: "An online event needs a link to join",

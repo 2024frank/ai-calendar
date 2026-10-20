@@ -670,7 +670,28 @@ export function EventReview({
           </Field>
         </Section>
 
-        <Section title="Schedule" hint={`Times use the community timezone (${communityTimezone}).`}>
+        <Section
+          title="Schedule"
+          hint={
+            `Times use the community timezone (${communityTimezone}).` +
+            (f.eventType === "an"
+              ? " For an announcement these dates are the window the post is displayed, not when anything happens; the real dates belong in the long description."
+              : f.eventType === "jp"
+                ? " For a job these dates are the posting window, open to the deadline."
+                : "")
+          }
+        >
+          {(() => {
+            const timed = sessions.filter((s) => s.startTime > 0);
+            const warnings: string[] = [];
+            if (new Set(timed.map((s) => s.startTime)).size !== timed.length)
+              warnings.push("Two sessions start at the same time. One occurrence was probably read twice; keep one session per real occurrence.");
+            if (f.eventType === "ot" && timed.some((s) => s.endTime - s.startTime > 24 * 3600))
+              warnings.push("A session runs longer than a day. That is usually a registration or display window, not a meeting time; check the real start and end against the source.");
+            return warnings.map((w) => (
+              <p key={w} role="status" style={{ margin: 0, fontSize: 13, color: "var(--warn)" }}>{w}</p>
+            ));
+          })()}
           <Field label="Sessions" required missing={m("sessions")}>
             <div className="grid" style={{ gap: 6 }}>
               {sessions.map((s, i) => (
