@@ -83,7 +83,7 @@ npm run seed -- --community-slug your-town --community-name "Your Town" --admin-
 npm run dev
 ```
 
-Use a separate development database. Generate independent signing secrets, for example with `openssl rand -hex 32`, for each blank secret in `.env.local`. The bootstrap creates a community in human-review mode and an initial platform admin, with no external publishing destination or preset password. Open `/login` and use the password-setup action. In development without email credentials, the server logs the setup link. Re-running bootstrap preserves existing settings. The older `scripts/seed-db.mjs` is a historical Oberlin import, not a portable setup command.
+Use a separate development database. Generate independent signing secrets, for example with `openssl rand -hex 32`, for each blank secret in `.env.local`. The bootstrap creates a community in human-review mode and an initial platform admin, with no external publishing destination or preset password. Open `/login` and use the password-setup action. In development without email credentials, the server logs the setup link. Re-running bootstrap preserves existing settings. The older `scripts/archive/seed-db.mjs` is a historical Oberlin import, not a portable setup command.
 
 `scripts/rebuild-db.mjs` is a destructive local-development reset and must not be used against a populated environment.
 
