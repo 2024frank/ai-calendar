@@ -56,8 +56,14 @@ export async function POST(req: Request) {
     actorEmail: user.email,
     summary: `${user.email} signed in to Studios`,
   });
+  // userId / orgId are the stable ids Studios stores in its session. orgId is the user's community (the tenant concept
+  // here; null for platform admins, who sit outside communities). Both are additions, nothing above changed.
   return reply(
-    { user: { id: user.id, email: user.email, name: user.name ?? null, role: user.role, communityId: user.communityId ?? null } },
+    {
+      user: { id: user.id, email: user.email, name: user.name ?? null, role: user.role, communityId: user.communityId ?? null },
+      userId: user.id,
+      orgId: user.communityId ?? null,
+    },
     200,
   );
 }

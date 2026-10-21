@@ -129,7 +129,11 @@ describe("studios login route", () => {
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("cache-control"), "no-store");
     assert.equal(res.headers.get("set-cookie"), null);
-    assert.deepEqual(await res.json(), { user: { id: 7, email: "ada@example.org", name: "Ada", role: "community_admin", communityId: 3 } });
+    assert.deepEqual(await res.json(), {
+      user: { id: 7, email: "ada@example.org", name: "Ada", role: "community_admin", communityId: 3 },
+      userId: 7,
+      orgId: 3,
+    });
     assert.equal(logged.length, 1);
     assert.equal((logged[0] as { action: string }).action, "login");
   });
@@ -160,7 +164,10 @@ describe("studios login route", () => {
       const admin = { ...activeUser, role: "platform_admin", communityId: null };
       const ok = await call(load({ row: { user: admin, communityStatus: null } }).POST);
       assert.equal(ok.status, 200);
-      assert.equal(((await ok.json()) as { user: { communityId: unknown } }).user.communityId, null);
+      const okBody = (await ok.json()) as { user: { communityId: unknown }; userId: unknown; orgId: unknown };
+      assert.equal(okBody.user.communityId, null);
+      assert.equal(okBody.userId, 7);
+      assert.equal(okBody.orgId, null);
     });
   });
 
