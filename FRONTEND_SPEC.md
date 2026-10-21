@@ -6,7 +6,7 @@ You are building the **frontend** for a multi-tenant "AI event calendar" SaaS. T
 
 ## 1. Product in one paragraph
 
-Communities (tenants like Oberlin, Cleveland) have **Sources** (a website or email inbox where events come from). AI agents extract events from each source on a schedule. Extracted events either wait in a **Review queue** for a human to approve (restricted mode) or publish automatically (unrestricted mode). Approved events go to that community's **Destination** (e.g. CommunityHub) and always live in the community's own **AI calendar**. Every agent run is watchable step by step (the "Run timeline"). Admins add users and sources.
+Communities (tenants like Oberlin, Cleveland) have **Sources** (a website or email inbox where events come from). AI agents extract events from each source on a schedule. Extracted events either wait in a **Review queue** for a human to approve (restricted mode) or publish automatically (unrestricted mode). Approved events go to that community's **Destination** (e.g. CommunityHub) and always live in the community's own **AI calendar**. Every agent run is watchable step by step in a live timeline (polled every ~1 second). Admins add users and sources.
 
 **Roles:** `platform_admin` (sees all communities), `community_admin` (one community, manages users + sources + endpoint), `reviewer` (works the review queue for assigned sources).
 
@@ -102,7 +102,6 @@ type Run = {
   id: number; communityId: number | null; sourceId: number | null;
   runKind: "extraction" | "discovery";
   status: "running" | "completed" | "failed" | "stopped";
-  control: "run" | "pause" | "stop";
   phase: string | null; startedAt: string; finishedAt: string | null;
   budgetTotal: number | null; promptTokens: number; completionTokens: number;
   eventsFound: number; eventsExtracted: number; eventsDuplicate: number;
@@ -133,8 +132,9 @@ Post-type taxonomy (CommunityHub categories), id → label, for rendering event 
 All return JSON. `401` = not signed in (redirect to /login). `403` = insufficient role. Errors: `{ error: string }`.
 
 **Auth**
-- `POST /api/auth/request` → body `{ email }` → `{ ok: true, devLink?: string }` (devLink only when email delivery is not configured).
-- `GET  /api/auth/verify?token=…` → redirects, sets session cookie. (Frontend just links to it.)
+- `POST /api/auth/login` → body `{ email, password }` → sets session cookie or `{ needsPassword: true }`.
+- `POST /api/auth/forgot` → body `{ email }` → `{ ok: true, devLink?: string }` (sends magic set/reset link).
+- `GET  /api/auth/verify?token=…` → redirects, sets session cookie. (Frontend just links to it; token from emailed link.)
 - `POST /api/auth/logout` → redirects to /login.
 - `GET  /api/me` → `Me` or 401.
 
@@ -163,9 +163,7 @@ All return JSON. `401` = not signed in (redirect to /login). `403` = insufficien
 **Runs**
 - `GET /api/runs?sourceId=…` → `Run[]`
 - `GET /api/runs/:id` → `Run`
-- `GET /api/runs/:id/events?after=<lastId>` → `{ events: RunEvent[], nextAfter: number, status, phase, terminal: boolean }`
-- `GET /api/runs/:id/stream` → **SSE** stream of `RunEvent` (each `data:` line is one event; an `event: end` closes it). Use this for the live timeline; fall back to polling `…/events?after=` every 1s.
-- `POST /api/runs/:id/stop | /pause | /resume` → `{ ok: true }`
+- `GET /api/runs/:id/events?after=<lastId>` → `{ events: RunEvent[], nextAfter: number, status, phase, terminal: boolean, tokens: { prompt, completion }, counts: { found, inserted, duplicate, invalid } }`
 
 **Review / events**
 - `GET  /api/events?status=pending` → `EventItem[]` (scoped)
@@ -183,17 +181,17 @@ All return JSON. `401` = not signed in (redirect to /login). `403` = insufficien
 
 ## 7. Screens (build all of these)
 
-1. **/login** — centered card. Email field → `POST /api/auth/request`. After submit show "check your email"; if `devLink` present, show it as a clickable link (dev mode). No password.
-2. **/dashboard** — KPI cards (Active sources, Pending review, Approved, Published) linking to their lists; a Communities summary (platform_admin); a "Recent runs" list linking to run timelines.
-3. **/sources** — table of sources: name, community, type, effective mode, discovery status (badge), active toggle. Row → detail. "Add source" button.
-4. **/sources/new** — form: name, type (web/email), link (if web), **optional special instructions** (multiline), community (platform_admin only). On submit, create and route to the new source's detail, where its Discovery run timeline is shown live.
-5. **/sources/:id** — header (name, badges), key fields (link, effective mode with a toggle restricted/unrestricted, extraction method, schedule, org/sponsor), special instructions, the extraction recipe (collapsible code block), and a Runs table. Buttons: **Run now**, **Re-discover**, **Edit**.
-6. **/review** — the queue: pending events with title, type, when (from `sessions[0].startTime`), location, source, added-time. Row → detail. Bulk-friendly if easy.
-7. **/review/:id** — the important one. Show the event nicely (title, category chips from postTypeIds, date/time, location or online link, sponsors, description + extended description, image if any, registration button). Make every field **editable inline**. Show a **payload preview** (what will be sent to the endpoint). Show **duplicate flags** if `duplicateCandidates` exist (highlight matching date + location). Actions: **Approve & publish**, **Reject** (reason code + note), **Save edits**.
-8. **/runs/:id** — the **live Run Timeline** (see §8).
-9. **/communities** (platform_admin) — cards per community: name, mode, timezone, endpoints (with active state), source count. Manage → detail with destination config editor.
-10. **/users** (admin) — table of users in the community; "Invite user" (email, role, assign sources for reviewers). Edit role/status.
-11. **/settings** — profile + light/dark toggle; admins: community defaults (timezone, default mode, default destination).
+1. **/login** — centered card. Email and password fields. On login, `POST /api/auth/login` with both. If response has `needsPassword: true`, show "First Time or Forgot Password?" button that calls `POST /api/auth/forgot`, then show "check your email" with optional devLink for dev mode.
+2. **/set-password** — form with token from URL. Set a new password; `POST /api/auth/set-password` with token + new password.
+3. **/dashboard** — KPI cards (Active sources, Pending review, Approved, Published) linking to their lists; a Communities summary (platform_admin); a "Recent runs" list linking to run timelines.
+4. **/sources** — table of sources: name, community, type, effective mode, discovery status (badge), active toggle. Row → detail. "Add source" button.
+5. **/sources/new** — form: name, type (web/email), link (if web), **optional special instructions** (multiline), community (platform_admin only). On submit, create and route to the new source's detail, where its Discovery run timeline is shown live.
+6. **/sources/:id** — header (name, badges), key fields (link, effective mode with a toggle restricted/unrestricted, extraction method, schedule, org/sponsor), special instructions, the extraction recipe (collapsible code block), and a Runs table. Buttons: **Run now**, **Re-discover**. Edit link/mode/schedule/instructions inline.
+7. **/review** — the queue: pending events with title, type, when (from `sessions[0].startTime`), location, source, added-time. Row → detail. Bulk-friendly if easy.
+8. **/review/:id** — the important one. Show the event nicely (title, category chips from postTypeIds, date/time, location or online link, sponsors, description + extended description, image if any, registration button). Make every field **editable inline**. Show a **payload preview** (what will be sent to the endpoint). Show **duplicate flags** if `duplicateCandidates` exist (highlight matching date + location). Actions: **Approve & publish**, **Reject** (reason code + note), **Save edits**.
+9. **/runs/:id** — the **live Run Timeline** (see §8).
+10. **/communities** (platform_admin) — cards per community: name, mode, timezone, endpoints (with active state), source count. Manage → detail with destination config editor.
+11. **/users** (admin) — table of users in the community; "Invite user" (email, role, assign sources for reviewers). Edit role/status.
 
 ---
 
@@ -201,17 +199,16 @@ All return JSON. `401` = not signed in (redirect to /login). `403` = insufficien
 
 This is what makes the product feel different, so make it excellent.
 
-- Header: run #, kind (extraction/discovery), status chip (running/completed/failed/stopped), source name, started/finished times, and a **live token/budget meter** (promptTokens + completionTokens vs budgetTotal).
-- Controls when running: **Stop**, **Pause**, **Resume** (call the run control endpoints).
-- Body: a **vertical timeline** that streams in `RunEvent`s from `GET /api/runs/:id/stream` (SSE), newest at the bottom, auto-scroll. Each event renders by `kind`:
+- Header: run #, kind (extraction/discovery), status chip (running/completed/failed/stopped), source name, started/finished times, and a **live token meter** (total promptTokens + completionTokens used so far).
+- Body: a **vertical timeline** of `RunEvent`s, newest at the bottom, auto-scroll. Fetched via polling `GET /api/runs/:id/events?after=<lastId>` every ~1s while running. Each event renders by `kind`:
   - `fetch_issued`/`fetch_result` — show the URL and retrieved size (paired).
   - `search_issued`/`search_result` — query + result count.
   - `model_turn` — a "thinking/summary" line + token usage for that turn.
   - `candidate_validated` — event title + valid/invalid + issues.
   - `dedup_outcome` — "duplicate of …" or "unique", with the reason (date/location match).
   - `queue_outcome` — inserted / auto-published / sent to review, linking to the event.
-  - `run_finished`/`run_failed` — terminal summary; stop streaming, flip the header chip.
-- Reconnect logic: on load, GET `…/events?after=0` for history, then open the SSE stream and de-dupe by `id`. If SSE is unavailable, poll `…/events?after=<lastId>` every 1s until `terminal: true`.
+  - `run_finished`/`run_failed` — terminal summary; stop polling, flip the header chip.
+- Connection resilience: on load, GET `…/events?after=0` for history; then poll `…/events?after=<lastId>` every 1s. Exponential backoff on network failure (max 15s); stop polling when `terminal: true`.
 - A run must never look "stuck forever": show elapsed time and, when terminal, a clear ended state.
 
 ---
@@ -228,8 +225,16 @@ This is what makes the product feel different, so make it excellent.
 ## 10. Hard rules
 
 - **No emojis** anywhere.
-- No passwords in the UI (email-link auth only).
 - Don't invent endpoints; if you need data that isn't in §6, list it separately so the backend can add it.
 - Keep the product name in one config constant.
+
+---
+
+## 11. Not yet built / proposals
+
+These ideas were in the initial spec but haven't been implemented:
+- **/settings** page for user profile + light/dark toggle; community defaults (timezone, mode, destination) in admin section.
+- **SSE streaming** for run timeline (currently using polling; could upgrade to streaming if latency becomes a concern).
+- **Run control endpoints** (`/api/runs/:id/stop`, `/pause`, `/resume`) and UI buttons to stop, pause, or resume a running extraction.
 
 Deliver a set of Next.js App Router routes + components implementing all screens above, wired to the API in §6, with light/dark and responsive layouts.

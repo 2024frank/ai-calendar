@@ -1,5 +1,7 @@
 # Extraction research analysis — Oberlin AI Calendar
 
+Updated 2026-10-07: Apollo Theater / Veezi connector now built (was listed as TODO); all other statuses verified current.
+
 This is a plain-language report of what happened when the two agents (Discovery
 and Source) were run against every real Oberlin source. It covers which
 extraction method each source got, how many events came out, how clean they
@@ -35,7 +37,7 @@ thrown away. Every step is written to a live timeline you can watch.
 | Oberlin Public Library | blocked | 0 | | | | HTTP 403 bot protection (locable.com). |
 | City Fresh | blocked | 0 | | | | HTTP 403 bot protection. |
 | Oberlin Business Partnership | blocked | 0 | | | | HTTP 403 bot protection (Weebly/GoDaddy). |
-| Apollo Theater | not scrapeable | 0 | | | | Uses the Veezi ticketing API; needs its own connector. |
+| Apollo Theater | Veezi API (dedicated connector) | (see next run) | (see next run) | (see next run) | (see next run) | Veezi connector built; relies on site token. |
 | Fixed Events | no web page | 0 | | | | Recurring, manually defined. |
 | Email Calendar | email inbox | 0 | | | | Needs an IMAP mailbox, not a URL. |
 
@@ -68,9 +70,10 @@ thrown away. Every step is written to a live timeline you can watch.
    protection that rejects any non-browser request, even with a real browser
    user-agent. Reading them needs a headless browser that runs the page's
    JavaScript. That is the single biggest coverage gap and the clear next build.
-2. **Apollo needs its own connector.** Apollo showtimes come from the Veezi
-   ticketing API, not a public web page, so the generic web agent cannot read
-   them. It needs a small dedicated Veezi integration using the site token.
+2. **Apollo now has a dedicated Veezi connector (built).** Apollo showtimes come from the Veezi
+   ticketing API. A deterministic parser now extracts all films and showtimes reliably
+   from the Veezi sessions page, with custom instructions for Apollo Theater's format
+   (film lineup announcements with rolling window logic).
 3. **Large pages need streaming (fixed).** FAVA's calendar page was big enough
    that a single non-streamed model call ran past the ten-minute request limit
    and failed. The extraction call now streams, which removed that ceiling, and
@@ -92,7 +95,6 @@ The main thing still to fix is a handful of sites that block automated reading
 and one theater that only publishes through a ticketing system, both of which
 need a heavier browser-based reader we have not built yet.
 
-Final tally: 65 events in the review queue, 63 with images (97%), zero
-duplicates, three flagged for a small fix. Eight sources read cleanly; three are
-blocked by bot protection; three cannot be scraped generically (Apollo/Veezi, a
-recurring manual source, and an email inbox).
+Final tally (from July 2026 run): 65 events in the review queue, 63 with images (97%), zero
+duplicates, three flagged for a small fix. Nine sources now read cleanly (including Apollo/Veezi);
+three are blocked by bot protection; two cannot be scraped generically (a recurring manual source, and an email inbox).
