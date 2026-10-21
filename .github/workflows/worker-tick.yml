@@ -5,9 +5,15 @@ name: Worker tick
 # expired. This kick starts a fresh chain every quarter hour through the
 # morning. It sends one authenticated request and returns; the work itself
 # runs in the app. Nothing here reads or prints the queue's contents.
+#
+# A failed run is the alert: GitHub emails the person who last edited this
+# schedule. Set the optional ALERT_WEBHOOK_URL secret (a Slack-style incoming
+# webhook) to also post to a channel; with it unset that step does nothing.
 on:
   schedule:
-    - cron: "*/15 6-15 * * *"
+    # Off the :00/:15 marks, where GitHub's scheduler is busiest and most
+    # likely to delay or drop runs.
+    - cron: "3,18,33,48 6-15 * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -20,13 +26,13 @@ jobs:
   kick:
     if: github.repository == '2024frank/ai-calendar'
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
+    env:
+      WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+      # Call the production deployment directly; do not follow redirects with credentials.
+      AI_CALENDAR_WORKER_URL: https://ai-calendar-pi.vercel.app/api/internal/jobs
     steps:
       - name: Start a worker chain
-        env:
-          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
-          # Call the production deployment directly; do not follow redirects with credentials.
-          AI_CALENDAR_WORKER_URL: https://ai-calendar-pi.vercel.app/api/internal/jobs
         run: |
           set -euo pipefail
           if [ -z "${WORKER_SECRET:-}" ] || [ -z "${AI_CALENDAR_WORKER_URL:-}" ]; then
@@ -39,10 +45,57 @@ jobs:
           esac
           umask 077
           printf 'header = "Authorization: Bearer %s"\n' "$WORKER_SECRET" > "$RUNNER_TEMP/auth.cfg"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST \
-            -K "$RUNNER_TEMP/auth.cfg" \
-            -H 'x-ai-calendar-worker-chain: 1' \
-            "$AI_CALENDAR_WORKER_URL?limit=1")
+          # Retry only transient failures (no response, 429, 5xx). Claims are
+          # conditional updates, so an extra chain cannot double-process a job.
+          code=000
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST \
+              -K "$RUNNER_TEMP/auth.cfg" \
+              -H 'x-ai-calendar-worker-chain: 1' \
+              "$AI_CALENDAR_WORKER_URL?limit=1" || true)
+            echo "Attempt $attempt: worker responded with HTTP $code"
+            case "$code" in
+              202) break ;;
+              000|429|5??) [ "$attempt" -lt 3 ] && sleep $((attempt * 20)) ;;
+              *) break ;;
+            esac
+          done
           rm -f "$RUNNER_TEMP/auth.cfg"
-          echo "Worker responded with HTTP $code"
           test "$code" = "202"
+
+      # A 202 only proves the app accepted the kick. This asks the app whether
+      # work is actually moving: it fails when a job has sat unclaimed for 90
+      # minutes or a lease has outlived recovery. Counters only, no content.
+      - name: Check queue health
+        run: |
+          set -euo pipefail
+          umask 077
+          printf 'header = "Authorization: Bearer %s"\n' "$WORKER_SECRET" > "$RUNNER_TEMP/auth.cfg"
+          code=$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' --max-time 30 \
+            -K "$RUNNER_TEMP/auth.cfg" "$AI_CALENDAR_WORKER_URL/health" || echo 000)
+          rm -f "$RUNNER_TEMP/auth.cfg"
+          echo "Queue health responded with HTTP $code"
+          case "$code" in
+            200) ;;
+            404) echo "::warning::Health endpoint not deployed yet; skipping the queue check." ;;
+            *) head -c 600 "$RUNNER_TEMP/health.json" || true; echo; exit 1 ;;
+          esac
+
+      - name: Notify webhook of failure
+        if: failure()
+        continue-on-error: true
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ALERT_WEBHOOK_URL:-}" ]; then
+            echo "ALERT_WEBHOOK_URL is not set; relying on GitHub's failure email."
+            exit 0
+          fi
+          umask 077
+          printf 'url = "%s"\n' "$ALERT_WEBHOOK_URL" > "$RUNNER_TEMP/hook.cfg"
+          curl -sS -o /dev/null --max-time 15 --retry 2 -K "$RUNNER_TEMP/hook.cfg" \
+            -H 'Content-Type: application/json' \
+            -d "{\"text\":\"AI Calendar worker tick failed. Background extraction may be stalled: $RUN_URL\"}"
+          rm -f "$RUNNER_TEMP/hook.cfg"
