@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { startTestDestination } from "../scripts/test-destination.mjs";
@@ -96,13 +97,15 @@ it("can simulate one ambiguous acknowledgment after a committed synthetic write"
 });
 
 it("CLI help exits without opening a server and rejects invalid or nonlocal binding options", () => {
-  const script = new URL("../scripts/test-destination.mjs", import.meta.url);
-  const help = spawnSync(process.execPath, [script.pathname, "--help"], { encoding: "utf8", timeout: 3000 });
+  // fileURLToPath, not .pathname: a workspace path with spaces stays
+  // percent-encoded in .pathname and node cannot open it.
+  const script = fileURLToPath(new URL("../scripts/test-destination.mjs", import.meta.url));
+  const help = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8", timeout: 3000 });
   assert.equal(help.status, 0);
   assert.match(help.stdout, /SYNTHETIC/);
   assert.match(help.stdout, /127\.0\.0\.1/);
   for (const args of [["--port", "-1"], ["--port", "99999"], ["--port", "no"], ["--host", "0.0.0.0"]]) {
-    const result = spawnSync(process.execPath, [script.pathname, ...args], { encoding: "utf8", timeout: 3000 });
+    const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8", timeout: 3000 });
     assert.equal(result.status, 1);
   }
 });
