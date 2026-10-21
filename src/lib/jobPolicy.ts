@@ -1,6 +1,15 @@
 export const STALE_JOB_LEASE_MS = 15 * 60_000;
 export const QUEUED_JOB_MAX_WAIT_MS = 6 * 60 * 60_000;
 export const QUEUED_RUN_DEADLINE_MS = 60 * 60_000;
+/**
+ * Alert thresholds for the queue health probe. A queue that is merely busy
+ * (several sources queued behind one another) must not page anyone, so the
+ * queued limit is well past the time three worker chains need to drain a
+ * morning's sources. A running lease older than twice the recovery lease means
+ * lease recovery itself is not happening.
+ */
+export const QUEUE_ALERT_QUEUED_AGE_MS = 90 * 60_000;
+export const QUEUE_ALERT_RUNNING_AGE_MS = 2 * STALE_JOB_LEASE_MS;
 export const MAX_DRAIN_BATCH = 5;
 export const WORKER_DISPATCH_ATTEMPTS = 3;
 export const MAX_WORKER_RECOVERY_DISPATCHES = 2;
@@ -48,4 +57,29 @@ export function workerRecoveryAttempt(raw: string | null | undefined): number {
 export function nextWorkerRecoveryAttempt(current: number): number | null {
   const normalized = workerRecoveryAttempt(String(current));
   return normalized < MAX_WORKER_RECOVERY_DISPATCHES ? normalized + 1 : null;
+}
+
+export type QueueHealth = {
+  queued: number;
+  running: number;
+  oldestQueuedSeconds: number | null;
+  oldestRunningSeconds: number | null;
+};
+
+/** Plain-language reasons the queue needs a human; an empty list means healthy. */
+export function queueHealthProblems(health: QueueHealth): string[] {
+  const problems: string[] = [];
+  if (
+    health.oldestQueuedSeconds != null &&
+    health.oldestQueuedSeconds * 1000 > QUEUE_ALERT_QUEUED_AGE_MS
+  ) {
+    problems.push("a job has waited unclaimed past the alert threshold");
+  }
+  if (
+    health.oldestRunningSeconds != null &&
+    health.oldestRunningSeconds * 1000 > QUEUE_ALERT_RUNNING_AGE_MS
+  ) {
+    problems.push("a job lease is stuck past the recovery threshold");
+  }
+  return problems;
 }
