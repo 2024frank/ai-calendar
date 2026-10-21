@@ -1,5 +1,5 @@
 import { config } from "dotenv";
-config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
+config({ path: [new URL("../../.env.local", import.meta.url), new URL("../../.env", import.meta.url)] });
 const token = process.env.APOLLO_VEEZI_SITE_TOKEN;
 const html = await (await fetch(`https://ticketing.uswest.veezi.com/sessions/?siteToken=${token}`, {
   headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/125 Safari/537.36" },

@@ -1,4 +1,4 @@
-import { databaseSsl } from "./db-ssl.mjs";
+import { databaseSsl } from "../db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 

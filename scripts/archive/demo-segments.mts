@@ -1,4 +1,4 @@
-import { buildApolloAnnouncements } from "../src/lib/sources/apolloSegments";
+import { buildApolloAnnouncements } from "../../src/lib/sources/apolloSegments";
 
 // Fabricated schedule to show how windows split. Veezi prints dates like "Friday 18, July".
 const day = (d: number) => `Weekday ${d}, July`;

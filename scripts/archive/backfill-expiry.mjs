@@ -1,8 +1,8 @@
-import { databaseSsl } from "./db-ssl.mjs";
+import { databaseSsl } from "../db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 
-config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
+config({ path: [new URL("../../.env.local", import.meta.url), new URL("../../.env", import.meta.url)] });
 
 /**
  * Give past events a date the expiry sweep can see.

@@ -1,9 +1,9 @@
-import { databaseSsl } from "./db-ssl.mjs";
+import { databaseSsl } from "../db-ssl.mjs";
 import { config } from "dotenv";
 import mysql from "mysql2/promise";
 import { randomBytes, createHash } from "crypto";
 
-config({ path: [new URL("../.env.local", import.meta.url), new URL("../.env", import.meta.url)] });
+config({ path: [new URL("../../.env.local", import.meta.url), new URL("../../.env", import.meta.url)] });
 
 const email = process.argv[2] || "fkusiapp@oberlin.edu";
 const raw = randomBytes(32).toString("hex");
