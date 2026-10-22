@@ -10,21 +10,30 @@ export const MINUTES_PER_MANUAL_EVENT = 6;
 
 export type SourceMetric = {
   name: string;
-  gathered: number; // lifetime: every event this source ever put on the calendar
+  gathered: number; // lifetime: every new event this source ever produced
   current: number; // records still stored (finished events are swept away)
   currentUnflagged: number; // of `current`, those with no stored rejection reason
   duplicatesCaught: number;
   accepted: number; // reviewer approvals, latest decision per event
+  autoPublished: number; // published automatically, no reviewer involved
+  rejected: number; // reviewer rejections, latest decision per event
+  autoRejected: number; // filtered out as incomplete before review, lifetime
   reviewed: number; // events a reviewer approved or rejected
   editsNeeded: number; // reviewer field edits recorded
 };
 
 export type PilotMetrics = {
   sourcesConnected: number;
-  eventsGathered: number; // lifetime: every record the system handed to review
+  eventsGathered: number; // lifetime: every new event the system produced
   duplicatesCaught: number; // lifetime: every incoming event judged a duplicate
   reviewerApproved: number; // lifetime: events whose latest reviewer decision is approve
   reviewerRejected: number; // lifetime: events whose latest reviewer decision is reject
+  autoPublished: number; // lifetime: published automatically, no reviewer involved
+  eventsAccepted: number; // reviewerApproved + autoPublished: everything that reached the calendar
+  autoRejectedLifetime: number; // lifetime: filtered as incomplete and never gathered
+  awaitingDecision: number; // gathered but neither accepted nor rejected yet
+  totalFound: number; // accepted + rejected + awaiting + duplicates + incomplete: every candidate processed
+  monthlyGathered: { month: string; gathered: number }[]; // new events per month, earliest first
   approvalRatePct: number | null;
   filteredIncomplete: number; // events the system caught as incomplete before a person saw them
   currentUnflaggedPct: number | null; // mutable operational state, not arrival accuracy
@@ -106,24 +115,54 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   // Which source each decided event came from. The sweep deletes the event, so
   // the run log (every new event's queue_outcome names its id, and the run
   // names its source) is the lasting record; stored events fill any gap.
+  // One classification per event, from the run timeline. An event can earn
+  // several queue_outcome rows over its life (auto-rejected, then corrected
+  // and re-queued), so counting rows or independent aggregates double-counts
+  // it and the outcome totals stop adding up. Classify each distinct event
+  // once instead: gathered if it ever proceeded as a new event, incomplete
+  // only if it never did.
   const origins = await db
     .selectDistinct({
       sourceId: runs.sourceId,
       eventId: sql<number>`cast(json_extract(${runEvents.data}, '$.eventId') as unsigned)`,
+      bucket: sql<string>`case when ${runEvents.label} like 'Auto-rejected%' then 'incomplete' when ${runEvents.label} like 'Kept as duplicate%' or ${runEvents.label} like 'New dates kept%' then 'excluded' else 'gathered' end`,
+      month: sql<string>`date_format(${runs.startedAt}, '%Y-%m')`,
     })
     .from(runEvents)
     .innerJoin(runs, sql`${runs.id} = ${runEvents.runId}`)
     .where(sql`${runEvents.kind} = 'queue_outcome'`);
   const sourceOfEvent = new Map<number, number>();
-  for (const o of origins) if (o.eventId != null && o.sourceId != null) sourceOfEvent.set(Number(o.eventId), o.sourceId);
+  const gatheredEvents = new Map<number, { sourceId: number; month: string }>();
+  const incompleteEvents = new Map<number, number>();
+  for (const o of origins) {
+    if (o.eventId == null || o.sourceId == null) continue;
+    const eventId = Number(o.eventId);
+    sourceOfEvent.set(eventId, o.sourceId);
+    if (o.bucket === "gathered") {
+      const seen = gatheredEvents.get(eventId);
+      if (!seen || String(o.month) < seen.month) gatheredEvents.set(eventId, { sourceId: o.sourceId, month: String(o.month) });
+      incompleteEvents.delete(eventId);
+    } else if (o.bucket === "incomplete" && !gatheredEvents.has(eventId)) {
+      incompleteEvents.set(eventId, o.sourceId);
+    }
+  }
+  const gatheredBySource = new Map<number, number>();
+  const monthlyMap = new Map<string, number>();
+  for (const g of gatheredEvents.values()) {
+    gatheredBySource.set(g.sourceId, (gatheredBySource.get(g.sourceId) ?? 0) + 1);
+    monthlyMap.set(g.month, (monthlyMap.get(g.month) ?? 0) + 1);
+  }
+  const incompleteBySource = new Map<number, number>();
+  for (const sid of incompleteEvents.values()) incompleteBySource.set(sid, (incompleteBySource.get(sid) ?? 0) + 1);
   const stored = await db.select({ id: events.id, sourceId: events.sourceId }).from(events);
   for (const e of stored) if (e.sourceId != null) sourceOfEvent.set(e.id, e.sourceId);
-  const decisionsBySource = new Map<number, { accepted: number; reviewed: number }>();
+  const decisionsBySource = new Map<number, { accepted: number; rejected: number; reviewed: number }>();
   for (const [eventId, d] of latest) {
     const sid = sourceOfEvent.get(eventId) ?? -1;
-    const tally = decisionsBySource.get(sid) ?? { accepted: 0, reviewed: 0 };
+    const tally = decisionsBySource.get(sid) ?? { accepted: 0, rejected: 0, reviewed: 0 };
     tally.reviewed += 1;
     if (d.action === "approve") tally.accepted += 1;
+    else tally.rejected += 1;
     decisionsBySource.set(sid, tally);
   }
 
@@ -154,16 +193,28 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   // failed send); counting only "Sent to review" missed every auto-published
   // event. Duplicates, auto-rejections and new-date proposals on an existing
   // event write the same kind but never reached the calendar as new events.
-  const intakeRows = await db
+  const dupRows = await db
     .select({
       sourceId: runs.sourceId,
-      sent: sql<number>`count(distinct case when ${runEvents.kind} = 'queue_outcome' and ${runEvents.label} not like 'Kept as duplicate%' and ${runEvents.label} not like 'Auto-rejected%' and ${runEvents.label} not like 'New dates kept%' then json_extract(${runEvents.data}, '$.eventId') end)`,
-      dups: sql<number>`sum(case when ${runEvents.kind} = 'dedup_outcome' and ${runEvents.label} like 'Duplicate%' then 1 else 0 end)`,
+      dups: sql<number>`count(*)`,
     })
     .from(runEvents)
     .innerJoin(runs, sql`${runs.id} = ${runEvents.runId}`)
+    .where(sql`${runEvents.kind} = 'dedup_outcome' and ${runEvents.label} like 'Duplicate%'`)
     .groupBy(runs.sourceId);
-  const intakeBySource = new Map(intakeRows.map((r) => [r.sourceId ?? -1, r]));
+  const dupsBySource = new Map(dupRows.map((r) => [r.sourceId ?? -1, n(r.dups)]));
+
+  // Automatic publishes never pass a reviewer, so the audit log cannot see
+  // them. The per-run counter is the lifetime record; runs are never swept.
+  const pubRows = await db
+    .select({
+      sourceId: runs.sourceId,
+      published: sql<number>`sum(${runs.eventsPublished})`,
+    })
+    .from(runs)
+    .groupBy(runs.sourceId);
+  const publishedBySource = new Map(pubRows.map((r) => [r.sourceId ?? -1, n(r.published)]));
+  const autoPublished = pubRows.reduce((a, r) => a + n(r.published), 0);
 
   const [runRow] = await db
     .select({
@@ -227,7 +278,7 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   for (const r of rows) {
     const sid = r.sourceId ?? -1;
     const name = nameOf.get(sid) ?? "Unknown";
-    const s = perSource.get(sid) ?? { name, gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, accepted: 0, reviewed: 0, editsNeeded: 0 };
+    const s = perSource.get(sid) ?? { name, gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, accepted: 0, autoPublished: 0, rejected: 0, autoRejected: 0, reviewed: 0, editsNeeded: 0 };
     const total = n(r.total);
     const flagged = n(r.flagged);
 
@@ -245,25 +296,35 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
   }
 
   // Sources whose events have all been swept still count for what they gathered.
-  for (const sid of [...intakeBySource.keys(), ...decisionsBySource.keys()]) {
+  for (const sid of [...gatheredBySource.keys(), ...incompleteBySource.keys(), ...dupsBySource.keys(), ...decisionsBySource.keys()]) {
     if (!perSource.has(sid)) {
-      perSource.set(sid, { name: nameOf.get(sid) ?? "Unknown", gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, accepted: 0, reviewed: 0, editsNeeded: 0 });
+      perSource.set(sid, { name: nameOf.get(sid) ?? "Unknown", gathered: 0, current: 0, currentUnflagged: 0, duplicatesCaught: 0, accepted: 0, autoPublished: 0, rejected: 0, autoRejected: 0, reviewed: 0, editsNeeded: 0 });
     }
   }
   // Lifetime per source; the stored rows are a floor for events older than the
   // run timeline.
   let lifetimeGathered = 0;
   let lifetimeDuplicates = 0;
+  let lifetimeIncomplete = 0;
   for (const [sid, s] of perSource) {
-    const intake = intakeBySource.get(sid);
-    s.gathered = Math.max(n(intake?.sent), s.current);
-    s.duplicatesCaught = Math.max(n(intake?.dups), s.duplicatesCaught);
+    s.gathered = Math.max(gatheredBySource.get(sid) ?? 0, s.current);
+    s.duplicatesCaught = Math.max(dupsBySource.get(sid) ?? 0, s.duplicatesCaught);
     s.accepted = decisionsBySource.get(sid)?.accepted ?? 0;
+    s.rejected = decisionsBySource.get(sid)?.rejected ?? 0;
+    s.autoPublished = publishedBySource.get(sid) ?? 0;
+    s.autoRejected = incompleteBySource.get(sid) ?? 0;
     s.reviewed = decisionsBySource.get(sid)?.reviewed ?? 0;
     s.editsNeeded = n(editsBySource.get(sid)?.edits);
     lifetimeGathered += s.gathered;
     lifetimeDuplicates += s.duplicatesCaught;
+    lifetimeIncomplete += s.autoRejected;
   }
+
+  // The five outcome buckets partition everything the system ever processed,
+  // so the presentation numbers reconcile by construction.
+  const eventsAccepted = reviewerApproved + autoPublished;
+  const awaitingDecision = Math.max(0, lifetimeGathered - eventsAccepted - reviewerRejected);
+  const totalFound = eventsAccepted + reviewerRejected + awaitingDecision + lifetimeDuplicates + lifetimeIncomplete;
 
   return {
     sourcesConnected: srcRows.filter((s) => s.active).length,
@@ -271,6 +332,12 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     duplicatesCaught: lifetimeDuplicates,
     reviewerApproved,
     reviewerRejected,
+    autoPublished,
+    eventsAccepted,
+    autoRejectedLifetime: lifetimeIncomplete,
+    awaitingDecision,
+    totalFound,
+    monthlyGathered: [...monthlyMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, gathered]) => ({ month, gathered })),
     approvalRatePct:
       reviewerApproved + reviewerRejected
         ? Math.round((reviewerApproved / (reviewerApproved + reviewerRejected)) * 100)
@@ -288,6 +355,6 @@ export async function pilotMetrics(): Promise<PilotMetrics> {
     correctedAccepted: n(corrRow?.accepted),
     byModel,
     activeModel: chosenModel,
-    bySource: [...perSource.values()].filter((s) => s.gathered > 0 || s.duplicatesCaught > 0).sort((a, b) => b.gathered - a.gathered),
+    bySource: [...perSource.values()].filter((s) => s.gathered > 0 || s.duplicatesCaught > 0 || s.autoRejected > 0).sort((a, b) => b.gathered - a.gathered),
   };
 }

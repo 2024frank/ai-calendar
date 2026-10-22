@@ -46,11 +46,14 @@ it("learning page exposes scoped failed generation and avoids claiming training 
 it("metrics render operational counts without claiming arrival accuracy or automatic human approval", async () => {
   const { default: Page } = loadRoute<{ default: () => Promise<ReactElement> }>(new URL("../src/app/(app)/metrics/page.tsx", import.meta.url), {
     "@/lib/auth": { requireUser: async () => ({ role: "platform_admin" }) },
-    "@/lib/metrics": { MINUTES_PER_MANUAL_EVENT: 6, pilotMetrics: async () => ({ sourcesConnected: 1, eventsGathered: 2, duplicatesCaught: 1, currentUnflaggedPct: 50, approvedAsIsPct: null, approvedTotal: 0, totalReviewerEdits: 0, estimatedHoursSaved: 0, runsCompleted: 0, totalSpendUsd: 0, costPerEventUsd: 0, correctedCount: 0, correctedAccepted: 0, filteredIncomplete: 0, bySource: [], byModel: [], activeModel: "test" }) },
+    "@/lib/metrics": { MINUTES_PER_MANUAL_EVENT: 6, pilotMetrics: async () => ({ sourcesConnected: 1, eventsGathered: 2, duplicatesCaught: 1, reviewerApproved: 1, reviewerRejected: 0, approvalRatePct: 100, autoPublished: 0, eventsAccepted: 1, autoRejectedLifetime: 1, awaitingDecision: 1, totalFound: 4, monthlyGathered: [{ month: "2026-09", gathered: 2 }], currentUnflaggedPct: 50, approvedAsIsPct: null, approvedTotal: 0, totalReviewerEdits: 0, estimatedHoursSaved: 0, runsCompleted: 0, totalSpendUsd: 0, costPerEventUsd: 0, correctedCount: 0, correctedAccepted: 0, filteredIncomplete: 0, bySource: [], byModel: [], activeModel: "test" }) },
     "@/lib/modelList": { modelLabel: (v: string) => v },
     "./ModelPicker": { ModelPicker: () => null },
   });
   const html = renderToStaticMarkup(await Page());
+  assert.match(html, /Where every event ended up/);
+  assert.match(html, /Accepted onto the calendar/);
+  assert.doesNotMatch(html, /NaN/);
   assert.match(html, /Current unflagged records/);
   assert.match(html, /href="\/evaluations"/);
   assert.doesNotMatch(html, /Complete on arrival|Complete-on-arrival/);

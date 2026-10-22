@@ -20,9 +20,19 @@ it("counts reviewer decisions from the audit log, so swept events still count", 
     // Lifetime intake per source: source 7 still has one stored event, source 9
     // has had every event swept after its date passed.
     // Which source each event came from: events 1 and 2 from source 7, event 3
-    // (already swept) from source 9.
-    if (sql.includes("run_events") && sql.includes("select distinct")) return { rows: [[7, 1], [7, 2], [9, 3]] };
-    if (sql.includes("run_events")) return { rows: [[7, 38, 25], [9, 2, 0]] };
+    // (already swept) from source 9. Event 104 was auto-rejected, corrected,
+    // then gathered: it must count once, as gathered. Events 101-103 never
+    // made it past the incomplete filter.
+    if (sql.includes("run_events") && sql.includes("select distinct")) {
+      const rows: unknown[][] = [];
+      for (let id = 1; id <= 38; id++) if (id !== 3) rows.push([7, id, "gathered", "2026-09"]);
+      rows.push([7, 104, "incomplete", "2026-09"], [7, 104, "gathered", "2026-09"]);
+      rows.push([7, 101, "incomplete", "2026-09"], [7, 102, "incomplete", "2026-09"], [7, 103, "incomplete", "2026-09"]);
+      rows.push([9, 3, "gathered", "2026-08"], [9, 202, "gathered", "2026-08"]);
+      return { rows };
+    }
+    if (sql.includes("run_events")) return { rows: [[7, 25], [9, 0]] };
+    if (sql.includes("events_published")) return { rows: [[7, 5], [9, 1]] };
     return { rows: [] };
   });
   const lib = loadRoute<{ pilotMetrics(): Promise<Record<string, unknown>> }>(new URL("../src/lib/metrics.ts", import.meta.url), {
@@ -36,11 +46,23 @@ it("counts reviewer decisions from the audit log, so swept events still count", 
   assert.equal(result.approvedAsIsPct, 50, "a geoScope default fill is not a correction; a title fix is");
   assert.equal(result.eventsGathered, 40, "lifetime intake from the run timeline, not the current table");
   assert.equal(result.duplicatesCaught, 25);
-  const bySource = result.bySource as { gathered: number; current: number; accepted: number; reviewed: number }[];
+  assert.equal(result.autoRejectedLifetime, 3, "incomplete-only events; the corrected one counts as gathered, once");
+  assert.equal(result.autoPublished, 6);
+  assert.equal(result.eventsAccepted, 8, "reviewer approvals plus automatic publishes");
+  assert.equal(result.awaitingDecision, 31);
+  assert.equal(result.totalFound, 68, "the five outcome buckets partition everything processed");
+  const monthly = result.monthlyGathered as { month: string; gathered: number }[];
+  assert.deepEqual(monthly, [{ month: "2026-08", gathered: 2 }, { month: "2026-09", gathered: 38 }]);
+  const bySource = result.bySource as { gathered: number; current: number; accepted: number; reviewed: number; rejected: number; autoPublished: number; autoRejected: number }[];
   assert.deepEqual(
     bySource.map((s) => [s.gathered, s.current, s.accepted, s.reviewed]),
     [[38, 2, 1, 2], [2, 0, 1, 1]],
     "per-organization counts are lifetime, and a fully swept source still appears",
+  );
+  assert.deepEqual(
+    bySource.map((s) => [s.rejected, s.autoPublished, s.autoRejected]),
+    [[1, 5, 3], [0, 1, 0]],
+    "per-organization rejected, automatic publishes, and incomplete counts are lifetime too",
   );
   assert.equal(result.currentUnflaggedPct, 50);
   assert.equal("completeOnArrivalPct" in result, false);
