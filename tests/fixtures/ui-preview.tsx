@@ -36,15 +36,11 @@ function Preview() {
     return () => window.removeEventListener("fixture:refresh", load);
   }, []);
 
-  const sidebar = <aside className="side" id="app-sidebar" aria-label="Primary navigation">
-    <div className="brand"><Image src="/brand/communityhub-wordmark.png" alt="CommunityHub" width={1662} height={255} priority /><div className="brand__product">AI Calendar</div></div>
-    <Nav key={`${community.activeId}:${community.pending}`} role="platform_admin" pending={community.pending} />
-    <CommunitySwitcher communities={communities} activeId={community.activeId} />
-    <div className="side__spacer" />
-    <div className="account-card"><div className="account-card__top"><span className="account-card__avatar">T</span><div className="account-card__copy"><strong>Test user</strong><span>Platform admin</span></div><ThemeToggle /></div></div>
-  </aside>;
+  const brand = <span className="topbar__brand"><Image src="/brand/communityhub-wordmark.png" alt="CommunityHub" width={1662} height={255} priority /><span className="topbar__product">AI Calendar</span></span>;
+  const nav = <Nav key={`${community.activeId}:${community.pending}`} role="platform_admin" pending={community.pending} />;
+  const tools = <div className="topbar__tools"><CommunitySwitcher communities={communities} activeId={community.activeId} /><div className="topbar__account"><span className="topbar__avatar">T</span><span className="topbar__account-copy"><strong>Test user</strong><span>Platform admin</span></span><ThemeToggle /></div></div>;
 
-  return <AppShell sidebar={sidebar}>
+  return <AppShell brand={brand} nav={nav} tools={tools}>
     <div className="grid" style={{ gap: 22 }}>
       <Alert tone="info">UI test fixture. Synthetic data only. This checks real components, not production data or authentication.</Alert>
       <nav className="row" style={{ flexWrap: "wrap" }} aria-label="Preview scenarios"><Link href="/dashboard">Dashboard fixture</Link><Link href="/review">Review workflows</Link><Link href="/evaluations">Research comparisons</Link></nav>

@@ -3,17 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Icon, type IconName } from "@/components/ui";
 
 const items = [
-  { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
-  { href: "/review", label: "Review Queue", icon: "review" },
-  { href: "/sources", label: "Sources", icon: "sources", adminOnly: true },
-  { href: "/users", label: "Users", icon: "users", adminOnly: true },
-  { href: "/communities", label: "Communities", icon: "communities", platformOnly: true },
-  { href: "/metrics", label: "Pilot Metrics", icon: "metrics", platformOnly: true },
-  { href: "/learning", label: "Training Data", icon: "metrics", adminOnly: true },
-  { href: "/activity", label: "Activity Log", icon: "inbox", platformOnly: true },
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/review", label: "Review Queue" },
+  { href: "/sources", label: "Sources", adminOnly: true },
+  { href: "/users", label: "Users", adminOnly: true },
+  { href: "/communities", label: "Communities", platformOnly: true },
+  { href: "/metrics", label: "Pilot Metrics", platformOnly: true },
+  { href: "/learning", label: "Training Data", adminOnly: true },
+  { href: "/activity", label: "Activity Log", platformOnly: true },
 ] as const;
 
 export function Nav({ role, pending = 0 }: { role: string; pending?: number }) {
@@ -53,21 +52,17 @@ export function Nav({ role, pending = 0 }: { role: string; pending?: number }) {
   }, [pathname]);
 
   return (
-    <nav className="nav" aria-label="Workspace">
-      <div className="nav__label">Workspace</div>
+    <nav className="nav" aria-label="Primary">
       {items
         .filter((item) => (!("platformOnly" in item) || !item.platformOnly || role === "platform_admin") && (!("adminOnly" in item) || !item.adminOnly || admin))
         .map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link key={item.href} href={item.href} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>
-              <Icon name={item.icon as IconName} />
-              <span className="nav__text">
-                <span>{item.label}</span>
-                {item.href === "/review" && count > 0 && (
-                  <span className="nav__count" aria-label={`${count} pending events`}>{count}</span>
-                )}
-              </span>
+              <span>{item.label}</span>
+              {item.href === "/review" && count > 0 && (
+                <span className="nav__count" aria-label={`${count} pending events`}>{count}</span>
+              )}
             </Link>
           );
         })}

@@ -60,3 +60,20 @@ it("metrics render operational counts without claiming arrival accuracy or autom
   assert.match(html, /not.*accuracy/i);
   assert.doesNotMatch(html, /Auto-rejects corrected|rescued by finding the missing field/);
 });
+
+it("app shell uses the v1 top bar: brand, horizontal nav region, toggle, and footer", () => {
+  const { AppShell } = loadRoute<{ AppShell: (props: { brand: ReactElement; nav: ReactElement; tools: ReactElement; children?: ReactElement }) => ReactElement }>(new URL("../src/components/AppShell.tsx", import.meta.url), {
+    "next/navigation": { usePathname: () => "/dashboard" },
+    "@/components/ui": ui,
+  });
+  const html = renderToStaticMarkup(createElement(AppShell, {
+    brand: createElement("span", { className: "topbar__brand" }, "CommunityHub"),
+    nav: createElement("nav", { className: "nav" }, createElement("a", { href: "/dashboard" }, "Dashboard")),
+    tools: createElement("span", null, "tools"),
+  }, createElement("p", null, "content")));
+  assert.match(html, /class="topbar"/);
+  assert.match(html, /id="app-menu"/);
+  assert.match(html, /aria-controls="app-menu"/);
+  assert.match(html, /All rights reserved\. CommunityHub\./);
+  assert.doesNotMatch(html, /class="side"|app-sidebar/);
+});

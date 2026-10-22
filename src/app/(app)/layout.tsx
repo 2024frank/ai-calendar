@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import Image from "next/image";
+import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { Nav } from "@/components/Nav";
 import { CommunitySwitcher } from "@/components/CommunitySwitcher";
@@ -20,44 +21,37 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const displayName = session.name || session.email;
   const roleLabel = session.role.replace(/_/g, " ");
 
-  const sidebar = (
-    <aside className="side" id="app-sidebar" aria-label="Primary navigation">
-      <div className="brand">
-        <Image
-          src="/brand/communityhub-wordmark.png"
-          alt="CommunityHub"
-          width={1662}
-          height={255}
-          priority
-        />
-        <div className="brand__product">AI Calendar</div>
-      </div>
-      <Nav key={`${activeId ?? "none"}:${pending}`} role={session.role} pending={pending} />
+  const brand = (
+    <Link className="topbar__brand" href="/dashboard" aria-label="CommunityHub AI Calendar — dashboard">
+      <Image src="/brand/communityhub-wordmark.png" alt="CommunityHub" width={1662} height={255} priority />
+      <span className="topbar__product">AI Calendar</span>
+    </Link>
+  );
+
+  const nav = <Nav key={`${activeId ?? "none"}:${pending}`} role={session.role} pending={pending} />;
+
+  const tools = (
+    <div className="topbar__tools">
       <CommunitySwitcher
         communities={communities.map((community) => ({ id: community.id, name: community.name }))}
         activeId={activeId}
       />
-      <div className="side__spacer" />
-      <div className="account-card">
-        <div className="account-card__top">
-          <span className="account-card__avatar" aria-hidden="true">
-            {displayName.slice(0, 1).toUpperCase()}
-          </span>
-          <div className="account-card__copy">
-            <strong>{displayName}</strong>
-            <span>{roleLabel}</span>
-          </div>
-          <ThemeToggle />
-        </div>
+      <div className="topbar__account">
+        <span className="topbar__avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+        <span className="topbar__account-copy">
+          <strong>{displayName}</strong>
+          <span>{roleLabel}</span>
+        </span>
+        <ThemeToggle />
         <form action="/api/auth/logout" method="post">
-          <button className="account-card__signout" type="submit">
+          <button className="topbar__signout" type="submit">
             <Icon name="logout" />
             Sign Out
           </button>
         </form>
       </div>
-    </aside>
+    </div>
   );
 
-  return <AppShell sidebar={sidebar}>{children}</AppShell>;
+  return <AppShell brand={brand} nav={nav} tools={tools}>{children}</AppShell>;
 }

@@ -70,11 +70,11 @@ export default function LoginPage() {
 
   return (
     <main className="auth-shell">
+      <div className="auth-topbar">
+        <Image src="/brand/communityhub-wordmark.png" alt="CommunityHub" width={1662} height={255} priority />
+        <span className="auth-topbar__product">AI Calendar</span>
+      </div>
       <div className="auth-panel">
-        <div className="auth-brand">
-          <Image src="/brand/communityhub-wordmark.png" alt="CommunityHub" width={1662} height={255} priority />
-          <div className="auth-brand__product">AI Calendar</div>
-        </div>
 
         <Card className="auth-card">
           {sent ? (
