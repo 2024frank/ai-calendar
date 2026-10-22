@@ -1,13 +1,21 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Comfortaa, Lato } from "next/font/google";
 import "./globals.css";
 
 // Self-hosted by Next at build time, so the page makes no external font request.
-const sans = Plus_Jakarta_Sans({
+// Lato body + Comfortaa headings match v1.communityhub.cloud.
+const sans = Lato({
   subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "700", "900"],
   variable: "--font-sans",
+});
+
+const display = Comfortaa({
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-display",
 });
 
 export const metadata: Metadata = {
@@ -20,8 +28,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f5f7f4" },
-    { media: "(prefers-color-scheme: dark)", color: "#111713" },
+    { media: "(prefers-color-scheme: light)", color: "#f2f3f5" },
+    { media: "(prefers-color-scheme: dark)", color: "#161d24" },
   ],
 };
 
@@ -29,7 +37,7 @@ const themeScript = `(() => { try { const saved = localStorage.getItem('ai-calen
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={sans.variable} suppressHydrationWarning>
+    <html lang="en" className={`${sans.variable} ${display.variable}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
       <body>{children}</body>
     </html>

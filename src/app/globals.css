@@ -1,54 +1,66 @@
+/* Design tokens aligned to v1.communityhub.cloud (Avada theme, sampled
+   2026-10-22): primary #58ba51, button green #65bc7b, ink #212934, body
+   #4a4e57, line #e2e2e2, panels #f9f9fb / #f2f3f5, Comfortaa headings,
+   Lato body, 4px button radius. The v1 greens fail WCAG AA with white
+   text (2.3-2.5:1), so --accent is the closest same-hue derivative that
+   passes (4.6:1); the exact v1 greens live in --brand for fills that
+   carry dark ink text. */
 :root {
   color-scheme: light;
-  --bg: #f5f7f4;
+  --brand: #58ba51;
+  --brand-bright: #65bc7b;
+  --brand-ink: #212934;
+  --bg: #f2f3f5;
   --panel: #ffffff;
   --card: #ffffff;
-  --panel-subtle: #f9faf8;
-  --line: #dde3dc;
-  --line-strong: #cbd4ca;
-  --ink: #17201a;
-  --muted: #667268;
-  --muted-strong: #4c5850;
-  --accent: #34724a;
-  --accent-hover: #285e3c;
+  --panel-subtle: #f9f9fb;
+  --line: #e2e2e2;
+  --line-strong: #d3d3d3;
+  --ink: #212934;
+  --muted: #666d78;
+  --muted-strong: #4a4e57;
+  --accent: #35853b;
+  --accent-hover: #2c7331;
   --accent-ink: #ffffff;
-  --accent-soft: #e8f2eb;
-  --accent-soft-hover: #dcece1;
-  --good: #246a41;
-  --good-bg: #e6f3ea;
+  --accent-soft: #e9f5e4;
+  --accent-soft-hover: #daefce;
+  --good: #35853b;
+  --good-bg: #e9f5e4;
   --warn: #855d08;
   --warn-bg: #fff3d8;
   --bad: #a1372e;
   --bad-bg: #fce9e7;
   --info: #315f8d;
   --info-bg: #eaf2fa;
-  --shadow-xs: 0 1px 2px rgba(21, 33, 24, 0.04);
-  --shadow-sm: 0 1px 2px rgba(21, 33, 24, 0.05), 0 5px 14px rgba(21, 33, 24, 0.04);
-  --shadow-lg: 0 18px 50px rgba(18, 31, 22, 0.14);
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --focus: 0 0 0 3px rgba(52, 114, 74, 0.22);
+  --shadow-xs: 0 1px 2px rgba(33, 41, 52, 0.04);
+  --shadow-sm: 0 1px 2px rgba(33, 41, 52, 0.05), 0 5px 14px rgba(33, 41, 52, 0.04);
+  --shadow-lg: 0 18px 50px rgba(33, 41, 52, 0.14);
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --focus: 0 0 0 3px rgba(88, 186, 81, 0.32);
 }
 
+/* Dark theme has no v1 counterpart; surfaces derive from the v1 ink
+   #212934 and footer #1d242d, accent is the exact v1 button green. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #111713;
-  --panel: #171e19;
-  --card: #19211b;
-  --panel-subtle: #141b16;
-  --line: #2b372e;
-  --line-strong: #3a493e;
-  --ink: #edf3ee;
-  --muted: #9eaaa1;
-  --muted-strong: #bcc6be;
+  --bg: #161d24;
+  --panel: #1d242d;
+  --card: #212934;
+  --panel-subtle: #1a212a;
+  --line: #2e3947;
+  --line-strong: #3d4a5c;
+  --ink: #edf1f5;
+  --muted: #a3adb9;
+  --muted-strong: #c2cad4;
   --accent: #65bc7b;
   --accent-hover: #7cca8f;
-  --accent-ink: #0f2416;
-  --accent-soft: #20392a;
-  --accent-soft-hover: #294834;
+  --accent-ink: #10240f;
+  --accent-soft: #23402c;
+  --accent-soft-hover: #2c4f37;
   --good: #74ca8c;
-  --good-bg: #1d3927;
+  --good-bg: #23402c;
   --warn: #efc668;
   --warn-bg: #3e331c;
   --bad: #f08d84;
@@ -71,13 +83,13 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: rgba(52, 114, 74, 0.14);
+  -webkit-tap-highlight-color: rgba(88, 186, 81, 0.18);
 }
 button, input, select, textarea { font: inherit; }
 button, a { touch-action: manipulation; }
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; }
-h1, h2, h3, h4 { color: var(--ink); letter-spacing: -0.025em; margin: 0; text-wrap: balance; }
+h1, h2, h3, h4 { color: var(--ink); font-family: var(--font-display, var(--font-sans)), var(--font-sans, ui-sans-serif), sans-serif; font-weight: 600; letter-spacing: 0; margin: 0; text-wrap: balance; }
 p { text-wrap: pretty; }
 h1 { font-size: clamp(1.65rem, 2.2vw, 2rem); line-height: 1.18; }
 h2 { font-size: 1.15rem; }
@@ -118,7 +130,7 @@ h3 { font-size: 1rem; }
 .nav { display: flex; flex-direction: column; gap: 3px; }
 .nav__label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; padding: 0 11px 7px; text-transform: uppercase; }
 .nav a {
-  align-items: center; border-radius: 9px; color: var(--muted-strong); display: flex; font-size: 13px;
+  align-items: center; border-radius: var(--radius-sm); color: var(--muted-strong); display: flex; font-size: 13px;
   font-weight: 650; gap: 11px; min-height: 42px; padding: 9px 11px;
   transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
@@ -127,7 +139,7 @@ h3 { font-size: 1rem; }
 .nav a.active { background: var(--accent-soft); color: var(--accent); }
 .nav a svg { flex: 0 0 18px; height: 18px; width: 18px; }
 .nav__text { align-items: center; display: flex; flex: 1; gap: 8px; justify-content: space-between; min-width: 0; }
-.nav__count { background: var(--accent); border-radius: 999px; color: var(--accent-ink); font-size: 10px; font-variant-numeric: tabular-nums; line-height: 20px; min-width: 20px; padding: 0 6px; text-align: center; }
+.nav__count { background: var(--brand); border-radius: 999px; color: var(--brand-ink); font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 800; line-height: 20px; min-width: 20px; padding: 0 6px; text-align: center; }
 .community-switcher { border-top: 1px solid var(--line); margin-top: 16px; padding: 16px 10px 0; }
 .community-switcher .input { font-size: 13px; }
 
@@ -157,7 +169,7 @@ h3 { font-size: 1rem; }
 .page-title { font-size: clamp(1.55rem, 2vw, 1.9rem); font-weight: 750; line-height: 1.2; }
 
 .button, .btn {
-  align-items: center; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink);
+  align-items: center; background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink);
   cursor: pointer; display: inline-flex; font-size: 13px; font-weight: 700; gap: 8px; justify-content: center; min-height: 38px;
   padding: 8px 13px; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
@@ -178,7 +190,7 @@ h3 { font-size: 1rem; }
 
 .label { color: var(--muted-strong); display: block; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
 .input {
-  background-color: var(--panel); border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink); font-size: 14px;
+  background-color: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink); font-size: 14px;
   min-height: 40px; padding: 9px 11px; transition: border-color 140ms ease, box-shadow 140ms ease; width: 100%;
 }
 .input:hover { border-color: var(--muted); }
@@ -203,7 +215,7 @@ textarea.input { min-height: 96px; resize: vertical; }
 .alert--danger { background: var(--bad-bg); border-color: color-mix(in srgb, var(--bad) 25%, var(--line)); color: var(--bad); }
 
 .empty-state { align-items: center; display: flex; flex-direction: column; padding: clamp(38px, 7vw, 72px) 24px; text-align: center; }
-.empty-state__icon { align-items: center; background: var(--accent-soft); border-radius: 12px; color: var(--accent); display: flex; height: 42px; justify-content: center; margin-bottom: 14px; width: 42px; }
+.empty-state__icon { align-items: center; background: var(--accent-soft); border-radius: var(--radius); color: var(--accent); display: flex; height: 42px; justify-content: center; margin-bottom: 14px; width: 42px; }
 .empty-state h2 { font-size: 15px; }
 .empty-state p { color: var(--muted); margin: 5px 0 0; max-width: 430px; }
 .empty-state__action { margin-top: 16px; }
@@ -214,7 +226,7 @@ textarea.input { min-height: 96px; resize: vertical; }
 a.kpi-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
 .kpi-card__top { align-items: center; color: var(--muted); display: flex; font-size: 12px; font-weight: 700; gap: 8px; justify-content: space-between; }
 .kpi-card__top svg { height: 17px; width: 17px; }
-.kpi { font-size: 30px; font-variant-numeric: tabular-nums; font-weight: 760; letter-spacing: -0.035em; line-height: 1.1; margin-top: 16px; }
+.kpi { font-family: var(--font-display, var(--font-sans)), var(--font-sans, ui-sans-serif), sans-serif; font-size: 30px; font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: 0; line-height: 1.1; margin-top: 16px; }
 .kpi-label { color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
 .kpi-card__hint { color: var(--muted); font-size: 11px; margin-top: 3px; }
 

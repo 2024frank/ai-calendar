@@ -30,7 +30,7 @@ Aim for the polish of **Linear / Vercel dashboard / Stripe**: calm, spacious, da
 - **Wordmark:** `/brand/communityhub-wordmark.png` (1662×255, transparent PNG, green "COMMUNITYHUB" lockup with a circular hands-holding-a-skyline mark). Use in the sidebar header and on the login screen. Render ~168px wide in the sidebar, ~210px on login.
 - **Icon / mark:** `/brand/communityhub-mark.png` (192×192, transparent). Use for compact spots and the favicon (`src/app/icon.png` is already wired).
 - Lock the product label **"AI CALENDAR"** beneath the wordmark as small uppercase, letter-spaced, muted text — the wordmark is the brand, "AI Calendar" is the product.
-- **Accent color: CommunityHub green** (sampled from the logo, roughly `#4CAF50`; the app currently uses `#2f6d4f` for light and `#5aa77e` for dark surfaces). Keep the accent consistent with the logo so the mark never looks pasted on.
+- **Accent color: CommunityHub green**, aligned to v1.communityhub.cloud: primary `#58ba51`, button green `#65bc7b`, ink `#212934`, body `#4a4e57`. The app uses `#35853b` for text/primary buttons in light mode (the closest same-hue green that passes WCAG AA with white text) and the exact v1 `#65bc7b` in dark mode; exact v1 greens are kept as brand fills in `src/app/globals.css`. Headings are Comfortaa, body is Lato, button radius is 4px — all matching v1. Keep the accent consistent with the logo so the mark never looks pasted on.
 - Both logo files are green on transparent, so they sit correctly on light *and* dark backgrounds — do not put them on a white plate in dark mode.
 - Avoid generic purple-gradient-on-white AI slop.
 
